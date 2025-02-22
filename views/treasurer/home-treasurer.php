@@ -506,7 +506,7 @@ $currentTerm = getCurrentTerm();
                 </div>
                
                 <div class="status-cards">
-                    <div class="status-card" onclick="window.location.href='pending_loans.php'">
+                    <div class="status-card" onclick="window.location.href='pendingLoans.php'">
                         <i class="fas fa-landmark status-icon"></i>
                         <div class="status-content">
                             <div class="stat-number"><?php echo $pendingLoans; ?></div>
@@ -516,7 +516,7 @@ $currentTerm = getCurrentTerm();
                         </div>
                     </div>
                     
-                    <div class="status-card" onclick="window.location.href='pending_welfare.php'">
+                    <div class="status-card" onclick="window.location.href='pendingWelfare.php'">
                         <i class="fas fa-heart status-icon"></i>
                         <div class="status-content">
                             <div class="stat-number"><?php echo $pendingWelfare; ?></div>
