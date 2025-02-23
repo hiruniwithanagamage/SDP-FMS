@@ -1,0 +1,562 @@
+<?php
+session_start();
+require_once "../../../config/database.php";
+
+// Get current term
+function getCurrentTerm() {
+    $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
+    $result = Database::search($sql);
+    $row = $result->fetch_assoc();
+    return $row['year'] ?? date('Y');
+}
+
+// Get members with monthly fee status for all months
+function getMemberMonthlyPayments($year) {
+    $sql = "SELECT 
+            m.MemberID,
+            m.Name,
+            GROUP_CONCAT(
+                CASE 
+                    WHEN mf.IsPaid = 'Yes' AND mf.Type = 'Monthly' 
+                    THEN MONTH(mf.Date) 
+                    ELSE NULL 
+                END
+            ) as paid_months,
+            SUM(CASE WHEN mf.Type = 'Monthly' AND mf.IsPaid = 'Yes' THEN mf.Amount ELSE 0 END) as total_paid
+        FROM Member m
+        LEFT JOIN MembershipFee mf ON m.MemberID = mf.Member_MemberID 
+        AND YEAR(mf.Date) = $year
+        GROUP BY m.MemberID, m.Name
+        ORDER BY m.Name";
+    
+    return Database::search($sql);
+}
+
+// Get registration fee status
+function getRegistrationFeeStatus($year) {
+    $sql = "SELECT 
+            m.MemberID,
+            m.Name,
+            mf.IsPaid,
+            mf.Date as payment_date,
+            mf.Amount
+        FROM Member m
+        LEFT JOIN MembershipFee mf ON m.MemberID = mf.Member_MemberID 
+        AND mf.Type = 'Registration' AND YEAR(mf.Date) = $year
+        ORDER BY m.Name";
+    
+    return Database::search($sql);
+}
+
+// Get fee amounts from Static table
+function getFeeAmounts() {
+    $sql = "SELECT monthly_fee, registration_fee FROM Static ORDER BY year DESC LIMIT 1";
+    $result = Database::search($sql);
+    return $result->fetch_assoc();
+}
+
+// Get monthly summary
+function getMonthlyPaymentSummary($year) {
+    $sql = "SELECT 
+            MONTH(mf.Date) as month,
+            (SELECT COUNT(*) FROM Member) as all_members,
+            COUNT(*) as paid_members,
+            SUM(mf.Amount) as total_amount
+        FROM MembershipFee mf
+        WHERE YEAR(mf.Date) = $year AND mf.Type = 'Monthly' AND mf.IsPaid = 'Yes'
+        GROUP BY MONTH(mf.Date)
+        ORDER BY month";
+    
+    return Database::search($sql);
+}
+
+$currentTerm = getCurrentTerm();
+$selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
+
+$monthlyPayments = getMonthlyPaymentSummary($selectedYear);
+$registrationFees = getRegistrationFeeStatus($selectedYear);
+$feeAmounts = getFeeAmounts();
+
+$months = [
+    1 => 'January', 2 => 'February', 3 => 'March', 
+    4 => 'April', 5 => 'May', 6 => 'June',
+    7 => 'July', 8 => 'August', 9 => 'September',
+    10 => 'October', 11 => 'November', 12 => 'December'
+];
+
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Membership Details</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="../../../assets/css/adminActorDetails.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header-card {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .filters {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .filter-select {
+            padding: 0.5rem 1rem;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            border-radius: 50px;
+            cursor: pointer;
+        }
+
+        .filter-select option {
+            background: #1e3c72;
+            color: white;
+        }
+
+        .stats-cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            color: #1e3c72;
+            font-weight: bold;
+            margin: 0.5rem 0;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .tab {
+            padding: 0.8rem 1.5rem;
+            background: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            background: #1e3c72;
+            color: white;
+        }
+
+        .table-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            background: #f8f9fa;
+            color: #1e3c72;
+            font-weight: 600;
+        }
+
+        .status-badge {
+            padding: 0.5rem 1rem;
+            border-radius: 50px;
+            font-size: 0.9em;
+            font-weight: 500;
+        }
+
+        .status-paid {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-unpaid {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .month-cell {
+            width: 30px;
+            height: 30px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin: 2px;
+            border-radius: 50%;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+
+        .month-paid {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .month-unpaid {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .fee-type-header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 2rem 0 1rem;
+        }
+
+        .total-cell {
+            font-weight: bold;
+            color: #1e3c72;
+        }
+
+        .stats-cards {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    text-align: center;
+    width: 100%;
+    max-width: 400px;
+}
+
+.table-container {
+    max-height: 400px; /* Height for approximately 5 rows */
+    overflow-y: auto;
+    padding-top: 0px; /* Prevents content from shifting */
+}
+
+/* Keep the table header fixed while scrolling */
+.table-container table thead {
+    position: sticky;
+    top: 0;
+    background: #f8f9fa;
+    z-index: 1;
+}
+
+/* Add shadow to header when scrolling */
+.table-container table thead::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    border-bottom: 1px solid #eee;
+}
+
+    /* Ensure consistent cell heights */
+    .table-container table td {
+        height: 60px; /* Adjust this value based on your content */
+    }
+
+    /* Style the scrollbar */
+    .table-container::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .table-container::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+    }
+
+    .table-container::-webkit-scrollbar-thumb {
+        background: #1e3c72;
+        border-radius: 4px;
+    }
+
+    .table-container::-webkit-scrollbar-thumb:hover {
+        background: #2a5298;
+    }
+
+        @media (max-width: 768px) {
+            .header-card {
+                flex-direction: column;
+                gap: 1rem;
+                text-align: center;
+            }
+
+            .filters {
+                flex-direction: column;
+                width: 100%;
+            }
+
+            .filter-select {
+                width: 100%;
+            }
+
+            .stats-cards {
+                grid-template-columns: 1fr;
+            }
+
+            .tabs {
+                flex-direction: column;
+            }
+
+            .tab {
+                width: 100%;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+    <?php include '../../templates/navbar-treasurer.php'; ?>
+    <div class="container">
+        <div class="header-card">
+            <h1>Membership Details</h1>
+            <div class="filters">
+                <select class="filter-select" onchange="updateFilters()" id="yearSelect">
+                    <?php for($y = $currentTerm; $y >= $currentTerm - 2; $y--): ?>
+                        <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
+                            Year <?php echo $y; ?>
+                        </option>
+                    <?php endfor; ?>
+                </select>
+            </div>
+        </div>
+
+        <div id="stats-section" class="stats-cards">
+            <?php
+            $memberMonthlyPayments = getMemberMonthlyPayments($selectedYear);
+            $totalMembers = 0;
+            $paidMembers = 0;
+            $totalAmount = 0;
+            
+            while($row = $memberMonthlyPayments->fetch_assoc()) {
+                $totalMembers++;
+                if($row['paid_months']) {
+                    $paidMembers++;
+                    $totalAmount += $row['total_paid'];
+                }
+            }
+            ?>
+            <div id="stats-section" class="stats-cards">
+                <?php
+                $sql = "SELECT 
+                        (SELECT SUM(Amount) 
+                        FROM MembershipFee 
+                        WHERE YEAR(Date) = $selectedYear 
+                        AND Type = 'Monthly' 
+                        AND IsPaid = 'Yes') as yearly_amount";
+                
+                $result = Database::search($sql);
+                $totalAmount = $result->fetch_assoc()['yearly_amount'] ?? 0;
+                ?>
+                <div class="stat-card">
+                    <i class="fas fa-money-bill-wave"></i>
+                    <div class="stat-number">Rs. <?php echo number_format($totalAmount, 2); ?></div>
+                    <div class="stat-label">Total Membership Fee (<?php echo $selectedYear; ?>)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('members')">Member-wise View</button>
+            <button class="tab" onclick="showTab('months')">Month-wise View</button>
+        </div>
+
+        <div id="members-view" >
+            <div class="fee-type-header">
+                <h2>Monthly Fee (Rs. <?php echo number_format($feeAmounts['monthly_fee'], 2); ?> per month)</h2>
+            </div>
+            <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Member ID</th>
+                        <th>Name</th>
+                        <th>Monthly Payment Status</th>
+                        <th>Total Paid Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php 
+                    $memberMonthlyPayments->data_seek(0);
+                    while($row = $memberMonthlyPayments->fetch_assoc()): 
+                        $paidMonths = $row['paid_months'] ? explode(',', $row['paid_months']) : [];
+                    ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
+                        <td><?php echo htmlspecialchars($row['Name']); ?></td>
+                        <td>
+                            <?php foreach($months as $num => $name): ?>
+                                <div class="month-cell <?php echo in_array($num, $paidMonths) ? 'month-paid' : 'month-unpaid'; ?>" 
+                                     title="<?php echo $name; ?>">
+                                    <?php echo substr($name, 0, 1); ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </td>
+                        <td class="total-cell">Rs. <?php echo number_format($row['total_paid'], 2); ?></td>
+                    </tr>
+                    <?php endwhile; ?>
+                </tbody>
+            </table>
+            </div>
+        </div>
+
+        <div id="months-view" style="display: none;">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th>Paid Members</th>
+                            <th>Due Members</th>
+                            <th>Total Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php while($row = $monthlyPayments->fetch_assoc()): ?>
+                        <tr>
+                            <td><?php echo $months[$row['month']]; ?></td>
+                            <td><?php echo $row['paid_members']; ?></td>
+                            <td><?php echo $row['all_members'] - $row['paid_members']; ?></td>
+                            <td>Rs. <?php echo number_format($row['total_amount'], 2); ?></td>
+                        </tr>
+                        <?php endwhile; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="registration-view" >
+            <div class="fee-type-header">
+                <h2>Registration Fee (Rs. <?php echo number_format($feeAmounts['registration_fee'], 2); ?>)</h2>
+            </div>
+            <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Member ID</th>
+                        <th>Name</th>
+                        <th>Payment Status</th>
+                        <th>Payment Date</th>
+                        <th>Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php while($row = $registrationFees->fetch_assoc()): ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
+                        <td><?php echo htmlspecialchars($row['Name']); ?></td>
+                        <td>
+                            <span class="status-badge <?php echo $row['IsPaid'] == 'Yes' ? 'status-paid' : 'status-unpaid'; ?>">
+                                <?php echo $row['IsPaid'] == 'Yes' ? 'Paid' : 'Due'; ?>
+                            </span>
+                        </td>
+                        <td><?php echo $row['payment_date'] ? date('Y-m-d', strtotime($row['payment_date'])) : '-'; ?></td>
+                        <td>Rs. <?php echo number_format($row['Amount'] ?? $feeAmounts['registration_fee'], 2); ?></td>
+                    </tr>
+                    <?php endwhile; ?>
+                </tbody>
+            </table>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <script>
+        function updateFilters() {
+            const year = document.getElementById('yearSelect').value;
+            
+            fetch(`membership_fee.php?year=${year}`)
+                .then(response => response.text())
+                .then(html => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    
+                    // Update stats cards
+                    document.getElementById('stats-section').innerHTML = doc.getElementById('stats-section').innerHTML;
+                    
+                    // Update members view
+                    document.getElementById('members-view').innerHTML = doc.getElementById('members-view').innerHTML;
+                    
+                    // Update months view
+                    document.getElementById('months-view').innerHTML = doc.getElementById('months-view').innerHTML;
+                    
+                    // Update registration view
+                    document.getElementById('registration-view').innerHTML = doc.getElementById('registration-view').innerHTML;
+                });
+        }
+
+        function showTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            
+            // Only toggle between monthly views
+            document.getElementById('members-view').style.display = 'none';
+            document.getElementById('months-view').style.display = 'none';
+            
+            if (tab === 'members') {
+                document.getElementById('members-view').style.display = 'block';
+                document.querySelector('button[onclick="showTab(\'members\')"]').classList.add('active');
+            } else {
+                document.getElementById('months-view').style.display = 'block';
+                document.querySelector('button[onclick="showTab(\'months\')"]').classList.add('active');
+            }
+        }
+    </script>
+
+    <?php include '../templates/footer.php'; ?>
+</body>
+</html>
