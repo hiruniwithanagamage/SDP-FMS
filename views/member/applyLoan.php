@@ -72,7 +72,7 @@ function checkMemberEligibility($memberId) {
     
     if ($statusResult && $statusResult->num_rows > 0) {
         $member = $statusResult->fetch_assoc();
-        if ($member['Status'] !== 'TRUE') {
+        if ($member['Status'] !== 'Full Member') {
             return "Member status must be active to apply for a loan";
         }
     }

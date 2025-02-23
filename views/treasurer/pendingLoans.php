@@ -2,6 +2,50 @@
 session_start();
 require_once "../../config/database.php";
 
+function createExpenseRecord($loanId, $amount) {
+    try {
+        // Get treasurer ID from User table
+        $treasurerQuery = "SELECT Treasurer_TreasurerID FROM User WHERE UserId = '{$_SESSION['user_id']}'";
+        $treasurerResult = Database::search($treasurerQuery);
+        $treasurerData = $treasurerResult->fetch_assoc();
+        
+        if (!$treasurerData || !$treasurerData['Treasurer_TreasurerID']) {
+            throw new Exception("Invalid Treasurer ID");
+        }
+
+        // Generate Expense ID
+        $sql = "SELECT ExpenseID FROM Expenses 
+                WHERE ExpenseID LIKE 'EXP%' 
+                ORDER BY ExpenseID DESC LIMIT 1";
+        $result = Database::search($sql);
+        
+        if ($result->num_rows > 0) {
+            $lastId = $result->fetch_assoc()['ExpenseID'];
+            $lastNum = intval(substr($lastId, 3));
+            $newNum = $lastNum + 1;
+            $expenseId = 'EXP' . str_pad($newNum, 3, '0', STR_PAD_LEFT);
+        } else {
+            $expenseId = 'EXP001';
+        }
+
+        // Set up expense data
+        $date = date('Y-m-d');
+        $term = date('Y');
+        $treasurerId = $treasurerData['Treasurer_TreasurerID'];
+        
+        // Insert expense record
+        $sql = "INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, Description, Image, Treasurer_TreasurerID) 
+                VALUES ('$expenseId', 'Loan', 'System', $amount, '$date', $term, 'Loan Payment (LoanID: $loanId)', NULL, '$treasurerId')";
+        Database::iud($sql);
+        
+        return true;
+
+    } catch (Exception $e) {
+        $_SESSION['error_message'] = "Error creating expense record: " . $e->getMessage();
+        return false;
+    }
+}
+
 // Fetch pending loans with member details
 $query = "SELECT l.*, m.Name as MemberName, m.MemberID 
           FROM Loan l 
@@ -15,11 +59,32 @@ if(isset($_POST['update_status'])) {
     $loanId = $_POST['loan_id'];
     $status = $_POST['status'];
     
-    $updateQuery = "UPDATE Loan SET Status = '$status' WHERE LoanID = '$loanId'";
-    
     try {
-        Database::iud($updateQuery);
-        $_SESSION['success_message'] = "Loan status updated successfully!";
+        if($status === 'approved') {
+            // Get loan amount
+            $loanQuery = "SELECT Amount FROM Loan WHERE LoanID = '$loanId'";
+            $loanResult = Database::search($loanQuery);
+            $loanData = $loanResult->fetch_assoc();
+            
+            if($loanData) {
+                // Begin processing
+                if(createExpenseRecord($loanId, $loanData['Amount'])) {
+                    // Update loan status
+                    $updateQuery = "UPDATE Loan SET Status = '$status' WHERE LoanID = '$loanId'";
+                    Database::iud($updateQuery);
+                    $_SESSION['success_message'] = "Loan approved and expense recorded successfully!";
+                } else {
+                    throw new Exception("Failed to create expense record");
+                }
+            } else {
+                throw new Exception("Loan record not found");
+            }
+        } else {
+            // Just update status for rejection
+            $updateQuery = "UPDATE Loan SET Status = '$status' WHERE LoanID = '$loanId'";
+            Database::iud($updateQuery);
+            $_SESSION['success_message'] = "Loan application has been rejected.";
+        }
     } catch(Exception $e) {
         $_SESSION['error_message'] = "Error updating loan status: " . $e->getMessage();
     }

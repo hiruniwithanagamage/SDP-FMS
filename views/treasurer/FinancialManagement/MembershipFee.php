@@ -37,12 +37,26 @@ function getRegistrationFeeStatus($year) {
     $sql = "SELECT 
             m.MemberID,
             m.Name,
-            mf.IsPaid,
-            mf.Date as payment_date,
-            mf.Amount
+            CASE 
+                WHEN EXISTS (
+                    SELECT 1 FROM MembershipFee mf2 
+                    WHERE mf2.Member_MemberID = m.MemberID 
+                    AND mf2.Type = 'Registration' 
+                    AND mf2.IsPaid = 'Yes'
+                ) THEN 'Yes'
+                ELSE 'No'
+            END as IsPaid,
+            (SELECT Date FROM MembershipFee mf3 
+             WHERE mf3.Member_MemberID = m.MemberID 
+             AND mf3.Type = 'Registration' 
+             AND mf3.IsPaid = 'Yes' 
+             LIMIT 1) as payment_date,
+            (SELECT Amount FROM MembershipFee mf4 
+             WHERE mf4.Member_MemberID = m.MemberID 
+             AND mf4.Type = 'Registration' 
+             AND mf4.IsPaid = 'Yes' 
+             LIMIT 1) as Amount
         FROM Member m
-        LEFT JOIN MembershipFee mf ON m.MemberID = mf.Member_MemberID 
-        AND mf.Type = 'Registration' AND YEAR(mf.Date) = $year
         ORDER BY m.Name";
     
     return Database::search($sql);
@@ -144,20 +158,10 @@ $months = [
             color: white;
         }
 
-        .stats-cards {
+        /* .stats-cards {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .stat-card {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-            text-align: center;
-        }
+        } */
 
         .stat-number {
             font-size: 2rem;
@@ -265,10 +269,12 @@ $months = [
         }
 
         .stats-cards {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 2rem;
-}
+            display: flex;
+            justify-content: center;
+            margin-bottom: 2rem;
+            flex: 1;
+            gap: 1.5rem;
+        }
 
 .stat-card {
     background: white;
@@ -278,6 +284,24 @@ $months = [
     text-align: center;
     width: 100%;
     max-width: 400px;
+}
+
+.edit-btn {
+    background: #1e3c72;
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.edit-btn:hover {
+    background: #2a5298;
 }
 
 .table-container {
@@ -364,7 +388,7 @@ $months = [
     <?php include '../../templates/navbar-treasurer.php'; ?>
     <div class="container">
         <div class="header-card">
-            <h1>Membership Details</h1>
+            <h1>Membership Fee Details</h1>
             <div class="filters">
                 <select class="filter-select" onchange="updateFilters()" id="yearSelect">
                     <?php for($y = $currentTerm; $y >= $currentTerm - 2; $y--): ?>
@@ -391,24 +415,29 @@ $months = [
                 }
             }
             ?>
-            <div id="stats-section" class="stats-cards">
-                <?php
-                $sql = "SELECT 
-                        (SELECT SUM(Amount) 
-                        FROM MembershipFee 
-                        WHERE YEAR(Date) = $selectedYear 
-                        AND Type = 'Monthly' 
-                        AND IsPaid = 'Yes') as yearly_amount";
+        </div>
+
+        <div id="stats-section" class="stats-cards">
+            <?php
+            $sql = "SELECT 
+                    (SELECT SUM(Amount) 
+                    FROM MembershipFee 
+                    WHERE YEAR(Date) = $selectedYear 
+                    AND Type = 'Monthly' 
+                    AND IsPaid = 'Yes') as yearly_amount";
                 
-                $result = Database::search($sql);
-                $totalAmount = $result->fetch_assoc()['yearly_amount'] ?? 0;
-                ?>
-                <div class="stat-card">
-                    <i class="fas fa-money-bill-wave"></i>
-                    <div class="stat-number">Rs. <?php echo number_format($totalAmount, 2); ?></div>
-                    <div class="stat-label">Total Membership Fee (<?php echo $selectedYear; ?>)</div>
-                </div>
+            $result = Database::search($sql);
+            $totalAmount = $result->fetch_assoc()['yearly_amount'] ?? 0;
+            ?>
+            <div class="stat-card">
+                <i class="fas fa-money-bill-wave"></i>
+                <div class="stat-number">Rs. <?php echo number_format($totalAmount, 2); ?></div>
+                <div class="stat-label">Total Membership Fee (<?php echo $selectedYear; ?>)</div>
             </div>
+            <button onclick="window.location.href='editMembershipFee.php'" class="edit-btn">
+                <i class="fas fa-edit"></i>
+                Edit Details
+            </button>
         </div>
 
         <div class="tabs">
@@ -514,11 +543,14 @@ $months = [
             </div>
         </div>
     </div>
+    <?php include '../../templates/footer.php'; ?>
     </div>
 
     <script>
         function updateFilters() {
             const year = document.getElementById('yearSelect').value;
+
+            window.location.href = `?year=${year}`;
             
             fetch(`membership_fee.php?year=${year}`)
                 .then(response => response.text())
@@ -556,7 +588,5 @@ $months = [
             }
         }
     </script>
-
-    <?php include '../templates/footer.php'; ?>
 </body>
 </html>

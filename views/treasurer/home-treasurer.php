@@ -547,7 +547,7 @@ $currentTerm = getCurrentTerm();
 
 <div id="financial-section" class="category-section">
     <div class="category-cards">
-        <div class="action-card" onclick="window.location.href='FinancialManagement/membershipFee.php'">
+        <div class="action-card" onclick="window.location.href='financialManagement/membershipFee.php'">
             <i class="fas fa-id-card icon"></i>
             <h3>Membership Fee Management</h3>
         </div>
@@ -635,7 +635,7 @@ $currentTerm = getCurrentTerm();
            </div>
        </div>
        <br><br>
-       <?php include './templates/footer.php'; ?>
+       <?php include '../templates/footer.php'; ?>
        </div>
    </div>
 

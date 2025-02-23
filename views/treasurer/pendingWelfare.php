@@ -2,6 +2,54 @@
 session_start();
 require_once "../../config/database.php";
 
+function generateExpenseId() {
+    // Get the latest expense ID
+    $sql = "SELECT ExpenseID FROM Expenses 
+            WHERE ExpenseID LIKE 'EXP%' 
+            ORDER BY ExpenseID DESC LIMIT 1";
+    $result = Database::search($sql);
+    
+    if ($result->num_rows > 0) {
+        $lastId = $result->fetch_assoc()['ExpenseID'];
+        // Extract the number part and increment
+        $lastNum = intval(substr($lastId, 3)); // Remove 'EXP' and convert to integer
+        $newNum = $lastNum + 1;
+        // Format with leading zeros
+        $expenseId = 'EXP' . str_pad($newNum, 3, '0', STR_PAD_LEFT);
+    } else {
+        // If no existing records, start with EXP001
+        $expenseId = 'EXP001';
+    }
+    
+    return $expenseId;
+}
+
+function createExpenseRecord($welfareId, $amount) {
+    $treasurerQuery = "SELECT Treasurer_TreasurerID FROM User WHERE UserId = '{$_SESSION['user_id']}'";
+    $treasurerResult = Database::search($treasurerQuery);
+    $treasurerData = $treasurerResult->fetch_assoc();
+    
+    if (!$treasurerData || !$treasurerData['Treasurer_TreasurerID']) {
+        throw new Exception("Invalid Treasurer ID");
+    }
+
+    $date = date('Y-m-d');
+    $term = date('Y');
+    $expenseId = generateExpenseId();
+    $treasurerId = $treasurerData['Treasurer_TreasurerID'];
+    
+    $sql = "INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, Description, Image, Treasurer_TreasurerID) 
+            VALUES ('$expenseId', 'Death Welfare', 'System', $amount, '$date', $term, 'Death Welfare Payment (WelfareID: $welfareId)', NULL, '$treasurerId')";
+    
+    Database::iud($sql);
+    
+    // Update DeathWelfare record with the expense ID
+    $updateSql = "UPDATE DeathWelfare SET Expense_ExpenseID = '$expenseId' WHERE WelfareID = '$welfareId'";
+    Database::iud($updateSql);
+    
+    return $expenseId;
+}
+
 // Fetch pending death welfare applications with member details
 $query = "SELECT dw.*, m.Name as MemberName, m.MemberID 
           FROM DeathWelfare dw
@@ -10,16 +58,36 @@ $query = "SELECT dw.*, m.Name as MemberName, m.MemberID
           ORDER BY dw.Date DESC";
 $result = Database::search($query);
 
-// Handle approval/rejection
+// Replace the existing approval handling code with this
 if(isset($_POST['update_status'])) {
     $welfareId = $_POST['welfare_id'];
     $status = $_POST['status'];
     
-    $updateQuery = "UPDATE DeathWelfare SET Status = '$status' WHERE WelfareID = '$welfareId'";
-    
     try {
-        Database::iud($updateQuery);
-        $_SESSION['success_message'] = "Death welfare status updated successfully!";
+        // Start by getting welfare amount if it's being approved
+        if($status === 'approved') {
+            $welfareQuery = "SELECT Amount FROM DeathWelfare WHERE WelfareID = '$welfareId'";
+            $welfareResult = Database::search($welfareQuery);
+            $welfareData = $welfareResult->fetch_assoc();
+            
+            if($welfareData) {
+                // Create expense record
+                $expenseId = createExpenseRecord($welfareId, $welfareData['Amount']);
+                
+                // Update welfare status
+                $updateQuery = "UPDATE DeathWelfare SET Status = '$status' WHERE WelfareID = '$welfareId'";
+                Database::iud($updateQuery);
+                
+                $_SESSION['success_message'] = "Death welfare approved and expense recorded successfully!";
+            } else {
+                throw new Exception("Welfare record not found");
+            }
+        } else {
+            // Just update status for rejection
+            $updateQuery = "UPDATE DeathWelfare SET Status = '$status' WHERE WelfareID = '$welfareId'";
+            Database::iud($updateQuery);
+            $_SESSION['success_message'] = "Death welfare application has been rejected.";
+        }
     } catch(Exception $e) {
         $_SESSION['error_message'] = "Error updating status: " . $e->getMessage();
     }
