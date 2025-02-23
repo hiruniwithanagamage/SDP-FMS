@@ -278,9 +278,9 @@ echo "</pre>";
                    </div>
                    <div class="info-item">
                         <span>Membership Status:</span>
-                        <span class="<?php echo ($memberInfo['Status'] === 'TRUE') ? 'status-active' : 'status-pending'; ?>">
+                        <span class="<?php echo ($memberInfo['Status'] === 'Full Member') ? 'status-active' : 'status-pending'; ?>">
                             <?php 
-                            if($memberInfo['Status'] === 'TRUE') {
+                            if($memberInfo['Status'] === 'Full Member') {
                                 echo 'Full Membership';
                             } else {
                                 echo 'Pending';
