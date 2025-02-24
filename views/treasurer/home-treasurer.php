@@ -551,15 +551,15 @@ $currentTerm = getCurrentTerm();
             <i class="fas fa-id-card icon"></i>
             <h3>Membership Fee Management</h3>
         </div>
-        <div class="action-card" onclick="window.location.href='manage_loans.php'">
+        <div class="action-card" onclick="window.location.href='financialManagement/loan.php'">
             <i class="fas fa-landmark icon"></i>
             <h3>Loan Management</h3>
         </div>
-        <div class="action-card" onclick="window.location.href='death_welfare.php'">
+        <div class="action-card" onclick="window.location.href='financialManagement/deathWelfare.php'">
             <i class="fas fa-heart icon"></i>
             <h3>Death Welfare Management</h3>
         </div>
-        <div class="action-card" onclick="window.location.href='fine_management.php'">
+        <div class="action-card" onclick="window.location.href='financialManagement/fine.php'">
             <i class="fas fa-gavel icon"></i>
             <h3>Fine Management</h3>
         </div>

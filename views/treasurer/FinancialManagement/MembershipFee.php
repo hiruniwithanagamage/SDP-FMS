@@ -107,281 +107,7 @@ $months = [
     <title>Membership Details</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="../../../assets/css/adminActorDetails.css">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f5f7fa;
-            color: #333;
-            line-height: 1.6;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-
-        .header-card {
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            color: white;
-            padding: 2rem;
-            border-radius: 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        }
-
-        .filters {
-            display: flex;
-            gap: 1rem;
-        }
-
-        .filter-select {
-            padding: 0.5rem 1rem;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            background: rgba(255, 255, 255, 0.15);
-            color: white;
-            border-radius: 50px;
-            cursor: pointer;
-        }
-
-        .filter-select option {
-            background: #1e3c72;
-            color: white;
-        }
-
-        /* .stats-cards {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-        } */
-
-        .stat-number {
-            font-size: 2rem;
-            color: #1e3c72;
-            font-weight: bold;
-            margin: 0.5rem 0;
-        }
-
-        .tabs {
-            display: flex;
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .tab {
-            padding: 0.8rem 1.5rem;
-            background: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            transition: all 0.3s ease;
-        }
-
-        .tab.active {
-            background: #1e3c72;
-            color: white;
-        }
-
-        .table-container {
-            background: white;
-            border-radius: 12px;
-            padding: 1.5rem;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-            overflow-x: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        th, td {
-            padding: 1rem;
-            text-align: left;
-            border-bottom: 1px solid #eee;
-        }
-
-        th {
-            background: #f8f9fa;
-            color: #1e3c72;
-            font-weight: 600;
-        }
-
-        .status-badge {
-            padding: 0.5rem 1rem;
-            border-radius: 50px;
-            font-size: 0.9em;
-            font-weight: 500;
-        }
-
-        .status-paid {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .status-unpaid {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .month-cell {
-            width: 30px;
-            height: 30px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            margin: 2px;
-            border-radius: 50%;
-            font-size: 0.8em;
-            font-weight: 500;
-        }
-
-        .month-paid {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .month-unpaid {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .fee-type-header {
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            color: white;
-            padding: 1rem;
-            border-radius: 8px;
-            margin: 2rem 0 1rem;
-        }
-
-        .total-cell {
-            font-weight: bold;
-            color: #1e3c72;
-        }
-
-        .stats-cards {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 2rem;
-            flex: 1;
-            gap: 1.5rem;
-        }
-
-.stat-card {
-    background: white;
-    padding: 1.5rem;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-    text-align: center;
-    width: 100%;
-    max-width: 400px;
-}
-
-.edit-btn {
-    background: #1e3c72;
-    color: white;
-    padding: 0.8rem 1.5rem;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-weight: 500;
-    transition: all 0.3s ease;
-}
-
-.edit-btn:hover {
-    background: #2a5298;
-}
-
-.table-container {
-    max-height: 400px; /* Height for approximately 5 rows */
-    overflow-y: auto;
-    padding-top: 0px; /* Prevents content from shifting */
-}
-
-/* Keep the table header fixed while scrolling */
-.table-container table thead {
-    position: sticky;
-    top: 0;
-    background: #f8f9fa;
-    z-index: 1;
-}
-
-/* Add shadow to header when scrolling */
-.table-container table thead::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    border-bottom: 1px solid #eee;
-}
-
-    /* Ensure consistent cell heights */
-    .table-container table td {
-        height: 60px; /* Adjust this value based on your content */
-    }
-
-    /* Style the scrollbar */
-    .table-container::-webkit-scrollbar {
-        width: 8px;
-    }
-
-    .table-container::-webkit-scrollbar-track {
-        background: #f1f1f1;
-        border-radius: 4px;
-    }
-
-    .table-container::-webkit-scrollbar-thumb {
-        background: #1e3c72;
-        border-radius: 4px;
-    }
-
-    .table-container::-webkit-scrollbar-thumb:hover {
-        background: #2a5298;
-    }
-
-        @media (max-width: 768px) {
-            .header-card {
-                flex-direction: column;
-                gap: 1rem;
-                text-align: center;
-            }
-
-            .filters {
-                flex-direction: column;
-                width: 100%;
-            }
-
-            .filter-select {
-                width: 100%;
-            }
-
-            .stats-cards {
-                grid-template-columns: 1fr;
-            }
-
-            .tabs {
-                flex-direction: column;
-            }
-
-            .tab {
-                width: 100%;
-                text-align: center;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="../../../assets/css/financialManagement.css">
 </head>
 <body>
     <div class="main-container">
@@ -443,6 +169,12 @@ $months = [
         <div class="tabs">
             <button class="tab active" onclick="showTab('members')">Member-wise View</button>
             <button class="tab" onclick="showTab('months')">Month-wise View</button>
+            <div class="filters">
+                <div class="search-container">
+                    <input type="text" id="searchInput" placeholder="Search by Name or Member ID..." class="search-input">
+                    <button onclick="clearSearch()" class="clear-btn"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
         </div>
 
         <div id="members-view" >
@@ -586,6 +318,52 @@ $months = [
                 document.getElementById('months-view').style.display = 'block';
                 document.querySelector('button[onclick="showTab(\'months\')"]').classList.add('active');
             }
+        }
+
+        // Search functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('searchInput');
+            searchInput.addEventListener('input', performSearch);
+        });
+
+        function performSearch() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const tableRows = document.querySelectorAll('#members-view tbody tr, #registration-view tbody tr');
+            let hasResults = false;
+
+            tableRows.forEach(row => {
+                const memberID = row.cells[0].textContent.toLowerCase();
+                const name = row.cells[1].textContent.toLowerCase();
+                
+                if (name.includes(searchTerm) || memberID.includes(searchTerm)) {
+                    row.style.display = '';
+                    hasResults = true;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+
+            // Show/hide no results message
+            let noResultsMsg = document.querySelector('.no-results');
+            if (!hasResults) {
+                if (!noResultsMsg) {
+                    noResultsMsg = document.createElement('div');
+                    noResultsMsg.className = 'no-results';
+                    noResultsMsg.textContent = 'No matching records found';
+                    const table = document.querySelector('#members-view .table-container');
+                    table.appendChild(noResultsMsg);
+                }
+                noResultsMsg.style.display = 'block';
+            } else if (noResultsMsg) {
+                noResultsMsg.style.display = 'none';
+            }
+        }
+
+        function clearSearch() {
+            const searchInput = document.getElementById('searchInput');
+            searchInput.value = '';
+            performSearch();
+            searchInput.focus();
         }
     </script>
 </body>
