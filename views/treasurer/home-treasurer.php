@@ -143,23 +143,25 @@ $currentTerm = getCurrentTerm();
 
        /* Updated Statistics Grid Styles */
        .statistics-grid {
-           display: grid;
-           grid-template-columns: 1fr 1fr;
-           gap: 1.5rem;
-           margin-bottom: 2rem;
+        display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 15px;
+    margin-bottom: 30px;
        }
 
        .balance-card {
-           text-align: center;
-           padding: 2.5rem;
-           height: 100%;
-           display: flex;
-           flex-direction: column;
-           justify-content: center;
-           background: white;
-           border-radius: 12px;
-           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-       }
+            flex: 1;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
 
        .status-cards {
            display: flex;
@@ -335,16 +337,22 @@ $currentTerm = getCurrentTerm();
 
        @media (max-width: 992px) {
            .statistics-grid {
-               grid-template-columns: 1fr;
+                flex-wrap: wrap;
            }
            
            .status-cards {
-               flex-direction: row;
+                flex: 1 1 45%;
            }
            
            .status-card {
                flex: 1;
            }
+
+           .add-fine-btn {
+                order: 4;
+                width: auto;
+                flex: 1 1 45%;
+            }
        }
 
        @media (max-width: 768px) {
@@ -448,6 +456,27 @@ $currentTerm = getCurrentTerm();
     opacity: 1;
 }
 
+.add-fine-btn {
+    text-align: center;
+    padding: 2.5rem;
+    background: #1e3c72;
+    color: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.add-fine-btn:hover {
+    background: #2a5298;
+    transform: translateY(-3px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+}
+
 @media (max-width: 768px) {
     .management-buttons {
         grid-template-columns: 1fr;
@@ -483,12 +512,55 @@ $currentTerm = getCurrentTerm();
                 justify-content: center;
             }
         }
+
+        .success-message {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+        }
+        
+        .success-message .close-icon {
+            cursor: pointer;
+            color: #155724;
+            font-size: 20px;
+            background: none;
+            border: none;
+            position: absolute;
+            top: 50%;
+            right: 10px;
+            transform: translateY(-50%);
+        }
+        
+        .success-message .close-icon:hover {
+            color: #0b2e13;
+        }
    </style>
 </head>
 <body>
    <div class="home-container">
        <?php include '../templates/navbar-treasurer.php'; ?>
        <div class="content">
+
+       <div class="container">
+            <?php if(isset($_SESSION['success_message'])): ?>
+                <div class="success-message" id="success-message">
+                    <?php 
+                        echo htmlspecialchars($_SESSION['success_message']);
+                        unset($_SESSION['success_message']);
+                    ?>
+                    <button class="close-icon" onclick="closeSuccessMessage()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            <?php endif; ?>
+
        <div class="welcome-card">
             <h1>Welcome, Treasurer</h1>
             <a href="termDetails.php" class="term-button">
@@ -504,6 +576,11 @@ $currentTerm = getCurrentTerm();
                     <div class="stat-number">Rs.<?php echo number_format($totalBalance, 2); ?></div>
                     <div class="stat-label">Total Balance</div>
                 </div>
+
+                <button onclick="window.location.href='addFine.php'" class="add-fine-btn">
+                    <i class="fas fa-plus"></i>
+                    Add Fine
+                </button>
                
                 <div class="status-cards">
                     <div class="status-card" onclick="window.location.href='pendingLoans.php'">
@@ -664,6 +741,23 @@ function toggleSection(sectionName) {
     section.classList.toggle('show');
     icon.classList.toggle('active');
 }
+
+function closeSuccessMessage() {
+            const successMessage = document.getElementById('success-message');
+            if (successMessage) {
+                successMessage.style.display = 'none';
+            }
+        }
+
+        // Optional: Auto-hide the success message after 5 seconds
+        document.addEventListener('DOMContentLoaded', function() {
+            const successMessage = document.getElementById('success-message');
+            if (successMessage) {
+                setTimeout(function() {
+                    successMessage.style.display = 'none';
+                }, 5000);
+            }
+        });
 </script>
 </body>
 </html>
