@@ -194,7 +194,7 @@ while ($row = $memberQueryResult->fetch_assoc()) {
 
             <?php if ($selectedMemberId && $memberData): ?>
             <!-- Payment Form -->
-            <form id="paymentForm" action="process_treasurer_payment.php" method="POST">
+            <form id="paymentForm" action="./payments/process_treasurer_payment.php" method="POST">
                 <input type="hidden" name="member_id" value="<?php echo $selectedMemberId; ?>">
 
                 <!-- Member Info Display -->
@@ -353,7 +353,7 @@ while ($row = $memberQueryResult->fetch_assoc()) {
                 <!-- Submit Button -->
                 <div class="button-group">
                     <button type="submit" class="btn-submit">Process Payment</button>
-                    <button type="button" class="btn-cancel" onclick="window.location.href='dashboard.php'">Cancel</button>
+                    <button type="button" class="btn-cancel" onclick="window.location.href='home-treasurer.php'">Cancel</button>
                 </div>
             </form>
             <?php endif; ?>
