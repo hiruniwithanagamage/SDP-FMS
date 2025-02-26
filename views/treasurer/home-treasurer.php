@@ -645,13 +645,13 @@ $currentTerm = getCurrentTerm();
 
 <div id="expense-section" class="category-section">
     <div class="category-cards">
-        <div class="action-card" onclick="window.location.href='manage_expenses.php'">
+        <div class="action-card" onclick="window.location.href='financialManagement/addExpenses.php'">
             <i class="fas fa-file-invoice-dollar icon"></i>
-            <h3>Track Expenses</h3>
+            <h3>Add Expenses</h3>
         </div>
-        <div class="action-card" onclick="window.location.href='expense_categories.php'">
+        <div class="action-card" onclick="window.location.href='financialManagement/trackExpenses.php'">
             <i class="fas fa-tags icon"></i>
-            <h3>Expense Categories</h3>
+            <h3>Track Expenses</h3>
         </div>
     </div>
 </div>
@@ -712,8 +712,8 @@ $currentTerm = getCurrentTerm();
            </div>
        </div>
        <br><br>
-       <?php include '../templates/footer.php'; ?>
        </div>
+       <?php include '../templates/footer.php'; ?>
    </div>
 
    <script>
