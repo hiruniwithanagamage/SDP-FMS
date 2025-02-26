@@ -160,7 +160,7 @@
 </head>
 <body>
    <div class="home-container">
-       <?php include '../templates/header.php'; ?>
+       <?php include '../templates/navbar-admin.php'; ?>
        <div class="content">
            <div class="welcome-card">
                <h1>Welcome, Auditor</h1>
@@ -245,7 +245,7 @@
            </div>
        </div>
        <br><br>
-       <?php include './templates/footer.php'; ?>
+       <?php include '../templates/footer.php'; ?>
    </div>
 
    <script>

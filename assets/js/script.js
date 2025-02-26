@@ -31,7 +31,7 @@ function loginjs() {
                         } else if (response.role === "treasurer") {
                             window.location = "views/treasurer/home-treasurer.php";
                         } else if (response.role === "auditor") {
-                            window.location = "views/home-auditor.php";
+                            window.location = "views/auditor/home-auditor.php";
                         } else {
                             showError("Invalid role");
                         }
