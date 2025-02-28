@@ -1,10 +1,10 @@
 //processPayment.php
 <?php
 session_start();
-require_once "../../config/database.php";
+require_once "../../../config/database.php";
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: memberPayment.php');
+    header('Location: ../memberPayment.php');
     exit();
 }
 
@@ -54,7 +54,7 @@ try {
     // Handle file upload for bank transfer
     $receiptUrl = null;
     if ($method === 'bank' && isset($_FILES['receipt'])) {
-        $uploadDir = '../../uploads/receipts/';
+        $uploadDir = '../../../uploads/receipts/';
         if (!file_exists($uploadDir)) {
             mkdir($uploadDir, 0777, true);
         }
@@ -110,12 +110,12 @@ try {
                     Image, card_number, expire_date, cvv, Member_MemberID) 
                     VALUES ('$paymentId', '$paymentType', '$method', $amount, '$date', $year,
                     " . ($receiptUrl ? "'$receiptUrl'" : "NULL") . ", 
-                    " . ($cardNumber ? "'$cardNumber'" : "NULL") . ", 
+                    " . (isset($_POST['card_number']) ? "'" . $_POST['card_number'] . "'" : "NULL") . ",
                     " . ($expireDate ? "'$expireDate'" : "NULL") . ",
                     " . ($cvv ? "'$cvv'" : "NULL") . ", 
                     '$memberId')";
             Database::iud($query);
-
+  // " . ($cardNumber ? "'$cardNumber'" : "NULL") . ", Can be needed because this change into another one
             // Insert into MembershipFeePayment
             $query = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
                     VALUES ('$feeId', '$paymentId')";
@@ -142,23 +142,40 @@ try {
             if (!isset($_POST['selected_months']) || empty($_POST['selected_months'])) {
                 throw new Exception("No months selected for monthly fee");
             }
-
+        
             $selectedMonths = $_POST['selected_months'];
             $expectedAmount = count($selectedMonths) * $feeStructure['monthly_fee'];
             
             if ($amount != $expectedAmount) {
                 throw new Exception("Invalid monthly fee amount");
             }
-
+        
+            // Insert the payment record first
+            $query = "INSERT INTO Payment (PaymentID, Payment_Type, Method, Amount, Date, Term, 
+                    Image, card_number, expire_date, cvv, Member_MemberID) 
+                    VALUES ('$paymentId', '$paymentType', '$method', $amount, '$date', $year,
+                    " . ($receiptUrl ? "'$receiptUrl'" : "NULL") . ", 
+                    " . (isset($_POST['card_number']) ? "'" . $_POST['card_number'] . "'" : "NULL") . ", 
+                    " . (isset($_POST['expire_date']) ? "'" . $_POST['expire_date'] . "'" : "NULL") . ",
+                    " . (isset($_POST['cvv']) ? "'" . $_POST['cvv'] . "'" : "NULL") . ", 
+                    '$memberId')";
+            Database::iud($query);
+        
             // Process each selected month
             foreach ($selectedMonths as $month) {
                 $feeId = generateFeeId();
                 $monthDate = date('Y-m-d', strtotime("$year-$month-01"));
                 
+                // Insert membership fee record
                 $query = "INSERT INTO MembershipFee (FeeID, Amount, Date, Term, Type, Member_MemberID, IsPaid) 
                          VALUES ('$feeId', " . $feeStructure['monthly_fee'] . ", 
                          '$monthDate', $year, 'monthly', '$memberId', 'Yes')";
                 Database::iud($query);
+                
+                // Link the fee to the payment
+                $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
+                             VALUES ('$feeId', '$paymentId')";
+                Database::iud($linkQuery);
             }
             break;
 
@@ -243,15 +260,16 @@ try {
     // Commit transaction
     Database::iud("COMMIT");
     
+    $_SESSION['last_payment_id'] = $paymentId;
     $_SESSION['success_message'] = "Payment processed successfully";
-    header('Location: memberPayment.php');
+    header('Location: payment_confirmation.php');
     exit();
 
 } catch (Exception $e) {
     // Rollback transaction on error
     Database::iud("ROLLBACK");
     $_SESSION['error_message'] = "Error processing payment: " . $e->getMessage();
-    header('Location: memberPayment.php');
+    header('Location: ../memberPayment.php');
     exit();
 }
 

@@ -139,7 +139,7 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
                 </div>
             <?php endif; ?>
             
-            <form id="paymentForm" action="process_payment.php" method="POST" enctype="multipart/form-data">
+            <form id="paymentForm" action="payments/process_payment.php" method="POST" enctype="multipart/form-data">
                 <!-- Member Information -->
                 <div class="form-row">
                     <div class="form-group">
