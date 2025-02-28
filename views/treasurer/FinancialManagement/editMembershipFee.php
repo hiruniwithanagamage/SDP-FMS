@@ -6,7 +6,7 @@ require_once "../../../config/database.php";
 $currentTerm = isset($_SESSION['selected_year']) ? $_SESSION['selected_year'] : date('Y');
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
 
-// Fetch membership fee details for the selected year
+// Fetch membership fee details for the selected year with prepared statement
 function getMembershipFeeDetails($year, $limit = 15) {
     $sql = "SELECT 
             mf.*,
@@ -18,11 +18,16 @@ function getMembershipFeeDetails($year, $limit = 15) {
         JOIN Member m ON m.MemberID = mf.Member_MemberID
         LEFT JOIN MembershipFeePayment mfp ON mfp.FeeID = mf.FeeID
         LEFT JOIN Payment p ON p.PaymentID = mfp.PaymentID
-        WHERE YEAR(mf.Date) = {$year} AND mf.Term = {$year}
+        WHERE YEAR(mf.Date) = ? AND mf.Term = ?
         ORDER BY mf.Date DESC
-        LIMIT {$limit}";
+        LIMIT ?";
     
-    return Database::search($sql);
+    $conn = Database::getConnection();
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("iii", $year, $year, $limit);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result;
 }
 
 $feeDetails = getMembershipFeeDetails($selectedYear);
@@ -35,51 +40,79 @@ while (($row = $feeDetails->fetch_assoc()) && $rowCount < 15) {
     $rowCount++;
 }
 
-// Get fee amounts from Static table
-function getFeeAmounts() {
-    global $selectedYear;
-    $sql = "SELECT monthly_fee, registration_fee FROM Static WHERE year = {$selectedYear} LIMIT 1";
-    return Database::search($sql);
+// Get fee amounts from Static table with prepared statement
+function getFeeAmounts($year) {
+    $sql = "SELECT monthly_fee, registration_fee FROM Static WHERE year = ? LIMIT 1";
+    $conn = Database::getConnection();
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    return $stmt->get_result();
 }
 
 // Handle Update
 if(isset($_POST['update'])) {
     $feeId = $_POST['fee_id'];
-    $amount = $_POST['amount'];
+    $amount = floatval($_POST['amount']);
     $isPaid = $_POST['is_paid'];
     $date = $_POST['date'];
     $details = $_POST['details'];
     
     try {
-        // Update MembershipFee table
-        $updateQuery = "UPDATE MembershipFee SET 
-                       Amount = {$amount},
-                       IsPaid = '{$isPaid}',
-                       Date = '{$date}'
-                       WHERE FeeID = '{$feeId}'";
+        $conn = Database::getConnection();
         
-        Database::iud($updateQuery);
+        // Start transaction to ensure consistency
+        $conn->begin_transaction();
+        
+        // Update MembershipFee table with prepared statement
+        $updateQuery = "UPDATE MembershipFee SET 
+                       Amount = ?,
+                       IsPaid = ?,
+                       Date = ?
+                       WHERE FeeID = ?";
+        
+        $stmt = $conn->prepare($updateQuery);
+        $stmt->bind_param("dsss", $amount, $isPaid, $date, $feeId);
+        $stmt->execute();
         
         // If payment status changed to Paid, create payment record
         if($isPaid == 'Yes') {
             // First check if payment already exists
-            $checkQuery = "SELECT PaymentID FROM MembershipFeePayment WHERE FeeID = '{$feeId}'";
-            $result = Database::search($checkQuery);
+            $checkQuery = "SELECT PaymentID FROM MembershipFeePayment WHERE FeeID = ?";
+            $stmt = $conn->prepare($checkQuery);
+            $stmt->bind_param("s", $feeId);
+            $stmt->execute();
+            $result = $stmt->get_result();
             
             if($result->num_rows == 0) {
+                // Get member ID for the fee
+                $memberQuery = "SELECT Member_MemberID, Term FROM MembershipFee WHERE FeeID = ?";
+                $stmt = $conn->prepare($memberQuery);
+                $stmt->bind_param("s", $feeId);
+                $stmt->execute();
+                $memberResult = $stmt->get_result();
+                $memberData = $memberResult->fetch_assoc();
+                $memberId = $memberData['Member_MemberID'];
+                $term = $memberData['Term'];
+                
+                // Generate a proper payment ID
+                $paymentId = generatePaymentId($conn);
+                
                 // Create new payment
-                $paymentId = uniqid('PAY');
                 $paymentQuery = "INSERT INTO Payment 
                                 (PaymentID, Payment_Type, Method, Amount, Date, Term, Member_MemberID)
-                                SELECT '{$paymentId}', 'Membership', 'Cash', {$amount}, '{$date}', Term, Member_MemberID
-                                FROM MembershipFee WHERE FeeID = '{$feeId}'";
+                                VALUES (?, 'Membership', 'Cash', ?, ?, ?, ?)";
                 
-                Database::iud($paymentQuery);
+                $stmt = $conn->prepare($paymentQuery);
+                $stmt->bind_param("sdsss", $paymentId, $amount, $date, $term, $memberId);
+                $stmt->execute();
                 
                 // Link payment to membership fee with details
                 $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID, Details) 
-                            VALUES ('{$feeId}', '{$paymentId}', '" . mysqli_real_escape_string(Database::$connection, $details) . "')";
-                Database::iud($linkQuery);
+                            VALUES (?, ?, ?)";
+                $stmt = $conn->prepare($linkQuery);
+                $stmt->bind_param("sss", $feeId, $paymentId, $details);
+                $stmt->execute();
             } else {
                 // Update existing payment
                 $row = $result->fetch_assoc();
@@ -87,29 +120,60 @@ if(isset($_POST['update'])) {
                 
                 // Update Payment record
                 $updatePaymentQuery = "UPDATE Payment SET 
-                                     Amount = {$amount},
-                                     Date = '{$date}'
-                                     WHERE PaymentID = '{$paymentId}'";
-                Database::iud($updatePaymentQuery);
+                                     Amount = ?,
+                                     Date = ?
+                                     WHERE PaymentID = ?";
+                $stmt = $conn->prepare($updatePaymentQuery);
+                $stmt->bind_param("dss", $amount, $date, $paymentId);
+                $stmt->execute();
                 
                 // Update MembershipFeePayment details
-                $newDetails = date('Y-m-d') . ": " . mysqli_real_escape_string(Database::$connection, $details);
+                $newDetails = date('Y-m-d') . ": " . $details;
                 $updateDetailsQuery = "UPDATE MembershipFeePayment SET 
-                                     Details = CONCAT(IFNULL(Details,''), '\n', '{$newDetails}') 
-                                     WHERE FeeID = '{$feeId}' AND PaymentID = '{$paymentId}'";
-                Database::iud($updateDetailsQuery);
+                                     Details = CONCAT(IFNULL(Details,''), '\n', ?)
+                                     WHERE FeeID = ? AND PaymentID = ?";
+                $stmt = $conn->prepare($updateDetailsQuery);
+                $stmt->bind_param("sss", $newDetails, $feeId, $paymentId);
+                $stmt->execute();
             }
         } else {
             // If marked as unpaid, delete any existing payment records
-            $deletePaymentQuery = "DELETE p FROM Payment p 
-                                 JOIN MembershipFeePayment mfp ON p.PaymentID = mfp.PaymentID 
-                                 WHERE mfp.FeeID = '{$feeId}'";
-            Database::iud($deletePaymentQuery);
+            
+            // First, get the payment ID related to this fee
+            $findPaymentQuery = "SELECT PaymentID FROM MembershipFeePayment WHERE FeeID = ?";
+            $stmt = $conn->prepare($findPaymentQuery);
+            $stmt->bind_param("s", $feeId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            if($result->num_rows > 0) {
+                $row = $result->fetch_assoc();
+                $paymentId = $row['PaymentID'];
+                
+                // Delete from MembershipFeePayment first
+                $deleteLinkQuery = "DELETE FROM MembershipFeePayment WHERE FeeID = ?";
+                $stmt = $conn->prepare($deleteLinkQuery);
+                $stmt->bind_param("s", $feeId);
+                $stmt->execute();
+                
+                // Delete from Payment table
+                $deletePaymentQuery = "DELETE FROM Payment WHERE PaymentID = ?";
+                $stmt = $conn->prepare($deletePaymentQuery);
+                $stmt->bind_param("s", $paymentId);
+                $stmt->execute();
+            }
         }
+        
+        // Commit all changes
+        $conn->commit();
         
         $_SESSION['success_message'] = "Fee details updated successfully!";
         
     } catch (Exception $e) {
+        // Rollback on error
+        if(isset($conn)) {
+            $conn->rollback();
+        }
         $_SESSION['error_message'] = "Error updating fee details: " . $e->getMessage();
     }
     
@@ -121,17 +185,51 @@ if(isset($_POST['delete'])) {
     $feeId = $_POST['fee_id'];
     
     try {
-        // First delete related records from MembershipFeePayment
-        $deletePaymentLinks = "DELETE FROM MembershipFeePayment WHERE FeeID = '{$feeId}'";
-        Database::iud($deletePaymentLinks);
+        $conn = Database::getConnection();
+        
+        // Start transaction for consistency
+        $conn->begin_transaction();
+        
+        // First, get the payment ID related to this fee
+        $findPaymentQuery = "SELECT PaymentID FROM MembershipFeePayment WHERE FeeID = ?";
+        $stmt = $conn->prepare($findPaymentQuery);
+        $stmt->bind_param("s", $feeId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        // Delete related records from MembershipFeePayment
+        $deletePaymentLinks = "DELETE FROM MembershipFeePayment WHERE FeeID = ?";
+        $stmt = $conn->prepare($deletePaymentLinks);
+        $stmt->bind_param("s", $feeId);
+        $stmt->execute();
+        
+        // Delete related Payment records if they exist
+        if($result->num_rows > 0) {
+            $row = $result->fetch_assoc();
+            $paymentId = $row['PaymentID'];
+            
+            $deletePayment = "DELETE FROM Payment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($deletePayment);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+        }
         
         // Then delete the fee record
-        $deleteFee = "DELETE FROM MembershipFee WHERE FeeID = '{$feeId}'";
-        Database::iud($deleteFee);
+        $deleteFee = "DELETE FROM MembershipFee WHERE FeeID = ?";
+        $stmt = $conn->prepare($deleteFee);
+        $stmt->bind_param("s", $feeId);
+        $stmt->execute();
+        
+        // Commit all changes
+        $conn->commit();
         
         $_SESSION['success_message'] = "Fee record deleted successfully!";
         
     } catch (Exception $e) {
+        // Rollback on error
+        if(isset($conn)) {
+            $conn->rollback();
+        }
         $_SESSION['error_message'] = "Error deleting fee record: " . $e->getMessage();
     }
     
@@ -139,9 +237,47 @@ if(isset($_POST['delete'])) {
     exit();
 }
 
+// Function to generate a proper payment ID
+function generatePaymentId($conn) {
+    // Try to set isolation level
+    $conn->query("SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    
+    // Get the highest ID
+    $query = "SELECT CAST(SUBSTRING(PaymentID, 4) AS UNSIGNED) as max_num 
+             FROM Payment 
+             WHERE PaymentID LIKE 'PAY%'
+             ORDER BY PaymentID DESC 
+             LIMIT 1 FOR UPDATE";
+    
+    $result = $conn->query($query);
+    
+    // Determine the next number
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        $nextNum = $row['max_num'] + 1;
+    } else {
+        $nextNum = 1;
+    }
+    
+    // Generate the new ID
+    $newId = "PAY" . str_pad($nextNum, 3, '0', STR_PAD_LEFT);
+    
+    // Verify it doesn't exist (double check)
+    $verifyQuery = "SELECT COUNT(*) as count FROM Payment WHERE PaymentID = ?";
+    $stmt = $conn->prepare($verifyQuery);
+    $stmt->bind_param("s", $newId);
+    $stmt->execute();
+    $verifyResult = $stmt->get_result();
+    
+    if ($verifyResult->fetch_assoc()['count'] > 0) {
+        return generatePaymentId($conn); // Try again if ID exists
+    }
+    
+    return $newId;
+}
+
 // Get fee details for display
-// $feeDetails = getMembershipFeeDetails($selectedYear);
-$feeAmountsResult = getFeeAmounts();
+$feeAmountsResult = getFeeAmounts($selectedYear);
 $feeAmounts = $feeAmountsResult->fetch_assoc();
 ?>
 
@@ -355,13 +491,66 @@ $feeAmounts = $feeAmountsResult->fetch_assoc();
     color: #999;
 }
 
+/* Delete Modal Styles */
+.delete-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    padding: 20px;
+    overflow-y: auto;
+}
+
+.delete-modal-content {
+    background-color: white;
+    margin: 10% auto;
+    padding: 2rem;
+    width: 90%;
+    max-width: 500px;
+    border-radius: 12px;
+    position: relative;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    text-align: center;
+}
+
+.delete-modal-content h2 {
+    color: #e53935;
+    margin-bottom: 1rem;
+}
+
+.delete-modal-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 2rem;
+}
+
+.confirm-delete-btn {
+    padding: 0.8rem 1.8rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 1rem;
+    cursor: pointer;
+    background-color: #e53935;
+    color: white;
+    transition: background-color 0.3s;
+}
+
+.confirm-delete-btn:hover {
+    background-color: #c62828;
+}
+
 /* Responsive Adjustments */
 @media (max-width: 768px) {
     .filter-input {
         width: 100%;
     }
 
-    .modal-content {
+    .modal-content, .delete-modal-content {
         margin: 0;
         margin-top: 20px;
         width: 100%;
@@ -369,12 +558,11 @@ $feeAmounts = $feeAmountsResult->fetch_assoc();
         overflow-y: auto;
     }
 
-    .modal-footer {
+    .modal-footer, .delete-modal-buttons {
         flex-direction: column;
     }
 
-    .save-btn, 
-    .cancel-btn {
+    .save-btn, .cancel-btn, .confirm-delete-btn {
         width: 100%;
     }
 }
@@ -453,14 +641,6 @@ $feeAmounts = $feeAmountsResult->fetch_assoc();
                     onkeyup="searchTable()">
             </div>
 
-            <!-- <div class="fee-info">
-                <div class="info-card">
-                    <h3>Current Fee Rates</h3>
-                    <p><strong>Monthly Fee:</strong> Rs. <?php echo number_format($feeAmounts['monthly_fee'], 2); ?></p>
-                    <p><strong>Registration Fee:</strong> Rs. <?php echo number_format($feeAmounts['registration_fee'], 2); ?></p>
-                </div>
-            </div> -->
-
             <?php if(isset($_SESSION['success_message'])): ?>
                 <div class="alert alert-success">
                     <?php 
@@ -487,7 +667,6 @@ $feeAmounts = $feeAmountsResult->fetch_assoc();
                             <th>Name</th>
                             <th>Fee Type</th>
                             <th>Amount</th>
-                            <!-- <th>Status</th> -->
                             <th>Fee Date</th>
                             <th>Payment Date</th>
                             <th>Change Details</th>
@@ -502,19 +681,18 @@ $feeAmounts = $feeAmountsResult->fetch_assoc();
                             <td><?php echo htmlspecialchars($row['MemberName']); ?></td>
                             <td><?php echo htmlspecialchars($row['Type']); ?></td>
                             <td>Rs. <?php echo number_format($row['Amount'], 2); ?></td>
-                            <!-- <td>
-                                <span class="status-badge <?php echo $row['IsPaid'] == 'Yes' ? 'status-active' : 'status-inactive'; ?>">
-                                    <?php echo $row['IsPaid'] == 'Yes' ? 'Paid' : 'Unpaid'; ?>
-                                </span>
-                            </td> -->
                             <td><?php echo date('Y-m-d', strtotime($row['Date'])); ?></td>
                             <td><?php echo $row['payment_date'] ? date('Y-m-d', strtotime($row['payment_date'])) : '-'; ?></td>
                             <td class="history-cell" title="<?php echo htmlspecialchars($row['change_details'] ?? ''); ?>">
-                                <?php echo htmlspecialchars($row['change_details'] ?? '-'); ?>
+                                <?php 
+                                // Limit display length with ellipsis for better UI
+                                $details = $row['change_details'] ?? '-';
+                                echo strlen($details) > 50 ? htmlspecialchars(substr($details, 0, 50) . '...') : htmlspecialchars($details); 
+                                ?>
                             </td>
                             <td>
                                 <div class="action-buttons">
-                                    <button class="action-btn edit-btn" onclick="openEditModal('<?php echo $row['FeeID']; ?>', '<?php echo $row['Amount']; ?>', '<?php echo $row['IsPaid']; ?>', '<?php echo $row['Date']; ?>')">
+                                    <button class="action-btn edit-btn" onclick="openEditModal('<?php echo $row['FeeID']; ?>', '<?php echo $row['Amount']; ?>', '<?php echo $row['IsPaid']; ?>', '<?php echo date('Y-m-d', strtotime($row['Date'])); ?>')">
                                         <i class="fas fa-edit"></i> Edit
                                     </button>
                                     <button class="action-btn delete-btn" onclick="openDeleteModal('<?php echo $row['FeeID']; ?>')">
@@ -604,7 +782,7 @@ $feeAmounts = $feeAmountsResult->fetch_assoc();
             document.getElementById('edit_fee_id').value = id;
             document.getElementById('edit_amount').value = amount;
             document.getElementById('edit_status').value = isPaid;
-            document.getElementById('edit_date').value = date.split(' ')[0];
+            document.getElementById('edit_date').value = date;
         }
 
         function closeModal() {
@@ -620,22 +798,18 @@ $feeAmounts = $feeAmountsResult->fetch_assoc();
             document.getElementById('deleteModal').style.display = 'none';
         }
 
-        // Add to your existing window.onclick function
+        // Combined window.onclick for both modals
         window.onclick = function(event) {
-            if (event.target == document.getElementById('editModal')) {
+            const editModal = document.getElementById('editModal');
+            const deleteModal = document.getElementById('deleteModal');
+            
+            if (event.target == editModal) {
                 closeModal();
             }
-            if (event.target == document.getElementById('deleteModal')) {
+            if (event.target == deleteModal) {
                 closeDeleteModal();
             }
-        }
-
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            if (event.target == document.getElementById('editModal')) {
-                closeModal();
-            }
-        }
+        };
 
         function searchTable() {
             // Get input value and convert to lowercase for case-insensitive search

@@ -21,6 +21,18 @@ class Database{
         return $resultset;
     }
 
+    // Add a new prepared statement method
+    public static function prepare($q) {
+        Database::setUpConnection();
+        return Database::$connection->prepare($q);
+    }
+
+    // Add a method to get the connection
+    public static function getConnection() {
+        Database::setUpConnection();
+        return Database::$connection;
+    }
+
 }
 
 ?>
