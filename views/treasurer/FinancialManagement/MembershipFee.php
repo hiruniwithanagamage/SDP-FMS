@@ -5,7 +5,7 @@ require_once "../../../config/database.php";
 // Get current term
 function getCurrentTerm() {
     $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['year'] ?? date('Y');
 }
@@ -29,7 +29,7 @@ function getMemberMonthlyPayments($year) {
         GROUP BY m.MemberID, m.Name
         ORDER BY m.Name";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get registration fee status
@@ -59,13 +59,13 @@ function getRegistrationFeeStatus($year) {
         FROM Member m
         ORDER BY m.Name";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get fee amounts from Static table
 function getFeeAmounts() {
     $sql = "SELECT monthly_fee, registration_fee FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     return $result->fetch_assoc();
 }
 
@@ -81,7 +81,7 @@ function getMonthlyPaymentSummary($year) {
         GROUP BY MONTH(mf.Date)
         ORDER BY month";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 $currentTerm = getCurrentTerm();
@@ -152,7 +152,7 @@ $months = [
                     AND Type = 'Monthly' 
                     AND IsPaid = 'Yes') as yearly_amount";
                 
-            $result = Database::search($sql);
+            $result = search($sql);
             $totalAmount = $result->fetch_assoc()['yearly_amount'] ?? 0;
             ?>
             <div class="stat-card">

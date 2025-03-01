@@ -17,7 +17,7 @@ try {
              ORDER BY Name ASC 
              LIMIT $perPage OFFSET $offset";
 
-    $result = Database::search($query);
+    $result = search($query);
     
     if (!$result) {
         throw new Exception("Database query failed");
@@ -36,7 +36,7 @@ try {
                    FROM Member 
                    WHERE Name LIKE '$searchTerm' 
                    OR MemberID LIKE '$searchTerm'";
-    $countResult = Database::search($countQuery);
+    $countResult = search($countQuery);
     $totalCount = $countResult->fetch_assoc()['total'];
 
     // Format response for Select2

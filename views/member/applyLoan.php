@@ -4,8 +4,8 @@ require_once "../../config/database.php";
 
 // Debug database connection
 try {
-    Database::setUpConnection();
-    error_log("Database Connection Status: " . (Database::$connection ? "Connected" : "Not Connected"));
+    setupConnection(); // Changed from setUpConnection() to match your procedural function
+    error_log("Database Connection Status: " . ($GLOBALS['db_connection'] ? "Connected" : "Not Connected"));
 } catch (Exception $e) {
     error_log("Database Connection Error: " . $e->getMessage());
 }
@@ -22,8 +22,8 @@ if (!isset($_SESSION["u"])) {
 
 // Check database connection
 try {
-    Database::setUpConnection();
-    if (!Database::$connection) {
+    setupConnection(); // Changed from setUpConnection()
+    if (!$GLOBALS['db_connection']) { // Changed from $connection
         die("Database connection failed");
     }
 } catch (Exception $e) {
@@ -43,7 +43,7 @@ if(isset($_SESSION['member_id'])) {
                   WHERE Member_MemberID = ? 
                   AND Term = ?
                   AND (Status = 'approved' OR Status = 'pending')";
-    $stmt = Database::$connection->prepare($checkQuery);
+    $stmt = prepare($checkQuery); // Changed from $connection->prepare()
     $stmt->bind_param("ss", $_SESSION['member_id'], $currentYear);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -57,7 +57,7 @@ if(isset($_SESSION['member_id'])) {
 
 // Get member name from database
 $memberQuery = "SELECT Name FROM Member WHERE MemberID = '$memberId'";
-$memberResult = Database::search($memberQuery);
+$memberResult = search($memberQuery); // Already using procedural function
 $userName = 'N/A';
 if ($memberResult && $memberResult->num_rows > 0) {
     $memberData = $memberResult->fetch_assoc();
@@ -68,7 +68,7 @@ if ($memberResult && $memberResult->num_rows > 0) {
 function checkMemberEligibility($memberId) {
     // Check member status
     $statusQuery = "SELECT Status FROM Member WHERE MemberID = '$memberId'";
-    $statusResult = Database::search($statusQuery);
+    $statusResult = search($statusQuery); // Already using procedural function
     
     if ($statusResult && $statusResult->num_rows > 0) {
         $member = $statusResult->fetch_assoc();
@@ -81,7 +81,7 @@ function checkMemberEligibility($memberId) {
     $loanQuery = "SELECT Status, Remain_Loan FROM Loan 
                   WHERE Member_MemberID = '$memberId' 
                   AND (Status = 'pending' OR Status = 'approved')";
-    $loanResult = Database::search($loanQuery);
+    $loanResult = search($loanQuery); // Already using procedural function
     
     if ($loanResult && $loanResult->num_rows > 0) {
         $loan = $loanResult->fetch_assoc();
@@ -96,23 +96,27 @@ function checkMemberEligibility($memberId) {
     return true;
 }
 
-// Generate new Loan ID (L + Year + 3 digits)
-$query = "SELECT LoanID FROM Loan WHERE LoanID LIKE 'L" . $currentYear . "%' ORDER BY LoanID DESC LIMIT 1";
-$result = Database::search($query);
+// Generate new Loan ID (loan + Year + 3 digits)
+$query = "SELECT LoanID FROM Loan WHERE LoanID LIKE 'loan" . $currentYear . "%' ORDER BY LoanID DESC LIMIT 1";
+$result = search($query);
 
 if ($result->num_rows > 0) {
     $lastId = $result->fetch_assoc()['LoanID'];
-    $numericPart = intval(substr($lastId, 4));
-    $newLoanId = "loan" . ($numericPart + 1);
+    // Extract the numeric part after 'loan' + year
+    $yearPart = $currentYear;
+    $remainingPart = substr($lastId, strlen('loan' . $yearPart));
+    $numericPart = intval($remainingPart);
+    $newLoanId = "LN" . $yearPart . sprintf('%0d', $numericPart + 1);
 } else {
-    $newLoanId = "loan1";
+    // First loan of the year
+    $newLoanId = "LN" . $currentYear . "001";
 }
 
 // Fetch all eligible members for guarantor selection
 $eligibleMembersQuery = "SELECT MemberID, Name FROM Member 
                         WHERE MemberID != '$memberId'
                         ORDER BY Name";
-$eligibleMembersResult = Database::search($eligibleMembersQuery);
+$eligibleMembersResult = search($eligibleMembersQuery); // Already using procedural function
 $eligibleMembers = [];
 
 if ($eligibleMembersResult && $eligibleMembersResult->num_rows > 0) {
@@ -174,7 +178,8 @@ if (isset($_POST['apply'])) {
 
     if (empty($errors)) {
         try {
-            Database::$connection->begin_transaction();
+            $conn = getConnection(); // Get the connection using our procedural function
+            $conn->begin_transaction();
 
             // Calculate dates and interest
             $issuedDate = date('Y-m-d');
@@ -191,7 +196,7 @@ if (isset($_POST['apply'])) {
                              '$newLoanId',
                              $amount,
                              $term,
-                             '" . Database::$connection->real_escape_string($reason) . "',
+                             '" . $conn->real_escape_string($reason) . "',
                              '$issuedDate',
                              '$dueDate',
                              0,
@@ -206,7 +211,7 @@ if (isset($_POST['apply'])) {
             // Debug: Print query
             error_log("Loan Query: " . $loanQuery);
             
-            Database::iud($loanQuery);
+            iud($loanQuery); // Already using procedural function
 
             // Insert guarantor records
             $guarantors = [
@@ -231,7 +236,7 @@ if (isset($_POST['apply'])) {
                                  Guaranteed_Count, Loan_LoanID) 
                                  VALUES (
                                      '{$g['prefix']}$newLoanId',
-                                     '" . Database::$connection->real_escape_string($g['name']) . "',
+                                     '" . $conn->real_escape_string($g['name']) . "',
                                      '" . $g['id'] . "',
                                      {$g['status']},
                                      {$g['count']},
@@ -241,17 +246,18 @@ if (isset($_POST['apply'])) {
                 // Debug: Print query
                 error_log("Guarantor Query: " . $guarantorQuery);
                 
-                Database::iud($guarantorQuery);
+                iud($guarantorQuery); // Already using procedural function
             }
 
-            Database::$connection->commit();
+            $conn->commit();
             
             $_SESSION['success_message'] = "Loan application submitted successfully!";
             header("Location: home-member.php?id=" . $newLoanId);
             exit();
 
         } catch (Exception $e) {
-            Database::$connection->rollback();
+            $conn = getConnection(); // Get the connection using our procedural function
+            $conn->rollback();
             $errors['db'] = "Error submitting loan application: " . $e->getMessage();
             error_log("Database Error: " . $e->getMessage());
         }

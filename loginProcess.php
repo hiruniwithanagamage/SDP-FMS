@@ -6,18 +6,18 @@ $Username = $_POST["u"];
 $password = $_POST["p"];
 
 if(empty($Username)){
-    echo ("Please enter your Username");
+    echo json_encode(["status" => "error", "message" => "Please enter your Username"]);
 }else if(strlen($Username) > 100){
-    echo ("Username must have less than 100 characters");
+    echo json_encode(["status" => "error", "message" => "Username must have less than 100 characters"]);
 }else if (!preg_match("/^[a-zA-Z0-9_]{3,100}$/", $Username)) {
-    echo ("Invalid Username");
+    echo json_encode(["status" => "error", "message" => "Invalid Username"]);
 }else if(empty($password)){
-    echo ("Please enter your Password");
+    echo json_encode(["status" => "error", "message" => "Please enter your Password"]);
 }else if(strlen($password) < 5 || strlen($password) > 20){
-    echo ("Invalid Password");
+    echo json_encode(["status" => "error", "message" => "Invalid Password"]);
 }else{
-    // Updated query to check role
-    $rs = Database::search("SELECT u.*, 
+    // Using procedural function
+    $rs = search("SELECT u.*, 
             CASE
                 WHEN u.Admin_AdminID IS NOT NULL THEN 'admin'
                 WHEN u.Member_MemberID IS NOT NULL THEN 'member'
@@ -44,17 +44,16 @@ if(empty($Username)){
             $_SESSION["auditor_id"] = $d["Auditor_AuditorID"];
 
             // Return success with role for redirection
-            $response = array(
+            echo json_encode([
                 "status" => "success",
                 "role" => $d["role"]
-            );
-            echo json_encode($response);
+            ]);
             
         } else {
-            echo ("Invalid Username or Password");
+            echo json_encode(["status" => "error", "message" => "Invalid Username or Password"]);
         }
     }else{
-        echo ("Invalid Username or Password");
+        echo json_encode(["status" => "error", "message" => "Invalid Username or Password"]);
     } 
 }
 ?>

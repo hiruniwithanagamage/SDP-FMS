@@ -5,7 +5,7 @@ require_once "../../../config/database.php";
 // Get current term
 function getCurrentTerm() {
     $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['year'] ?? date('Y');
 }
@@ -31,7 +31,7 @@ function getMemberFines($year, $type = null) {
     $sql .= " GROUP BY m.MemberID, m.Name
         ORDER BY m.Name";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get fine summary for the year
@@ -47,7 +47,7 @@ function getFineSummary($year) {
         FROM Fine
         WHERE YEAR(Date) = $year";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get monthly fine statistics
@@ -63,13 +63,13 @@ function getMonthlyFineStats($year) {
         GROUP BY MONTH(Date)
         ORDER BY month";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get fine amounts from Static table
 function getFineAmounts() {
     $sql = "SELECT late_fine, absent_fine, rules_violation_fine FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     return $result->fetch_assoc();
 }
 

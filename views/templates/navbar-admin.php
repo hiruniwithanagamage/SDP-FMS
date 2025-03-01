@@ -18,7 +18,7 @@
 
    if (isset($userData['Admin_AdminID'])) {
       $memberQuery = "SELECT Name FROM Admin WHERE AdminID = '" . $userData['Admin_AdminID'] . "'";
-      $memberResult = Database::search($memberQuery);
+      $memberResult = search($memberQuery);
       
       if ($memberResult && $memberResult->num_rows > 0) {
          $memberData = $memberResult->fetch_assoc();

@@ -7,7 +7,7 @@ function getTotalBalance() {
     $sql = "SELECT 
         (SELECT COALESCE(SUM(Amount), 0) FROM Payment) - 
         (SELECT COALESCE(SUM(Amount), 0) FROM Expenses) as total_balance";
-    $result = Database::search($sql);
+    $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['total_balance'] ?? 0;
 }
@@ -15,7 +15,7 @@ function getTotalBalance() {
 // Function to get pending loans count
 function getPendingLoansCount() {
     $sql = "SELECT COUNT(*) as count FROM Loan WHERE Status = 'pending'";
-    $result = Database::search($sql);
+    $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['count'] ?? 0;
 }
@@ -23,7 +23,7 @@ function getPendingLoansCount() {
 // Function to get pending death welfare count
 function getPendingWelfareCount() {
     $sql = "SELECT COUNT(*) as count FROM DeathWelfare WHERE Status = 'pending'";
-    $result = Database::search($sql);
+    $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['count'] ?? 0;
 }
@@ -58,7 +58,7 @@ function getRecentTransactions() {
         ORDER BY date DESC
         LIMIT 3";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Function to get payment status counts
@@ -68,14 +68,14 @@ function getPaymentStatusCounts() {
         (SELECT COUNT(*) FROM Fine WHERE IsPaid = 'No') as outstanding_fines,
         (SELECT COUNT(*) FROM Loan WHERE Status = 'pending') as pending_loans";
     
-    $result = Database::search($sql);
+    $result = search($sql);
     return $result->fetch_assoc();
 }
 
 // Get current term
 function getCurrentTerm() {
     $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['year'] ?? date('Y');
 }

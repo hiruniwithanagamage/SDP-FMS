@@ -6,7 +6,7 @@ require_once "../../config/database.php";
 
 // Generate new User ID
 $query = "SELECT UserId FROM User ORDER BY UserId DESC LIMIT 1";
-$result = Database::search($query);
+$result = search($query);
 
 if ($result && $result->num_rows > 0) {
     $row = $result->fetch_assoc();
@@ -28,10 +28,10 @@ $auditorQuery = "SELECT AuditorID, Name FROM Auditor";
 $treasurerQuery = "SELECT TreasurerID, Name FROM Treasurer";
 $memberQuery = "SELECT MemberID, Name FROM Member";
 
-$adminResult = Database::search($adminQuery);
-$auditorResult = Database::search($auditorQuery);
-$treasurerResult = Database::search($treasurerQuery);
-$memberResult = Database::search($memberQuery);
+$adminResult = search($adminQuery);
+$auditorResult = search($auditorQuery);
+$treasurerResult = search($treasurerQuery);
+$memberResult = search($memberQuery);
 
 // Check if form is submitted
 if(isset($_POST['add'])) {
@@ -67,7 +67,7 @@ if(isset($_POST['add'])) {
                         $adminId, $auditorId, $treasurerId, $memberId)";
         
         try {
-            Database::iud($query);
+            iud($query);
             $_SESSION['success_message'] = "User added successfully";
             header("Location: userDetails.php");
             exit();
@@ -75,7 +75,7 @@ if(isset($_POST['add'])) {
             $error = "Error adding user: " . $e->getMessage();
         }
         $query = "SELECT UserId FROM User ORDER BY UserId DESC LIMIT 1";
-            $result = Database::search($query);
+            $result = search($query);
             if ($result && $result->num_rows > 0) {
                 $row = $result->fetch_assoc();
                 if ($row && isset($row['UserId'])) {

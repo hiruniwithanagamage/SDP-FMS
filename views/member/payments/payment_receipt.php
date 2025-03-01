@@ -24,7 +24,7 @@ $paymentQuery = "
     JOIN Member m ON p.Member_MemberID = m.MemberID
     WHERE p.PaymentID = '$paymentId'
 ";
-$paymentResult = Database::search($paymentQuery);
+$paymentResult = search($paymentQuery);
 
 if (!$paymentResult || $paymentResult->num_rows == 0) {
     die("Payment not found");
@@ -67,7 +67,7 @@ function getAdditionalPaymentDetails($paymentId, $paymentType) {
             return null;
     }
 
-    $result = Database::search($query);
+    $result = search($query);
     return $result ? $result->fetch_assoc() : null;
 }
 

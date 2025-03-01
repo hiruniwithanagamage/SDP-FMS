@@ -10,7 +10,7 @@
     $totalMembers = 0;
     try {
         $memberCountQuery = "SELECT COUNT(*) as total FROM Member";
-        $result = Database::search($memberCountQuery);
+        $result = search($memberCountQuery);
         if ($result && $result->num_rows > 0) {
             $totalMembers = $result->fetch_assoc()['total'];
         }
@@ -23,7 +23,7 @@
 
     if (isset($userData['Admin_AdminID'])) {
         $memberQuery = "SELECT Name FROM Admin WHERE AdminID = '" . $userData['Admin_AdminID'] . "'";
-        $memberResult = Database::search($memberQuery);
+        $memberResult = search($memberQuery);
         
         if ($memberResult && $memberResult->num_rows > 0) {
             $memberData = $memberResult->fetch_assoc();

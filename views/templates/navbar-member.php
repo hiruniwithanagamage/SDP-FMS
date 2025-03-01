@@ -18,7 +18,7 @@
 
    if (isset($userData['Member_MemberID'])) {
       $memberQuery = "SELECT Name, Image FROM Member WHERE MemberID = '" . $userData['Member_MemberID'] . "'";
-      $memberResult = Database::search($memberQuery);
+      $memberResult = search($memberQuery);
       
       if ($memberResult && $memberResult->num_rows > 0) {
          $memberData = $memberResult->fetch_assoc();
@@ -32,7 +32,7 @@
 
    if (isset($userData['Treasurer_TreasurerID'])) {
       $treasurerQuery = "SELECT Name FROM Treasurer WHERE TreasurerID = '" . $userData['Treasurer_TreasurerID'] . "'";
-      $treasurerResult = Database::search($treasurerQuery);
+      $treasurerResult = search($treasurerQuery);
       
       if ($treasurerResult && $treasurerResult->num_rows > 0) {
          $treasurerData = $treasurerResult->fetch_assoc();

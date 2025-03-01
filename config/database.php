@@ -1,38 +1,38 @@
 <?php
 
-class Database{
+// Global variable to store the database connection
+$GLOBALS['db_connection'] = null;
 
-    public static $connection;
-
-    public static function setUpConnection(){
-        if(!isset(Database::$connection)){
-            Database::$connection = new mysqli("localhost","root"," ","FMS","3306");
-        }
+// Function to set up the database connection
+function setupConnection() {
+    if (!isset($GLOBALS['db_connection'])) {
+        $GLOBALS['db_connection'] = new mysqli("localhost", "root", " ", "FMS", "3306");
     }
+}
 
-    public static function iud($q){
-        Database::setUpConnection();
-        Database::$connection->query($q);
-    }
+// Function for insert, update, delete operations
+function iud($q) {
+    setupConnection();
+    $GLOBALS['db_connection']->query($q);
+}
 
-    public static function search($q){
-        Database::setUpConnection();
-        $resultset = Database::$connection->query($q);
-        return $resultset;
-    }
+// Function for search operations
+function search($q) {
+    setupConnection();
+    $resultset = $GLOBALS['db_connection']->query($q);
+    return $resultset;
+}
 
-    // Add a new prepared statement method
-    public static function prepare($q) {
-        Database::setUpConnection();
-        return Database::$connection->prepare($q);
-    }
+// Function for prepared statements
+function prepare($q) {
+    setupConnection();
+    return $GLOBALS['db_connection']->prepare($q);
+}
 
-    // Add a method to get the connection
-    public static function getConnection() {
-        Database::setUpConnection();
-        return Database::$connection;
-    }
-
+// Function to get the connection
+function getConnection() {
+    setupConnection();
+    return $GLOBALS['db_connection'];
 }
 
 ?>

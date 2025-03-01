@@ -6,7 +6,7 @@ function createExpenseRecord($loanId, $amount) {
     try {
         // Get treasurer ID from User table
         $treasurerQuery = "SELECT Treasurer_TreasurerID FROM User WHERE UserId = '{$_SESSION['user_id']}'";
-        $treasurerResult = Database::search($treasurerQuery);
+        $treasurerResult = search($treasurerQuery);
         $treasurerData = $treasurerResult->fetch_assoc();
         
         if (!$treasurerData || !$treasurerData['Treasurer_TreasurerID']) {
@@ -17,7 +17,7 @@ function createExpenseRecord($loanId, $amount) {
         $sql = "SELECT ExpenseID FROM Expenses 
                 WHERE ExpenseID LIKE 'EXP%' 
                 ORDER BY ExpenseID DESC LIMIT 1";
-        $result = Database::search($sql);
+        $result = search($sql);
         
         if ($result->num_rows > 0) {
             $lastId = $result->fetch_assoc()['ExpenseID'];
@@ -52,7 +52,7 @@ $query = "SELECT l.*, m.Name as MemberName, m.MemberID
           JOIN Member m ON l.Member_MemberID = m.MemberID 
           WHERE l.Status = 'pending' 
           ORDER BY l.Issued_Date DESC";
-$result = Database::search($query);
+$result = search($query);
 
 // Handle loan approval/rejection
 if(isset($_POST['update_status'])) {
@@ -63,7 +63,7 @@ if(isset($_POST['update_status'])) {
         if($status === 'approved') {
             // Get loan amount
             $loanQuery = "SELECT Amount FROM Loan WHERE LoanID = '$loanId'";
-            $loanResult = Database::search($loanQuery);
+            $loanResult = search($loanQuery);
             $loanData = $loanResult->fetch_assoc();
             
             if($loanData) {

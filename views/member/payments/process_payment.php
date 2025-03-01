@@ -39,14 +39,14 @@ try {
 
     // Get fee structure for the year
     $query = "SELECT * FROM Static WHERE year = $year";
-    $result = Database::search($query);
+    $result = search($query);
     if ($result->num_rows === 0) {
         throw new Exception("Fee structure not found for selected year");
     }
     $feeStructure = $result->fetch_assoc();
 
     // Start transaction
-    Database::iud("START TRANSACTION");
+    iud("START TRANSACTION");
 
     // Generate payment ID
     $paymentId = generatePaymentId();
@@ -80,7 +80,7 @@ try {
                                 WHERE MF.Member_MemberID = '$memberId'
                                 AND MF.Type = 'registration'
                                 AND MF.Term = $year";
-            $regFeePaidResult = Database::search($regFeePaidQuery);
+            $regFeePaidResult = search($regFeePaidQuery);
             $regFeePaid = $regFeePaidResult->fetch_assoc()['total_paid'];
             $remainingRegFee = $feeStructure['registration_fee'] - $regFeePaid;
 
@@ -93,14 +93,14 @@ try {
                                 WHERE Member_MemberID = '$memberId' 
                                 AND Term = $year 
                                 AND Type = 'registration'";
-            $existingFeeResult = Database::search($existingFeeQuery);
+            $existingFeeResult = search($existingFeeQuery);
             
             if ($existingFeeResult->num_rows === 0) {
                 $feeId = generateFeeId();
                 $query = "INSERT INTO MembershipFee (FeeID, Amount, Date, Term, Type, Member_MemberID, IsPaid) 
                         VALUES ('$feeId', " . $feeStructure['registration_fee'] . ", 
                         '$date', $year, 'registration', '$memberId', 'No')";
-                Database::iud($query);
+                iud($query);
             } else {
                 $feeId = $existingFeeResult->fetch_assoc()['FeeID'];
             }
@@ -114,12 +114,12 @@ try {
                     " . ($expireDate ? "'$expireDate'" : "NULL") . ",
                     " . ($cvv ? "'$cvv'" : "NULL") . ", 
                     '$memberId')";
-            Database::iud($query);
+            iud($query);
   // " . ($cardNumber ? "'$cardNumber'" : "NULL") . ", Can be needed because this change into another one
             // Insert into MembershipFeePayment
             $query = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
                     VALUES ('$feeId', '$paymentId')";
-            Database::iud($query);
+            iud($query);
 
             // Check if registration fee is fully paid
             $newTotalPaid = $regFeePaid + $amount;
@@ -128,13 +128,13 @@ try {
                 $query = "UPDATE MembershipFee 
                         SET IsPaid = 'Yes' 
                         WHERE FeeID = '$feeId'";
-                Database::iud($query);
+                iud($query);
 
                 // Update member status
                 $query = "UPDATE Member 
                         SET Status = 'Full Member' 
                         WHERE MemberID = '$memberId'";
-                Database::iud($query);
+                iud($query);
             }
         break;
 
@@ -159,7 +159,7 @@ try {
                     " . (isset($_POST['expire_date']) ? "'" . $_POST['expire_date'] . "'" : "NULL") . ",
                     " . (isset($_POST['cvv']) ? "'" . $_POST['cvv'] . "'" : "NULL") . ", 
                     '$memberId')";
-            Database::iud($query);
+            iud($query);
         
             // Process each selected month
             foreach ($selectedMonths as $month) {
@@ -170,12 +170,12 @@ try {
                 $query = "INSERT INTO MembershipFee (FeeID, Amount, Date, Term, Type, Member_MemberID, IsPaid) 
                          VALUES ('$feeId', " . $feeStructure['monthly_fee'] . ", 
                          '$monthDate', $year, 'monthly', '$memberId', 'Yes')";
-                Database::iud($query);
+                iud($query);
                 
                 // Link the fee to the payment
                 $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
                              VALUES ('$feeId', '$paymentId')";
-                Database::iud($linkQuery);
+                iud($linkQuery);
             }
             break;
 
@@ -191,7 +191,7 @@ try {
                      WHERE FineID = '$fineId' 
                      AND Member_MemberID = '$memberId' 
                      AND IsPaid = 'No'";
-            $result = Database::search($query);
+            $result = search($query);
             
             if ($result->num_rows === 0) {
                 throw new Exception("Invalid fine payment");
@@ -207,7 +207,7 @@ try {
                      IsPaid = 'Yes',
                      Payment_PaymentID = '$paymentId' 
                      WHERE FineID = '$fineId'";
-            Database::iud($query);
+            iud($query);
             break;
 
         case 'loan':
@@ -222,7 +222,7 @@ try {
                      WHERE LoanID = '$loanId' 
                      AND Member_MemberID = '$memberId' 
                      AND Status = 'approved'";
-            $result = Database::search($query);
+            $result = search($query);
             
             if ($result->num_rows === 0) {
                 throw new Exception("Invalid loan payment");
@@ -246,11 +246,11 @@ try {
                      Paid_Interest = Paid_Interest + $interestPayment,
                      Remain_Interest = Remain_Interest - $interestPayment
                      WHERE LoanID = '$loanId'";
-            Database::iud($query);
+            iud($query);
 
             // Insert into LoanPayment table
             $query = "INSERT INTO LoanPayment (LoanID, PaymentID) VALUES ('$loanId', '$paymentId')";
-            Database::iud($query);
+            iud($query);
             break;
 
         default:
@@ -258,7 +258,7 @@ try {
     }
 
     // Commit transaction
-    Database::iud("COMMIT");
+    iud("COMMIT");
     
     $_SESSION['last_payment_id'] = $paymentId;
     $_SESSION['success_message'] = "Payment processed successfully";
@@ -267,7 +267,7 @@ try {
 
 } catch (Exception $e) {
     // Rollback transaction on error
-    Database::iud("ROLLBACK");
+    iud("ROLLBACK");
     $_SESSION['error_message'] = "Error processing payment: " . $e->getMessage();
     header('Location: ../memberPayment.php');
     exit();
@@ -322,10 +322,10 @@ function validateFileUpload($file) {
 function generatePaymentId() {
     try {
         // Set the isolation level before starting the transaction
-        Database::iud("SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+        iud("SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
         
         // Now start the transaction
-        Database::iud("START TRANSACTION");
+        iud("START TRANSACTION");
         
         // Get the highest ID with a lock
         $query = "SELECT CAST(SUBSTRING(PaymentID, 4) AS UNSIGNED) as max_num 
@@ -334,7 +334,7 @@ function generatePaymentId() {
                  ORDER BY PaymentID DESC 
                  LIMIT 1 FOR UPDATE";
                  
-        $result = Database::search($query);
+        $result = search($query);
         
         // Determine the next number
         if ($result && $result->num_rows > 0) {
@@ -349,27 +349,27 @@ function generatePaymentId() {
         
         // Verify it doesn't exist (double check)
         $verifyQuery = "SELECT COUNT(*) as count FROM Payment WHERE PaymentID = '$newId'";
-        $verifyResult = Database::search($verifyQuery);
+        $verifyResult = search($verifyQuery);
         
         if ($verifyResult->fetch_assoc()['count'] > 0) {
-            Database::iud("ROLLBACK");
+            iud("ROLLBACK");
             throw new Exception("Generated ID already exists: " . $newId);
         }
         
         // Commit the transaction
-        Database::iud("COMMIT");
+        iud("COMMIT");
         
         return $newId;
         
     } catch (Exception $e) {
-        Database::iud("ROLLBACK");
+        iud("ROLLBACK");
         throw new Exception("Error generating payment ID: " . $e->getMessage());
     }
 }
 
 function generateFeeId() {
     $query = "SELECT FeeID FROM MembershipFee ORDER BY FeeID DESC LIMIT 1";
-    $result = Database::search($query);
+    $result = search($query);
     
     if ($result && $result->num_rows > 0) {
         $row = $result->fetch_assoc();
@@ -387,7 +387,7 @@ function checkDuplicatePayment($memberId, $paymentType, $year) {
               AND Payment_Type = '$paymentType' 
               AND Term = $year";
     
-    $result = Database::search($query);
+    $result = search($query);
     $row = $result->fetch_assoc();
     
     if ($row['count'] > 0) {

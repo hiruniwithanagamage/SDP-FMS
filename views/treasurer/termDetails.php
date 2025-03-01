@@ -12,7 +12,7 @@ if($successMessage) {
 
 // Fetch all terms
 $query = "SELECT * FROM Static ORDER BY year DESC";
-$result = Database::search($query);
+$result = search($query);
 
 // Handle Update
 if(isset($_POST['update'])) {

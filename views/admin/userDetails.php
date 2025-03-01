@@ -59,7 +59,7 @@ if ($sortBy !== 'all') {
 $baseQuery .= " ORDER BY u.UserId";
 
 // Execute the query
-$result = Database::search($baseQuery);
+$result = search($baseQuery);
 
 // Fetch role options for the edit modal
 $adminQuery = "SELECT AdminID, Name FROM Admin";
@@ -67,10 +67,10 @@ $auditorQuery = "SELECT AuditorID, Name FROM Auditor";
 $treasurerQuery = "SELECT TreasurerID, Name FROM Treasurer";
 $memberQuery = "SELECT MemberID, Name FROM Member";
 
-$adminResult = Database::search($adminQuery);
-$auditorResult = Database::search($auditorQuery);
-$treasurerResult = Database::search($treasurerQuery);
-$memberResult = Database::search($memberQuery);
+$adminResult = search($adminQuery);
+$auditorResult = search($auditorQuery);
+$treasurerResult = search($treasurerQuery);
+$memberResult = search($memberQuery);
 
 // Handle Update
 if(isset($_POST['update'])) {
@@ -91,7 +91,7 @@ if(isset($_POST['update'])) {
                    WHERE UserId = '$userId'";
     
     try {
-        Database::iud($updateQuery);
+        iud($updateQuery);
         $_SESSION['success_message'] = "User updated successfully";
         header("Location: " . $_SERVER['PHP_SELF']);
         exit();
@@ -107,7 +107,7 @@ if(isset($_POST['delete'])) {
     $deleteQuery = "DELETE FROM User WHERE UserId = '$userId'";
     
     try {
-        Database::iud($deleteQuery);
+        iud($deleteQuery);
         $_SESSION['success_message'] = "User deleted successfully";
         header("Location: " . $_SERVER['PHP_SELF']);
         exit();
@@ -125,6 +125,8 @@ if(isset($_POST['delete'])) {
     <title>Manage Users</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="../../assets/css/adminActorDetails.css">
+    <link rel="stylesheet" href="../../assets/css/alerts.css">
+    <script src="../../assets/js/alertHandler.js"></script>
 </head>
 <body>
     <div class="main-container">

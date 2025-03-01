@@ -12,7 +12,7 @@ if($successMessage) {
 
 // Fetch all auditors
 $query = "SELECT * FROM Auditor ORDER BY Term DESC";
-$result = Database::search($query);
+$result = search($query);
 
 // Handle Update
 if(isset($_POST['update'])) {
@@ -27,7 +27,8 @@ if(isset($_POST['update'])) {
                    isActive = '$isActive'
                    WHERE AuditorID = '$auditorId'";
     
-    Database::iud($updateQuery);
+    iud($updateQuery);
+    $_SESSION['success_message'] = "Auditor updated successfully";
     header("Location: " . $_SERVER['PHP_SELF']);
     exit();
 }
@@ -39,7 +40,9 @@ if(isset($_POST['delete'])) {
     $deleteQuery = "DELETE FROM Auditor WHERE AuditorID = '$auditorId'";
     
     try {
-        Database::iud($deleteQuery);
+        iud($deleteQuery);
+        $_SESSION['success_message'] = "Auditor deleted successfully";
+        header("Location: " . $_SERVER['PHP_SELF']);
         $deleteSuccess = true;
     } catch(Exception $e) {
         $deleteError = "Cannot delete this auditor. They may have associated records.";
@@ -55,6 +58,8 @@ if(isset($_POST['delete'])) {
     <title>Manage Auditors</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="../../assets/css/adminActorDetails.css">
+    <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="../../assets/js/alertHandler.js"></script>
 </head>
 <body>
     <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">

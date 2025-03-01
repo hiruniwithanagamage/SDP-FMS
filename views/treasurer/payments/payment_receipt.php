@@ -25,7 +25,7 @@ $paymentQuery = "
     JOIN Static s ON p.Term = s.year
     WHERE p.PaymentID = '$paymentId'
 ";
-$paymentResult = Database::search($paymentQuery);
+$paymentResult = search($paymentQuery);
 
 if (!$paymentResult || $paymentResult->num_rows == 0) {
     die("Payment not found");

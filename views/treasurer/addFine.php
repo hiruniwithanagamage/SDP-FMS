@@ -6,7 +6,7 @@ require_once "../../config/database.php";
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Generate sequential Fine ID (Fine001, Fine002, etc.)
     $countQuery = "SELECT COUNT(*) as count FROM Fine";
-    $countResult = Database::search($countQuery);
+    $countResult = search($countQuery);
     $fineCount = $countResult->fetch_assoc()['count'] + 1;
     $fineID = "Fine" . str_pad($fineCount, 3, "0", STR_PAD_LEFT);
     
@@ -32,7 +32,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
 // Get current term
 $termQuery = "SELECT * FROM Static ORDER BY year DESC LIMIT 1";
-$termResult = Database::search($termQuery);
+$termResult = search($termQuery);
 $termData = $termResult->fetch_assoc();
 
 // Check if term data exists
@@ -42,7 +42,7 @@ if (!$termData) {
 
 // Get all members for dropdown
 $membersQuery = "SELECT MemberID, Name FROM Member";
-$membersResult = Database::search($membersQuery);
+$membersResult = search($membersQuery);
 
 // Check if we have members
 if ($membersResult->num_rows == 0) {

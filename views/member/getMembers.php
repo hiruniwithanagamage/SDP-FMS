@@ -17,7 +17,7 @@ try {
              OR MemberID LIKE '$searchTerm' 
              LIMIT $perPage OFFSET $offset";
 
-    $result = Database::search($query);
+    $result = search($query);
     
     $members = [];
     while ($row = $result->fetch_assoc()) {

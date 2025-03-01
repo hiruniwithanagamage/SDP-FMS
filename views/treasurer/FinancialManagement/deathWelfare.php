@@ -5,7 +5,7 @@ require_once "../../../config/database.php";
 // Get current term
 function getCurrentTerm() {
     $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['year'] ?? date('Y');
 }
@@ -56,7 +56,7 @@ function getMemberWelfare($year) {
         GROUP BY m.MemberID, m.Name
         ORDER BY m.Name";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get welfare summary for the year
@@ -70,7 +70,7 @@ function getWelfareSummary($year) {
         FROM DeathWelfare
         WHERE YEAR(Date) = $year";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get monthly welfare statistics
@@ -85,13 +85,13 @@ function getMonthlyWelfareStats($year) {
         GROUP BY MONTH(Date)
         ORDER BY month";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get welfare amount from Static table
 function getWelfareAmount() {
     $sql = "SELECT death_welfare FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     return $result->fetch_assoc();
 }
 

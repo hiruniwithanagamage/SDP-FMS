@@ -11,7 +11,7 @@ $term = isset($_GET['term']) ? $_GET['term'] : '';
 
 // Get all available terms
 $termQuery = "SELECT DISTINCT Term FROM Expenses ORDER BY Term DESC";
-$termResult = Database::search($termQuery);
+$termResult = search($termQuery);
 $terms = [];
 if ($termResult && $termResult->num_rows > 0) {
     while ($termRow = $termResult->fetch_assoc()) {
@@ -46,7 +46,7 @@ if (!empty($term)) {
 $baseQuery .= " ORDER BY e.Date DESC";
 
 // Execute query
-$result = Database::search($baseQuery);
+$result = search($baseQuery);
 
 // Calculate total expenses and category breakdown
 $totalExpenses = 0;
@@ -54,7 +54,7 @@ $categoryTotals = array();
 
 if ($result && $result->num_rows > 0) {
     // Create a copy of the result to iterate through for calculations
-    $calcResult = Database::search($baseQuery);
+    $calcResult = search($baseQuery);
     
     while ($row = $calcResult->fetch_assoc()) {
         $totalExpenses += $row['Amount'];
@@ -73,7 +73,7 @@ if (isset($_GET['delete']) && isset($_GET['id'])) {
     
     // Check if this expense is linked to a Death Welfare
     $checkDeathWelfareQuery = "SELECT * FROM DeathWelfare WHERE Expense_ExpenseID = '$expenseId'";
-    $checkResult = Database::search($checkDeathWelfareQuery);
+    $checkResult = search($checkDeathWelfareQuery);
     
     if ($checkResult && $checkResult->num_rows > 0) {
         $_SESSION['error_message'] = "Cannot delete this expense as it is linked to a Death Welfare record.";

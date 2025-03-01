@@ -4,7 +4,7 @@ require_once "../../../config/database.php";
 
 // Generate new Expense ID
 $query = "SELECT ExpenseID FROM Expenses ORDER BY ExpenseID DESC LIMIT 1";
-$result = Database::search($query);
+$result = search($query);
 
 if ($result && $result->num_rows > 0) {
     $row = $result->fetch_assoc();
@@ -24,7 +24,7 @@ if ($result && $result->num_rows > 0) {
 
 // Get current treasurer
 $treasurerQuery = "SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1";
-$treasurerResult = Database::search($treasurerQuery);
+$treasurerResult = search($treasurerQuery);
 $treasurerId = "";
 
 if ($treasurerResult && $treasurerResult->num_rows > 0) {
@@ -34,7 +34,7 @@ if ($treasurerResult && $treasurerResult->num_rows > 0) {
 
 // Get current term
 $termQuery = "SELECT Term FROM Treasurer WHERE isActive = 1 LIMIT 1";
-$termResult = Database::search($termQuery);
+$termResult = search($termQuery);
 $currentTerm = 1;
 
 if ($termResult && $termResult->num_rows > 0) {
@@ -98,7 +98,7 @@ if(isset($_POST['add'])) {
 
             // Regenerate next Expense ID
             $query = "SELECT ExpenseID FROM Expenses ORDER BY ExpenseID DESC LIMIT 1";
-            $result = Database::search($query);
+            $result = search($query);
             if ($result && $result->num_rows > 0) {
                 $row = $result->fetch_assoc();
                 if ($row && isset($row['ExpenseID'])) {

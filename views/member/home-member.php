@@ -16,7 +16,7 @@ if (isset($_SESSION['u'])) {
         
         // Get member details
         $memberQuery = "SELECT * FROM Member WHERE MemberID = '" . $memberID . "'";
-        $memberResult = Database::search($memberQuery);
+        $memberResult = search($memberQuery);
 
         // if ($memberResult) {
         //     echo "Query executed successfully<br>";
@@ -42,7 +42,7 @@ if (isset($_SESSION['u'])) {
                 COALESCE(SUM(Remain_Loan + Remain_Interest), 0) as total_dues 
                 FROM Loan 
                 WHERE Member_MemberID = '" . $memberID . "'";
-            $duesResult = Database::search($duesQuery);
+            $duesResult = search($duesQuery);
             $duesData = $duesResult->fetch_assoc();
             $totalDues = $duesData['total_dues'];
         }

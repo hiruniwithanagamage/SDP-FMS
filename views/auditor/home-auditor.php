@@ -13,12 +13,12 @@
         try {
             // Get current term from Static table
             $termSql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
-            $termResult = Database::search($termSql);
+            $termResult = search($termSql);
             $currentTerm = $termResult ? $termResult->fetch_assoc()['year'] : date('Y');
 
             // Pending Reports Query
             $pendingSql = "SELECT COUNT(*) as total FROM FinancialReportVersions WHERE Status = 'pending' AND Term = $currentTerm";
-            $pendingResult = Database::search($pendingSql);
+            $pendingResult = search($pendingSql);
             if ($pendingResult && $pendingResult->num_rows > 0) {
                 $row = $pendingResult->fetch_assoc();
                 $stats['pending'] = $row['total'];
@@ -26,7 +26,7 @@
 
             // Reviewed Reports Query
             $reviewedSql = "SELECT COUNT(*) as total FROM FinancialReportVersions WHERE Status = 'reviewed' AND Term = $currentTerm";
-            $reviewedResult = Database::search($reviewedSql);
+            $reviewedResult = search($reviewedSql);
             if ($reviewedResult && $reviewedResult->num_rows > 0) {
                 $row = $reviewedResult->fetch_assoc();
                 $stats['reviewed'] = $row['total'];
@@ -34,7 +34,7 @@
 
             // Approved Reports Query
             $approvedSql = "SELECT COUNT(*) as total FROM FinancialReportVersions WHERE Status = 'approved' AND Term = $currentTerm";
-            $approvedResult = Database::search($approvedSql);
+            $approvedResult = search($approvedSql);
             if ($approvedResult && $approvedResult->num_rows > 0) {
                 $row = $approvedResult->fetch_assoc();
                 $stats['approved'] = $row['total'];
@@ -52,7 +52,7 @@
 
     // Get current term
     $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     $currentTerm = "2025"; // Default fallback
     if ($result && $result->num_rows > 0) {
         $row = $result->fetch_assoc();
@@ -71,7 +71,7 @@
         try {
             // Membership Fee
             $membershipFeeSql = "SELECT SUM(Amount) as total FROM MembershipFee WHERE Term = $term AND IsPaid = 'Yes'";
-            $membershipFeeResult = Database::search($membershipFeeSql);
+            $membershipFeeResult = search($membershipFeeSql);
             if ($membershipFeeResult && $membershipFeeResult->num_rows > 0) {
                 $row = $membershipFeeResult->fetch_assoc();
                 $stats['membership_fee'] = $row['total'] ?? 0;
@@ -79,7 +79,7 @@
 
             // Loans
             $loanSql = "SELECT SUM(Amount) as total FROM Loan WHERE Term = $term AND Status = 'approved'";
-            $loanResult = Database::search($loanSql);
+            $loanResult = search($loanSql);
             if ($loanResult && $loanResult->num_rows > 0) {
                 $row = $loanResult->fetch_assoc();
                 $stats['loans'] = $row['total'] ?? 0;
@@ -87,7 +87,7 @@
 
             // Death Welfare
             $deathWelfareSql = "SELECT SUM(Amount) as total FROM DeathWelfare WHERE Term = $term AND Status = 'approved'";
-            $deathWelfareResult = Database::search($deathWelfareSql);
+            $deathWelfareResult = search($deathWelfareSql);
             if ($deathWelfareResult && $deathWelfareResult->num_rows > 0) {
                 $row = $deathWelfareResult->fetch_assoc();
                 $stats['death_welfare'] = $row['total'] ?? 0;
@@ -95,7 +95,7 @@
 
             // Fines
             $finesSql = "SELECT SUM(Amount) as total FROM Fine WHERE Term = $term AND IsPaid = 'Yes'";
-            $finesResult = Database::search($finesSql);
+            $finesResult = search($finesSql);
             if ($finesResult && $finesResult->num_rows > 0) {
                 $row = $finesResult->fetch_assoc();
                 $stats['fines'] = $row['total'] ?? 0;

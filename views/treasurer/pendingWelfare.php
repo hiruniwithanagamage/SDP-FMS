@@ -7,7 +7,7 @@ function generateExpenseId() {
     $sql = "SELECT ExpenseID FROM Expenses 
             WHERE ExpenseID LIKE 'EXP%' 
             ORDER BY ExpenseID DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     
     if ($result->num_rows > 0) {
         $lastId = $result->fetch_assoc()['ExpenseID'];
@@ -26,7 +26,7 @@ function generateExpenseId() {
 
 function createExpenseRecord($welfareId, $amount) {
     $treasurerQuery = "SELECT Treasurer_TreasurerID FROM User WHERE UserId = '{$_SESSION['user_id']}'";
-    $treasurerResult = Database::search($treasurerQuery);
+    $treasurerResult = search($treasurerQuery);
     $treasurerData = $treasurerResult->fetch_assoc();
     
     if (!$treasurerData || !$treasurerData['Treasurer_TreasurerID']) {
@@ -56,7 +56,7 @@ $query = "SELECT dw.*, m.Name as MemberName, m.MemberID
           JOIN Member m ON dw.Member_MemberID = m.MemberID 
           WHERE dw.Status = 'pending' 
           ORDER BY dw.Date DESC";
-$result = Database::search($query);
+$result = search($query);
 
 // Replace the existing approval handling code with this
 if(isset($_POST['update_status'])) {
@@ -67,7 +67,7 @@ if(isset($_POST['update_status'])) {
         // Start by getting welfare amount if it's being approved
         if($status === 'approved') {
             $welfareQuery = "SELECT Amount FROM DeathWelfare WHERE WelfareID = '$welfareId'";
-            $welfareResult = Database::search($welfareQuery);
+            $welfareResult = search($welfareQuery);
             $welfareData = $welfareResult->fetch_assoc();
             
             if($welfareData) {

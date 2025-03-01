@@ -4,7 +4,7 @@ require_once "../../config/database.php";
 
 // Generate new Treasurer ID
 $query = "SELECT TreasurerID FROM Treasurer ORDER BY TreasurerID DESC LIMIT 1";
-$result = Database::search($query);
+$result = search($query);
 
 if ($result && $result->num_rows > 0) {
     $row = $result->fetch_assoc();
@@ -28,33 +28,31 @@ if(isset($_POST['add'])) {
     $term = $_POST['term'];
     
     // Validate inputs
-    if(empty($name) || empty($treasurerId) || empty($term)) {
-        $error = "All fields are required";
+    if(empty($name)) {
+        $error = "Name is required";
+    } elseif(empty($term)) {
+        $error = "Term is required";
+    } elseif(!is_numeric($term) || intval($term) <= 0) {
+        $error = "Term must be a positive number";
     } else {
-        // Insert into Treasurer table
-        $query = "INSERT INTO Treasurer (TreasurerID, Name, Term, isActive) 
-                 VALUES ('" . $treasurerId . "', '" . $name . "', " . $term . ", 1)";
-        
         try {
-            Database::iud($query);
-            $_SESSION['success_message'] = "Auditor added successfully";
+            $conn = getConnection();
             
-            // Redirect to treasurerDetails.php
+            // Use prepared statement for insert
+            $stmt = $conn->prepare("INSERT INTO Treasurer (TreasurerID, Name, Term, isActive) VALUES (?, ?, ?, 1)");
+            $term = intval($term);
+            $stmt->bind_param("ssi", $treasurerId, $name, $term);
+            $stmt->execute();
+            
+            if($stmt->affected_rows > 0) {
+                $_SESSION['success_message'] = "Treasurer added successfully";
+            } else {
+                $error = "Failed to add treasurer";
+            }
+            $stmt->close();
+            
             header("Location: treasurerDetails.php");
             exit();
-
-            // Regenerate next Treasurer ID
-            $query = "SELECT TreasurerD FROM Treasurer ORDER BY TreasurerID DESC LIMIT 1";
-            $result = Database::search($query);
-            if ($result && $result->num_rows > 0) {
-                $row = $result->fetch_assoc();
-                if ($row && isset($row['TreasurerID'])) {
-                    $lastId = $row['TreasurerID'];
-                    $numericPart = preg_replace('/[^0-9]/', '', $lastId);
-                    $newNumericPart = intval($numericPart) + 1;
-                    $newAuditorId = "tres" . $newNumericPart;
-                }
-            }
         } catch(Exception $e) {
             $error = "Error adding treasurer: " . $e->getMessage();
         }

@@ -35,7 +35,7 @@ function validateDOB($dob) {
 
 // Generate new Member ID
 $query = "SELECT MemberID FROM Member ORDER BY MemberID DESC LIMIT 1";
-$result = Database::search($query);
+$result = search($query);
 
 if ($result->num_rows > 0) {
     $lastId = $result->fetch_assoc()['MemberID'];
@@ -104,8 +104,9 @@ if (isset($_POST['add'])) {
     }
 
     // Check for duplicate NIC
-    $checkNICQuery = "SELECT COUNT(*) as count FROM Member WHERE NIC = '$nic'";
-    $result = Database::search($checkNICQuery);
+    $conn = getConnection();
+    $checkNICQuery = "SELECT COUNT(*) as count FROM Member WHERE NIC = '" . $conn->real_escape_string($nic) . "'";
+    $result = search($checkNICQuery);
     if ($result->fetch_assoc()['count'] > 0) {
         $errors['nic'] = "This NIC is already registered";
     }
@@ -126,16 +127,25 @@ if (isset($_POST['add'])) {
     if (empty($errors)) {
         try {
             // Begin transaction
-            Database::$connection->begin_transaction();
+            $conn = getConnection(); // Get the database connection
+            $conn->begin_transaction();
 
-            $mobileValue = $mobile === null ? "NULL" : $mobile;
+            $mobileValue = $mobile === null ? "NULL" : "'" . $conn->real_escape_string($mobile) . "'";
 
             $insertQuery = "INSERT INTO Member (MemberID, Name, NIC, DoB, Address, Mobile_Number, 
-                          No_of_Family_Members, Other_Members, Status, Joined_Date) 
-                          VALUES ('$newMemberId', '$name', '$nic', '$dob', '$address', $mobileValue, 
-                          $familyMembers, $otherMembers, '$status', CURRENT_DATE())";
+                        No_of_Family_Members, Other_Members, Status, Joined_Date) 
+                        VALUES ('" . $conn->real_escape_string($newMemberId) . "', 
+                                '" . $conn->real_escape_string($name) . "', 
+                                '" . $conn->real_escape_string($nic) . "', 
+                                '" . $conn->real_escape_string($dob) . "', 
+                                '" . $conn->real_escape_string($address) . "', 
+                                $mobileValue, 
+                                " . intval($familyMembers) . ", 
+                                " . intval($otherMembers) . ", 
+                                '" . $conn->real_escape_string($status) . "', 
+                                CURRENT_DATE())";
 
-            Database::iud($insertQuery);
+            iud($insertQuery);
 
             // Handle file upload if exists
             if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === 0) {
@@ -144,13 +154,14 @@ if (isset($_POST['add'])) {
 
                 if (move_uploaded_file($_FILES['profile_photo']['tmp_name'], $uploadPath)) {
                     // Update member record with image path
-                    $updateImageQuery = "UPDATE Member SET Image = '$fileName' WHERE MemberID = '$newMemberId'";
-                    Database::iud($updateImageQuery);
+                    $updateImageQuery = "UPDATE Member SET Image = '" . $conn->real_escape_string($fileName) . "' 
+                    WHERE MemberID = '" . $conn->real_escape_string($newMemberId) . "'";
+                    iud($updateImageQuery);
                 }
             }
 
             // Commit transaction
-            Database::$connection->commit();
+            $conn->commit();
             
             $_SESSION['success_message'] = "Member added successfully!";
             header("Location: memberDetails.php");
@@ -158,7 +169,8 @@ if (isset($_POST['add'])) {
 
         } catch (Exception $e) {
             // Rollback transaction on error
-            Database::$connection->rollback();
+            $conn = getConnection(); // Get the database connection
+            $conn->rollback();
             $errors['db'] = "Error adding member: " . $e->getMessage();
         }
     }
@@ -174,6 +186,8 @@ if (isset($_POST['add'])) {
     <title>Add New Member</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="../../assets/js/alertHandler.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -313,18 +327,6 @@ if (isset($_POST['add'])) {
 
         input.error {
             border-color: #dc3545;
-        }
-
-        .alert {
-            padding: 1rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-        }
-
-        .alert-danger {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
         }
 
         @media (max-width: 768px) {

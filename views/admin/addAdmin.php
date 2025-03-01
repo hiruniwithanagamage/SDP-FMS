@@ -4,7 +4,7 @@ require_once "../../config/database.php";
 
 // Generate new Admin ID
 $query = "SELECT AdminID FROM Admin ORDER BY AdminID DESC LIMIT 1";
-$result = Database::search($query);
+$result = search($query);
 
 if ($result && $result->num_rows > 0) {
     $row = $result->fetch_assoc();
@@ -39,13 +39,18 @@ if(isset($_POST['add'])) {
     }
     
     if(empty($errors)) {
-        // Prepare SQL insert statement
+        // Get database connection for escaping strings
+        $conn = getConnection();
+
+        // Prepare SQL insert statement with escaped values
         $query = "INSERT INTO Admin (AdminID, Name, Contact_Number) 
-                  VALUES ('" . $adminId . "', '" . $name . "', '" . $contactNumber . "')";
-        
+                VALUES ('" . $conn->real_escape_string($adminId) . "', 
+                        '" . $conn->real_escape_string($name) . "', 
+                        '" . $conn->real_escape_string($contactNumber) . "')";
+                
         try {
             // Use the existing database method for insert/update/delete
-            Database::iud($query);
+            iud($query);
             
             // Set session message
             $_SESSION['success_message'] = "Admin added successfully";
@@ -71,6 +76,8 @@ if(isset($_POST['add'])) {
     <title>Add Admin</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="../../assets/js/alertHandler.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -150,24 +157,6 @@ if(isset($_POST['add'])) {
 
         .btn-cancel:hover {
             background-color: #f5f7fa;
-        }
-
-        .alert {
-            padding: 1rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-        }
-
-        .alert-error {
-            background-color: #ffebee;
-            color: #c62828;
-            border: 1px solid #ffcdd2;
-        }
-
-        .alert-success {
-            background-color: #e8f5e9;
-            color: #2e7d32;
-            border: 1px solid #c8e6c9;
         }
     </style>
 </head>

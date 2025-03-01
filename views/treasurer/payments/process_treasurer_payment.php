@@ -33,7 +33,7 @@ try {
 
     // Get fee structure for the year
     $query = "SELECT * FROM Static WHERE year = $year";
-    $result = Database::search($query);
+    $result = search($query);
     if ($result->num_rows === 0) {
         throw new Exception("Fee structure not found for selected year");
     }
@@ -70,7 +70,7 @@ try {
                                 WHERE MF.Member_MemberID = '$memberId'
                                 AND MF.Type = 'registration'
                                 AND MF.Term = $year";
-            $regFeePaidResult = Database::search($regFeePaidQuery);
+            $regFeePaidResult = search($regFeePaidQuery);
             $regFeePaid = $regFeePaidResult->fetch_assoc()['total_paid'];
             $remainingRegFee = $feeStructure['registration_fee'] - $regFeePaid;
 
@@ -83,7 +83,7 @@ try {
                                 WHERE Member_MemberID = '$memberId' 
                                 AND Term = $year 
                                 AND Type = 'registration'";
-            $existingFeeResult = Database::search($existingFeeQuery);
+            $existingFeeResult = search($existingFeeQuery);
             
             if ($existingFeeResult->num_rows === 0) {
                 $feeId = generateFeeId();
@@ -187,7 +187,7 @@ try {
                          WHERE FineID = '$fineId' 
                          AND Member_MemberID = '$memberId' 
                          AND IsPaid = 'No'";
-            $result = Database::search($fineQuery);
+            $result = search($fineQuery);
             
             if ($result->num_rows === 0) {
                 throw new Exception("Invalid fine payment");
@@ -218,7 +218,7 @@ try {
                          WHERE LoanID = '$loanId' 
                          AND Member_MemberID = '$memberId' 
                          AND Status = 'approved'";
-            $result = Database::search($loanQuery);
+            $result = search($loanQuery);
             
             if ($result->num_rows === 0) {
                 throw new Exception("Invalid loan payment");
@@ -337,7 +337,7 @@ function generatePaymentId() {
                  ORDER BY PaymentID DESC 
                  LIMIT 1 FOR UPDATE";
                  
-        $result = Database::search($query);
+        $result = search($query);
         
         // Determine the next number
         if ($result && $result->num_rows > 0) {
@@ -352,7 +352,7 @@ function generatePaymentId() {
         
         // Verify it doesn't exist (double check)
         $verifyQuery = "SELECT COUNT(*) as count FROM Payment WHERE PaymentID = '$newId'";
-        $verifyResult = Database::search($verifyQuery);
+        $verifyResult = search($verifyQuery);
         
         if ($verifyResult->fetch_assoc()['count'] > 0) {
             Database::iud("ROLLBACK");
@@ -372,7 +372,7 @@ function generatePaymentId() {
 
 function generateFeeId() {
     $query = "SELECT FeeID FROM MembershipFee ORDER BY FeeID DESC LIMIT 1";
-    $result = Database::search($query);
+    $result = search($query);
     
     if ($result && $result->num_rows > 0) {
         $row = $result->fetch_assoc();
@@ -390,7 +390,7 @@ function checkDuplicatePayment($memberId, $paymentType, $year) {
               AND Payment_Type = '$paymentType' 
               AND Term = $year";
     
-    $result = Database::search($query);
+    $result = search($query);
     $row = $result->fetch_assoc();
     
     if ($row['count'] > 0) {

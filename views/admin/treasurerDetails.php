@@ -10,9 +10,18 @@ if($successMessage) {
     unset($_SESSION['success_message']);
 }
 
+// Error message handling
+$errorMessage = isset($_SESSION['error_message']) ? $_SESSION['error_message'] : null;
+if($errorMessage) {
+    unset($_SESSION['error_message']);
+}
+
+// Get database connection
+$conn = getConnection();
+
 // Fetch all treasurers
 $query = "SELECT * FROM Treasurer ORDER BY Term DESC";
-$result = Database::search($query);
+$result = search($query);
 
 // Handle Update
 if(isset($_POST['update'])) {
@@ -20,14 +29,36 @@ if(isset($_POST['update'])) {
     $name = $_POST['name'];
     $term = $_POST['term'];
     $isActive = $_POST['is_active'];
+
+    // Add validation before updating
+    if(empty($name) || !is_numeric($term) || ($isActive != '0' && $isActive != '1')) {
+        $_SESSION['error_message'] = "Invalid input data";
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit();
+    }
+
+    try {
+        // Get connection
+        $conn = getConnection();
+        
+        // Use prepared statement for update
+        $stmt = $conn->prepare("UPDATE Treasurer SET Name = ?, Term = ?, isActive = ? WHERE TreasurerID = ?");
+        $term = intval($term);
+        $isActive = intval($isActive);
+        $stmt->bind_param("siis", $name, $term, $isActive, $treasurerId);
+        $stmt->execute();
+        
+        // Check if update was successful
+        if($stmt->affected_rows > 0) {
+            $_SESSION['success_message'] = "Treasurer updated successfully";
+        } else {
+            $_SESSION['success_message'] = "No changes were made";
+        }
+        $stmt->close();
+    } catch(Exception $e) {
+        $_SESSION['error_message'] = "Error updating treasurer: " . $e->getMessage();
+    }
     
-    $updateQuery = "UPDATE Treasurer SET 
-                   Name = '$name',
-                   Term = '$term',
-                   isActive = '$isActive'
-                   WHERE TreasurerID = '$treasurerId'";
-    
-    Database::iud($updateQuery);
     header("Location: " . $_SERVER['PHP_SELF']);
     exit();
 }
@@ -36,14 +67,28 @@ if(isset($_POST['update'])) {
 if(isset($_POST['delete'])) {
     $treasurerId = $_POST['treasurer_id'];
     
-    $deleteQuery = "DELETE FROM Treasurer WHERE TreasurerID = '$treasurerId'";
-    
     try {
-        Database::iud($deleteQuery);
-        $deleteSuccess = true;
+        // Get connection
+        $conn = getConnection();
+        
+        // Use prepared statement for delete
+        $stmt = $conn->prepare("DELETE FROM Treasurer WHERE TreasurerID = ?");
+        $stmt->bind_param("s", $treasurerId);
+        $stmt->execute();
+        
+        // Check if delete was successful
+        if($stmt->affected_rows > 0) {
+            $_SESSION['success_message'] = "Treasurer deleted successfully";
+        } else {
+            $_SESSION['error_message'] = "Treasurer not found";
+        }
+        $stmt->close();
     } catch(Exception $e) {
-        $deleteError = "Cannot delete this treasurer. They may have associated records.";
+        $_SESSION['error_message'] = "Cannot delete this treasurer. They may have associated records: " . $e->getMessage();
     }
+    
+    header("Location: " . $_SERVER['PHP_SELF']);
+    exit();
 }
 ?>
 
@@ -56,16 +101,13 @@ if(isset($_POST['delete'])) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="../../assets/css/adminActorDetails.css">
+    <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="../../assets/js/alertHandler.js"></script>
 </head>
 <body>
     <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">
     <?php include '../templates/navbar-admin.php'; ?>
     <div class="container">
-        <?php if($successMessage): ?>
-            <div class="alert alert-success">
-                <?php echo htmlspecialchars($successMessage); ?>
-            </div>
-        <?php endif; ?>
         <div class="header-section">
             <h1>Manage Treasurers</h1>
             <a href="addTreasurer.php" class="add-btn">
@@ -73,12 +115,16 @@ if(isset($_POST['delete'])) {
             </a>
         </div>
 
-        <?php if(isset($deleteSuccess)): ?>
-            <div class="alert alert-success">Treasurer deleted successfully!</div>
+        <?php if($successMessage): ?>
+            <div class="alert alert-success">
+                <?php echo htmlspecialchars($successMessage); ?>
+            </div>
         <?php endif; ?>
 
-        <?php if(isset($deleteError)): ?>
-            <div class="alert alert-danger"><?php echo $deleteError; ?></div>
+        <?php if($errorMessage): ?>
+            <div class="alert alert-danger">
+                <?php echo htmlspecialchars($errorMessage); ?>
+            </div>
         <?php endif; ?>
 
         <div class="table-responsive">

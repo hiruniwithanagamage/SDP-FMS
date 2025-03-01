@@ -4,7 +4,7 @@ require_once "../../config/database.php";
 
 // Generate new Auditor ID
 $query = "SELECT AuditorID FROM Auditor ORDER BY AuditorID DESC LIMIT 1";
-$result = Database::search($query);
+$result = search($query);
 
 if ($result && $result->num_rows > 0) {
     $row = $result->fetch_assoc();
@@ -35,23 +35,23 @@ if(isset($_POST['add'])) {
     if(!is_numeric($term)) $errors[] = "Term must be a number";
     
     if(empty($errors)) {
-        // Prepare SQL insert statement
+        // Get database connection for escaping strings
+        $conn = getConnection();
+        
+        // Prepare SQL insert statement with escaped values
         $query = "INSERT INTO Auditor (AuditorID, Name, Term, isActive) 
-                  VALUES ('" . $auditorId . "', '" . $name . "', " . $term . ", 1)";
+                  VALUES ('" . $conn->real_escape_string($auditorId) . "', 
+                          '" . $conn->real_escape_string($name) . "', 
+                          " . intval($term) . ", 
+                          1)";
         
         try {
             // Use the existing database method for insert/update/delete
-            Database::iud($query);
-            // Set session message
-            $_SESSION['success_message'] = "Auditor added successfully";
-            
-            // Redirect to auditorDetails.php
-            header("Location: auditorDetails.php");
-            exit();
+            iud($query);
             
             // Regenerate next Auditor ID
             $query = "SELECT AuditorID FROM Auditor ORDER BY AuditorID DESC LIMIT 1";
-            $result = Database::search($query);
+            $result = search($query);
             if ($result && $result->num_rows > 0) {
                 $row = $result->fetch_assoc();
                 if ($row && isset($row['AuditorID'])) {
@@ -61,6 +61,14 @@ if(isset($_POST['add'])) {
                     $newAuditorId = "auditor" . $newNumericPart;
                 }
             }
+            
+            // Set session message
+            $_SESSION['success_message'] = "Auditor added successfully";
+            
+            // Redirect to auditorDetails.php
+            header("Location: auditorDetails.php");
+            exit();
+            
         } catch(Exception $e) {
             $error = "Error adding auditor: " . $e->getMessage();
         }
@@ -79,6 +87,8 @@ if(isset($_POST['add'])) {
     <title>Add Auditor</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="../../assets/js/alertHandler.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -160,24 +170,6 @@ if(isset($_POST['add'])) {
 
         .btn-cancel:hover {
             background-color: #f5f7fa;
-        }
-
-        .alert {
-            padding: 1rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-        }
-
-        .alert-error {
-            background-color: #ffebee;
-            color: #c62828;
-            border: 1px solid #ffcdd2;
-        }
-
-        .alert-success {
-            background-color: #e8f5e9;
-            color: #2e7d32;
-            border: 1px solid #c8e6c9;
         }
     </style>
 </head>

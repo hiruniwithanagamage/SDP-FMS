@@ -21,7 +21,7 @@ try {
               FROM Member m
               WHERE m.MemberID = '$memberId'";
               
-    $result = Database::search($query);
+    $result = search($query);
     
     if ($result->num_rows === 0) {
         header('Content-Type: application/json');
@@ -42,12 +42,12 @@ try {
                     AND mf.Type = 'registration'
                     AND mf.Term = $currentYear";
                     
-    $regFeeResult = Database::search($regFeeQuery);
+    $regFeeResult = search($regFeeQuery);
     $regFeePaid = $regFeeResult->fetch_assoc()['paid_amount'];
 
     // Get current fee structure
     $staticQuery = "SELECT * FROM Static WHERE year = $currentYear";
-    $staticResult = Database::search($staticQuery);
+    $staticResult = search($staticQuery);
     $feeStructure = $staticResult->fetch_assoc();
 
     // Get monthly fee payment status
@@ -59,7 +59,7 @@ try {
                         AND mf.Type = 'monthly'
                         AND YEAR(mf.Date) = $currentYear";
                         
-    $monthlyFeeResult = Database::search($monthlyFeeQuery);
+    $monthlyFeeResult = search($monthlyFeeQuery);
     $paidMonths = [];
     while ($row = $monthlyFeeResult->fetch_assoc()) {
         if ($row['IsPaid'] === 'Yes') {
@@ -78,7 +78,7 @@ try {
                    AND IsPaid = 'No'
                    ORDER BY Date ASC";
                    
-    $finesResult = Database::search($finesQuery);
+    $finesResult = search($finesQuery);
     $unpaidFines = [];
     while ($row = $finesResult->fetch_assoc()) {
         $unpaidFines[] = $row;
@@ -97,7 +97,7 @@ try {
                    AND (Remain_Loan > 0 OR Remain_Interest > 0)
                    ORDER BY Due_Date ASC";
                    
-    $loansResult = Database::search($loansQuery);
+    $loansResult = search($loansQuery);
     $activeLoans = [];
     while ($row = $loansResult->fetch_assoc()) {
         $activeLoans[] = $row;

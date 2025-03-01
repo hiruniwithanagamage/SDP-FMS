@@ -8,10 +8,54 @@ if($successMessage) {
     unset($_SESSION['success_message']);
 }
 
+// Handle Update
+if(isset($_POST['update'])) {
+    $adminId = $_POST['admin_id'];
+    $name = $_POST['name'];
+    $contactNumber = $_POST['contact_number'];
+    
+    try {
+        // Get database connection for escaping strings
+        $conn = getConnection();
+        
+        // Use escaped values in the query
+        $updateQuery = "UPDATE Admin SET 
+                       Name = '" . $conn->real_escape_string($name) . "',
+                       Contact_Number = '" . $conn->real_escape_string($contactNumber) . "'
+                       WHERE AdminID = '" . $conn->real_escape_string($adminId) . "'";
+        
+        iud($updateQuery);
+        $_SESSION['success_message'] = "Admin updated successfully";
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit();
+    } catch(Exception $e) {
+        $updateError = "Error updating admin: " . $e->getMessage();
+    }
+}
+
+// Handle Delete
+if(isset($_POST['delete'])) {
+    $adminId = $_POST['admin_id'];
+    
+    try {
+        // Get database connection for escaping strings
+        $conn = getConnection();
+        
+        // Use escaped values in the query
+        $deleteQuery = "DELETE FROM Admin WHERE AdminID = '" . $conn->real_escape_string($adminId) . "'";
+        iud($deleteQuery);
+        $_SESSION['success_message'] = "Admin deleted successfully";
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit();
+    } catch(Exception $e) {
+        $deleteError = "Cannot delete this admin. They may have associated records.";
+    }
+}
+
 // Fetch Admin Details
 try {
     $query = "SELECT * FROM Admin";
-    $result = Database::search($query);
+    $result = search($query);
     $admins = [];
     
     if ($result && $result->num_rows > 0) {
@@ -21,21 +65,6 @@ try {
     }
 } catch(Exception $e) {
     $error = "Error fetching admin details: " . $e->getMessage();
-}
-
-// Handle Delete
-if(isset($_POST['delete'])) {
-    $adminId = $_POST['admin_id'];
-    
-    try {
-        $deleteQuery = "DELETE FROM Admin WHERE AdminID = '$adminId'";
-        Database::iud($deleteQuery);
-        $_SESSION['success_message'] = "Admin deleted successfully";
-        header("Location: " . $_SERVER['PHP_SELF']);
-        exit();
-    } catch(Exception $e) {
-        $deleteError = "Cannot delete this admin. They may have associated records.";
-    }
 }
 ?>
 
@@ -47,6 +76,8 @@ if(isset($_POST['delete'])) {
     <title>Admin Details</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="../../assets/css/adminActorDetails.css">
+    <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="../../assets/js/alertHandler.js"></script>
 </head>
 <body>
     <div class="main-container">
@@ -69,6 +100,18 @@ if(isset($_POST['delete'])) {
             <?php if(isset($error)): ?>
                 <div class="alert alert-danger">
                     <?php echo htmlspecialchars($error); ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if(isset($updateError)): ?>
+                <div class="alert alert-danger">
+                    <?php echo htmlspecialchars($updateError); ?>
+                </div>
+            <?php endif; ?>
+            
+            <?php if(isset($deleteError)): ?>
+                <div class="alert alert-danger">
+                    <?php echo htmlspecialchars($deleteError); ?>
                 </div>
             <?php endif; ?>
 
@@ -121,7 +164,7 @@ if(isset($_POST['delete'])) {
         <div class="modal-content">
             <span class="close" onclick="closeModal()">&times;</span>
             <h2>Edit Admin</h2>
-            <form id="editForm" method="POST" action="editAdmin.php">
+            <form id="editForm" method="POST" action="">
                 <input type="hidden" id="edit_admin_id" name="admin_id">
                 
                 <div class="form-group">
@@ -146,7 +189,7 @@ if(isset($_POST['delete'])) {
     <div id="deleteModal" class="delete-modal">
         <div class="delete-modal-content">
             <h2>Confirm Delete</h2>
-            <p>Are you sure you want to delete this auditor? This action cannot be undone.</p>
+            <p>Are you sure you want to delete this admin? This action cannot be undone.</p>
             <form method="POST" id="deleteForm">
                 <input type="hidden" id="delete_admin_id" name="admin_id">
                 <div class="delete-modal-buttons">

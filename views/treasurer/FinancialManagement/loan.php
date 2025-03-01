@@ -5,7 +5,7 @@ require_once "../../../config/database.php";
 // Get current term
 function getCurrentTerm() {
     $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['year'] ?? date('Y');
 }
@@ -53,7 +53,7 @@ function getMemberLoans($year) {
         GROUP BY m.MemberID, m.Name
         ORDER BY m.Name";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get loan summary for the year
@@ -68,7 +68,7 @@ function getLoanSummary($year) {
         FROM Loan
         WHERE YEAR(Issued_Date) = $year";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get monthly loan statistics
@@ -84,13 +84,13 @@ function getMonthlyLoanStats($year) {
         GROUP BY MONTH(Issued_Date)
         ORDER BY month";
     
-    return Database::search($sql);
+    return search($sql);
 }
 
 // Get loan limits and interest rate from Static table
 function getLoanSettings() {
     $sql = "SELECT interest, max_loan_limit FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     return $result->fetch_assoc();
 }
 

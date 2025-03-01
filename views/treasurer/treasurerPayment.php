@@ -14,17 +14,17 @@ $currentYear = date('Y');
 
 // Fetch static data for current year
 $query = "SELECT * FROM Static WHERE year = $currentYear";
-$result = Database::search($query);
+$result = search($query);
 if ($result->num_rows === 0) {
     $query = "SELECT * FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($query);
+    $result = search($query);
 }
 $staticData = $result->fetch_assoc();
 
 // Get treasurer details
 $treasurerId = $_SESSION['treasurer_id'];
 $query = "SELECT Name FROM Treasurer WHERE TreasurerID = '$treasurerId'";
-$result = Database::search($query);
+$result = search($query);
 $treasurerData = $result->fetch_assoc();
 
 // Initialize variables
@@ -43,7 +43,7 @@ if (isset($_POST['member_select']) && !empty($_POST['member_select'])) {
     
     // Get member details
     $query = "SELECT Name, Status FROM Member WHERE MemberID = '$selectedMemberId'";
-    $result = Database::search($query);
+    $result = search($query);
     $memberData = $result->fetch_assoc();
 
     // Get unpaid fees
@@ -51,14 +51,14 @@ if (isset($_POST['member_select']) && !empty($_POST['member_select'])) {
                         WHERE Member_MemberID = '$selectedMemberId' 
                         AND IsPaid = 'No' 
                         ORDER BY Date ASC";
-    $unpaidFeesResult = Database::search($unpaidFeesQuery);
+    $unpaidFeesResult = search($unpaidFeesQuery);
 
     // Get unpaid fines
     $unpaidFinesQuery = "SELECT * FROM Fine 
                          WHERE Member_MemberID = '$selectedMemberId' 
                          AND IsPaid = 'No' 
                          ORDER BY Date ASC";
-    $unpaidFinesResult = Database::search($unpaidFinesQuery);
+    $unpaidFinesResult = search($unpaidFinesQuery);
 
     // Get active loans
     $activeLoansQuery = "SELECT * FROM Loan 
@@ -66,7 +66,7 @@ if (isset($_POST['member_select']) && !empty($_POST['member_select'])) {
                          AND Status = 'approved' 
                          AND Remain_Loan > 0
                          ORDER BY Issued_Date DESC";
-    $activeLoansResult = Database::search($activeLoansQuery);
+    $activeLoansResult = search($activeLoansQuery);
 
     // Get total paid registration fee
     $regFeePaidQuery = "SELECT COALESCE(SUM(P.Amount), 0) as total_paid
@@ -76,7 +76,7 @@ if (isset($_POST['member_select']) && !empty($_POST['member_select'])) {
                         WHERE MF.Member_MemberID = '$selectedMemberId'
                         AND MF.Type = 'registration'
                         AND MF.Term = $currentYear";
-    $regFeePaidResult = Database::search($regFeePaidQuery);
+    $regFeePaidResult = search($regFeePaidQuery);
     $regFeePaid = $regFeePaidResult->fetch_assoc()['total_paid'];
     $remainingRegFee = $staticData['registration_fee'] - $regFeePaid;
 
@@ -85,7 +85,7 @@ if (isset($_POST['member_select']) && !empty($_POST['member_select'])) {
 
 // Fetch all members for dropdown
 $memberQuery = "SELECT MemberID, Name FROM Member ORDER BY Name";
-$memberQueryResult = Database::search($memberQuery);
+$memberQueryResult = search($memberQuery);
 $memberList = [];
 while ($row = $memberQueryResult->fetch_assoc()) {
     $memberList[] = [
@@ -222,7 +222,7 @@ while ($row = $memberQueryResult->fetch_assoc()) {
                         <select name="year" id="yearSelect">
                             <?php
                             $yearQuery = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
-                            $yearResult = Database::search($yearQuery);
+                            $yearResult = search($yearQuery);
                             while($yearRow = $yearResult->fetch_assoc()): ?>
                                 <option value="<?php echo $yearRow['year']; ?>" 
                                     <?php echo ($yearRow['year'] == $currentYear) ? 'selected' : ''; ?>>
@@ -283,7 +283,7 @@ while ($row = $memberQueryResult->fetch_assoc()) {
                                     AND MONTH(Date) = $monthNum 
                                     AND Type = 'monthly' 
                                     AND IsPaid = 'Yes'";
-                            $paidResult = Database::search($query);
+                            $paidResult = search($query);
                             $isPaid = $paidResult->fetch_assoc()['paid'] > 0;
                             
                             echo "<label class='month-checkbox " . ($isPaid ? 'paid' : '') . "'>

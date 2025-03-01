@@ -4,7 +4,7 @@
 
     // Get current term from database
     $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
-    $result = Database::search($sql);
+    $result = search($sql);
     $currentTerm = "2025"; // Default fallback
     if ($result && $result->num_rows > 0) {
         $row = $result->fetch_assoc();
@@ -57,7 +57,7 @@
                     SUM(CASE WHEN IsPaid = 'No' THEN 1 ELSE 0 END) as unpaid_count
                 FROM MembershipFee 
                 WHERE Term = $term";
-            $membershipFeeResult = Database::search($membershipFeeSql);
+            $membershipFeeResult = search($membershipFeeSql);
             if ($membershipFeeResult && $membershipFeeResult->num_rows > 0) {
                 $row = $membershipFeeResult->fetch_assoc();
                 $details['membership_fees'] = [
@@ -76,7 +76,7 @@
                     SUM(CASE WHEN Status = 'rejected' THEN 1 ELSE 0 END) as rejected_count
                 FROM Loan 
                 WHERE Term = $term";
-            $loanResult = Database::search($loanSql);
+            $loanResult = search($loanSql);
             if ($loanResult && $loanResult->num_rows > 0) {
                 $row = $loanResult->fetch_assoc();
                 $details['loans'] = [
@@ -96,7 +96,7 @@
                     SUM(CASE WHEN Status = 'rejected' THEN 1 ELSE 0 END) as rejected_count
                 FROM DeathWelfare 
                 WHERE Term = $term";
-            $deathWelfareResult = Database::search($deathWelfareSql);
+            $deathWelfareResult = search($deathWelfareSql);
             if ($deathWelfareResult && $deathWelfareResult->num_rows > 0) {
                 $row = $deathWelfareResult->fetch_assoc();
                 $details['death_welfare'] = [
@@ -118,7 +118,7 @@
                     SUM(CASE WHEN Description = 'violation' THEN Amount ELSE 0 END) as violation_fines
                 FROM Fine 
                 WHERE Term = $term";
-            $fineResult = Database::search($fineSql);
+            $fineResult = search($fineSql);
             if ($fineResult && $fineResult->num_rows > 0) {
                 $row = $fineResult->fetch_assoc();
                 $details['fines'] = [
@@ -140,7 +140,7 @@
                 FROM Expenses 
                 WHERE Term = $term
                 GROUP BY Category";
-            $expensesResult = Database::search($expensesSql);
+            $expensesResult = search($expensesSql);
             $details['expenses']['total_amount'] = 0;
             $details['expenses']['categories'] = [];
             if ($expensesResult) {

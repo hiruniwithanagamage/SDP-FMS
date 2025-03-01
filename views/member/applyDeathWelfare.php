@@ -4,7 +4,7 @@ require_once "../../config/database.php";
 
 // Generate new Welfare ID
 $query = "SELECT WelfareID FROM DeathWelfare ORDER BY WelfareID DESC LIMIT 1";
-$result = Database::search($query);
+$result = search($query);
 
 if ($result && $result->num_rows > 0) {
     $row = $result->fetch_assoc();
@@ -22,7 +22,7 @@ function hasPendingApplication($memberId, $term) {
                   WHERE Member_MemberID = ? 
                   AND Term = ? 
                   AND Status = 'pending'";
-    $stmt = Database::$connection->prepare($checkQuery);
+    $stmt = prepare($checkQuery);
     $stmt->bind_param("ss", $memberId, $term);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -44,7 +44,7 @@ if(isset($_POST['apply'])) {
                   WHERE Member_MemberID = ? 
                   AND Term = ? 
                   AND Status = 'approved'";
-    $stmt = Database::$connection->prepare($checkQuery);
+    $stmt = prepare($checkQuery);
     $stmt->bind_param("ss", $memberId, $term);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -76,7 +76,7 @@ if(isset($_POST['apply'])) {
                   VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL)";
                   
         try {
-            $stmt = Database::$connection->prepare($query);
+            $stmt = prepare($query);
             $stmt->bind_param("sdssss", 
                 $newWelfareId,
                 $amount,
@@ -114,7 +114,7 @@ if(isset($_SESSION['member_id'])) {
                   WHERE Member_MemberID = ? 
                   AND Term = ?
                   AND (Status = 'approved' OR Status = 'pending')";
-    $stmt = Database::$connection->prepare($checkQuery);
+    $stmt = prepare($checkQuery);
     $stmt->bind_param("ss", $_SESSION['member_id'], $currentYear);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -126,7 +126,7 @@ if(isset($_SESSION['member_id'])) {
     
     // Get member details
     $query = "SELECT MemberID, Name FROM Member WHERE MemberID = ?";
-    $stmt = Database::$connection->prepare($query);
+    $stmt = prepare($query);
     $stmt->bind_param("s", $_SESSION['member_id']);
     $stmt->execute();
     $result = $stmt->get_result();
