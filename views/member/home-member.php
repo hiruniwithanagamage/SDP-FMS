@@ -5,6 +5,10 @@ require_once "../../config/database.php";
 // Initialize variables with default values
 $memberData = null;
 $totalDues = 0;
+$transactions = [];
+
+// Get database connection
+$conn = getConnection();
 
 // Check if user is logged in and has user data in session
 if (isset($_SESSION['u'])) {
@@ -14,37 +18,111 @@ if (isset($_SESSION['u'])) {
     if (isset($userData['Member_MemberID'])) {
         $memberID = $userData['Member_MemberID'];
         
-        // Get member details
-        $memberQuery = "SELECT * FROM Member WHERE MemberID = '" . $memberID . "'";
-        $memberResult = search($memberQuery);
-
-        // if ($memberResult) {
-        //     echo "Query executed successfully<br>";
-        //     echo "Number of rows: " . $memberResult->num_rows . "<br>";
+        try {
+            // Get member details using prepared statement
+            $query = "SELECT * FROM Member WHERE MemberID = ?";
+            $stmt = $conn->prepare($query);
+            $stmt->bind_param("s", $memberID);
+            $stmt->execute();
+            $memberResult = $stmt->get_result();
             
-        //     if ($memberResult->num_rows > 0) {
-        //         $memberData = $memberResult->fetch_assoc();
-        //         echo "<pre>Member Data from DB: ";
-        //         print_r($memberData);
-        //         echo "</pre>";
-        //     } else {
-        //         echo "No rows found for this member ID<br>";
-        //     }
-        // } else {
-        //     echo "Query failed<br>";
-        // }
-    
-        
-        if ($memberResult && $memberResult->num_rows > 0) {
-            $memberData = $memberResult->fetch_assoc();
-            // Calculate dues
-            $duesQuery = "SELECT 
-                COALESCE(SUM(Remain_Loan + Remain_Interest), 0) as total_dues 
-                FROM Loan 
-                WHERE Member_MemberID = '" . $memberID . "'";
-            $duesResult = search($duesQuery);
-            $duesData = $duesResult->fetch_assoc();
-            $totalDues = $duesData['total_dues'];
+            if ($memberResult && $memberResult->num_rows > 0) {
+                $memberData = $memberResult->fetch_assoc();
+                
+                // Calculate loan dues
+                $loanDuesQuery = "SELECT COALESCE(SUM(Remain_Loan + Remain_Interest), 0) as loan_dues 
+                                 FROM Loan WHERE Member_MemberID = ?";
+                $loanStmt = $conn->prepare($loanDuesQuery);
+                $loanStmt->bind_param("s", $memberID);
+                $loanStmt->execute();
+                $loanResult = $loanStmt->get_result();
+                $loanData = $loanResult->fetch_assoc();
+                $loanDues = $loanData['loan_dues'];
+                
+                // Calculate unpaid membership fees
+                $currentMonth = date('Y-m');
+                $joinedDate = $memberData['Joined_Date'];
+                
+                // Get monthly fee amount from Static table
+                $feeQuery = "SELECT monthly_fee, registration_fee FROM Static 
+                            ORDER BY year DESC LIMIT 1";
+                $feeStmt = $conn->prepare($feeQuery);
+                $feeStmt->execute();
+                $feeResult = $feeStmt->get_result();
+                $feeData = $feeResult->fetch_assoc();
+                $monthlyFee = $feeData['monthly_fee'];
+                $registrationFee = $feeData['registration_fee'];
+                
+                // Check if registration fee is fully paid
+                $regFeeQuery = "SELECT COALESCE(SUM(Amount), 0) as paid_registration 
+                               FROM Payment 
+                               WHERE Member_MemberID = ? AND Payment_Type = 'Registration'";
+                $regFeeStmt = $conn->prepare($regFeeQuery);
+                $regFeeStmt->bind_param("s", $memberID);
+                $regFeeStmt->execute();
+                $regFeeResult = $regFeeStmt->get_result();
+                $regFeeData = $regFeeResult->fetch_assoc();
+                $paidRegistration = $regFeeData['paid_registration'];
+                $regFeeDue = max(0, $registrationFee - $paidRegistration);
+                
+                // Calculate unpaid monthly fees
+                $membershipQuery = "SELECT 
+                                    COALESCE(SUM(mf.Amount), 0) as total_membership_fees,
+                                    COALESCE(SUM(CASE WHEN mf.IsPaid = 'Yes' THEN mf.Amount ELSE 0 END), 0) as paid_membership_fees
+                                   FROM MembershipFee mf
+                                   WHERE mf.Member_MemberID = ?";
+                $membershipStmt = $conn->prepare($membershipQuery);
+                $membershipStmt->bind_param("s", $memberID);
+                $membershipStmt->execute();
+                $membershipResult = $membershipStmt->get_result();
+                $membershipData = $membershipResult->fetch_assoc();
+                $membershipDue = $membershipData['total_membership_fees'] - $membershipData['paid_membership_fees'];
+                
+                // Calculate unpaid fines
+                $fineQuery = "SELECT COALESCE(SUM(Amount), 0) as unpaid_fines 
+                             FROM Fine 
+                             WHERE Member_MemberID = ? AND IsPaid = 'No'";
+                $fineStmt = $conn->prepare($fineQuery);
+                $fineStmt->bind_param("s", $memberID);
+                $fineStmt->execute();
+                $fineResult = $fineStmt->get_result();
+                $fineData = $fineResult->fetch_assoc();
+                $unpaidFines = $fineData['unpaid_fines'];
+                
+                // Calculate total dues
+                $totalDues = $loanDues + $regFeeDue + $membershipDue + $unpaidFines;
+                
+                // Store itemized dues for potential detailed display
+                $duesBreakdown = [
+                    'loan' => $loanDues,
+                    'registration' => $regFeeDue,
+                    'membership' => $membershipDue,
+                    'fines' => $unpaidFines
+                ];
+                
+                // Get recent transactions
+                $transQuery = "SELECT 
+                              transaction_date as date, 
+                              transaction_type as type, 
+                              amount 
+                              FROM Transactions 
+                              WHERE Member_MemberID = ? 
+                              ORDER BY transaction_date DESC 
+                              LIMIT 5";
+                $transStmt = $conn->prepare($transQuery);
+                $transStmt->bind_param("s", $memberID);
+                $transStmt->execute();
+                $transResult = $transStmt->get_result();
+                
+                if ($transResult && $transResult->num_rows > 0) {
+                    while ($row = $transResult->fetch_assoc()) {
+                        $transactions[] = $row;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            // Log error (in a production environment, use proper logging)
+            error_log("Database error: " . $e->getMessage());
         }
     }
 }
@@ -62,33 +140,30 @@ if (!$memberData) {
     );
 }
 
-
-// add the memeber data into another array
+// Format member information
 $memberInfo = array(
-    'Name' => $memberData['Name'],
-    'MemberID' => $memberData['MemberID'],
-    'Mobile_Number' => $memberData['Mobile_Number'],
-    'Address' => $memberData['Address'],
-    'Status' => $memberData['Status'],
-    'Joined_Date' => $memberData['Joined_Date'],
-    'No_of_Family_Members' => $memberData['No_of_Family_Members']
+    'Name' => htmlspecialchars($memberData['Name']),
+    'MemberID' => htmlspecialchars($memberData['MemberID']),
+    'Mobile_Number' => htmlspecialchars($memberData['Mobile_Number']),
+    'Address' => htmlspecialchars($memberData['Address']),
+    'Status' => htmlspecialchars($memberData['Status']),
+    'Joined_Date' => htmlspecialchars($memberData['Joined_Date']),
+    'No_of_Family_Members' => htmlspecialchars($memberData['No_of_Family_Members'])
 );
-// Add this for debugging (commented out but useful for troubleshooting)
-/*
-echo "Session Data:<br>";
-echo "<pre>";
-print_r($_SESSION);
-echo "</pre>";
-*/
+
+// Format the total dues for display
+$formattedDues = number_format($totalDues, 2);
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
    <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <title>Member Home</title>
-   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+   <link rel="stylesheet" href="../../assets/css/alert.css">
+   <script src="../../assets/js/alertHandler.js"></script>
    <style>
         body {
             font-family: Arial, sans-serif;
@@ -223,6 +298,16 @@ echo "</pre>";
         .fade-out {
             opacity: 0;
         }
+        
+        .status-active {
+            color: #166534;
+            font-weight: bold;
+        }
+        
+        .status-pending {
+            color: #b45309;
+            font-weight: bold;
+        }
    </style>
 </head>
 <body>
@@ -230,24 +315,28 @@ echo "</pre>";
    <?php include '../templates/navbar-member.php'; ?> 
        <div class="content">
            <div class="welcome-card">
-               <h1>Welcome, <?php echo htmlspecialchars($memberData['Name']); ?></h1>
-               <a href="pay_dues.php" class="dues-button">
+               <h1>Welcome, <?php echo $memberInfo['Name']; ?></h1>
+               <a href="payDues.php" class="dues-button">
                    <i class="fas fa-credit-card"></i>
-                   Outstanding: $67
+                   Outstanding: Rs.<?php echo $formattedDues; ?>
                </a>
            </div>
 
            <?php if (isset($_SESSION['success_message'])): ?>
                 <div class="alert alert-success">
                     <?php 
-                    echo $_SESSION['success_message']; 
+                    echo htmlspecialchars($_SESSION['success_message']); 
                     unset($_SESSION['success_message']); // Clear the message after displaying
                     ?>
                 </div>
             <?php endif; ?>
+            
+            <?php if(isset($error)): ?>
+                <div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div>
+            <?php endif; ?>
 
            <div class="action-cards">
-               <div class="action-card" onclick="window.location.href='view_summary.php'">
+               <div class="action-card" onclick="window.location.href='memberSummary.php'">
                    <i class="fas fa-file-alt icon"></i>
                    <h3>View Summary</h3>
                </div>
@@ -270,11 +359,11 @@ echo "</pre>";
                    <h2>Member Information</h2>
                    <div class="info-item">
                        <span>ID:</span>
-                       <span><?php echo htmlspecialchars($memberInfo['MemberID']); ?></span>
+                       <span><?php echo $memberInfo['MemberID']; ?></span>
                    </div>
                    <div class="info-item">
                        <span>Contact:</span>
-                       <span><?php echo htmlspecialchars($memberInfo['Mobile_Number']); ?></span>
+                       <span><?php echo $memberInfo['Mobile_Number']; ?></span>
                    </div>
                    <div class="info-item">
                         <span>Membership Status:</span>
@@ -288,6 +377,16 @@ echo "</pre>";
                             ?>
                         </span>
                     </div>
+                    <div class="info-item">
+                        <span>Joined Date:</span>
+                        <span><?php echo date('Y-m-d', strtotime($memberInfo['Joined_Date'])); ?></span>
+                    </div>
+                    <?php if ($duesBreakdown['membership'] > 0): ?>
+                    <div class="info-item">
+                        <span>Membership Fee Due:</span>
+                        <span class="status-pending">Rs.<?php echo number_format($duesBreakdown['membership'], 2); ?></span>
+                    </div>
+                    <?php endif; ?>
                </div>
 
                <div class="info-card transactions">
@@ -312,22 +411,27 @@ echo "</pre>";
        <?php include '../templates/footer.php'; ?>
    </div>
 
+   <!-- Use the common alert handler script -->
    <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const alertElement = document.querySelector('.alert-success');
-            if (alertElement) {
-                setTimeout(function() {
-                    // Add fade-out class
-                    alertElement.style.transition = 'opacity 0.5s ease';
-                    alertElement.style.opacity = '0';
-                    
-                    // Remove element after fade animation
+            // Initialize alerts if alertHandler.js is available
+            if (typeof initAlerts === 'function') {
+                initAlerts();
+            } else {
+                // Fallback if the script isn't loaded
+                const alertElements = document.querySelectorAll('.alert');
+                alertElements.forEach(function(alert) {
                     setTimeout(function() {
-                        alertElement.remove();
-                    }, 500);
-                }, 4000); // 5000ms = 5 seconds
+                        alert.style.transition = 'opacity 0.5s ease';
+                        alert.style.opacity = '0';
+                        
+                        setTimeout(function() {
+                            alert.remove();
+                        }, 500);
+                    }, 4000);
+                });
             }
         });
-</script>
+   </script>
 </body>
 </html>
