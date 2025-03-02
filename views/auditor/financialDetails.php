@@ -2,19 +2,29 @@
     session_start();
     require_once "../../config/database.php";
 
-    // Get current term from database
-    $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
-    $result = search($sql);
+    // Validate and sanitize year input
     $currentTerm = "2025"; // Default fallback
-    if ($result && $result->num_rows > 0) {
-        $row = $result->fetch_assoc();
-        $currentTerm = $row['year'];
+    try {
+        // Get current term from database using prepared statement
+        $stmt = prepare("SELECT year FROM Static ORDER BY year DESC LIMIT 1");
+        if ($stmt) {
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result && $result->num_rows > 0) {
+                $row = $result->fetch_assoc();
+                $currentTerm = $row['year'];
+            }
+            $stmt->close();
+        }
+
+        // Validate and sanitize year input
+        $selectedYear = filter_input(INPUT_GET, 'year', FILTER_VALIDATE_INT) ?: $currentTerm;
+    } catch (Exception $e) {
+        error_log("Error fetching current term: " . $e->getMessage());
+        $selectedYear = $currentTerm;
     }
 
-    // Allow term selection
-    $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
-
-    // Function to fetch comprehensive financial details
+    // Function to fetch comprehensive financial details using prepared statements
     function fetchFinancialDetails($term) {
         $details = [
             'membership_fees' => [
@@ -49,109 +59,130 @@
         ];
 
         try {
+            $conn = getConnection();
+
             // Membership Fees
-            $membershipFeeSql = "
+            $stmt = $conn->prepare("
                 SELECT 
-                    SUM(Amount) as total_amount,
-                    SUM(CASE WHEN IsPaid = 'Yes' THEN 1 ELSE 0 END) as paid_count,
-                    SUM(CASE WHEN IsPaid = 'No' THEN 1 ELSE 0 END) as unpaid_count
+                    COALESCE(SUM(Amount), 0) as total_amount,
+                    COALESCE(SUM(CASE WHEN IsPaid = 'Yes' THEN 1 ELSE 0 END), 0) as paid_count,
+                    COALESCE(SUM(CASE WHEN IsPaid = 'No' THEN 1 ELSE 0 END), 0) as unpaid_count
                 FROM MembershipFee 
-                WHERE Term = $term";
-            $membershipFeeResult = search($membershipFeeSql);
-            if ($membershipFeeResult && $membershipFeeResult->num_rows > 0) {
-                $row = $membershipFeeResult->fetch_assoc();
+                WHERE Term = ?
+            ");
+            $stmt->bind_param("i", $term);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result && $result->num_rows > 0) {
+                $row = $result->fetch_assoc();
                 $details['membership_fees'] = [
-                    'total_amount' => $row['total_amount'] ?? 0,
-                    'paid_count' => $row['paid_count'] ?? 0,
-                    'unpaid_count' => $row['unpaid_count'] ?? 0
+                    'total_amount' => $row['total_amount'],
+                    'paid_count' => $row['paid_count'],
+                    'unpaid_count' => $row['unpaid_count']
                 ];
             }
+            $stmt->close();
 
             // Loans
-            $loanSql = "
+            $stmt = $conn->prepare("
                 SELECT 
-                    SUM(Amount) as total_amount,
-                    SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END) as pending_count,
-                    SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END) as approved_count,
-                    SUM(CASE WHEN Status = 'rejected' THEN 1 ELSE 0 END) as rejected_count
+                    COALESCE(SUM(Amount), 0) as total_amount,
+                    COALESCE(SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END), 0) as pending_count,
+                    COALESCE(SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END), 0) as approved_count,
+                    COALESCE(SUM(CASE WHEN Status = 'rejected' THEN 1 ELSE 0 END), 0) as rejected_count
                 FROM Loan 
-                WHERE Term = $term";
-            $loanResult = search($loanSql);
-            if ($loanResult && $loanResult->num_rows > 0) {
-                $row = $loanResult->fetch_assoc();
+                WHERE Term = ?
+            ");
+            $stmt->bind_param("i", $term);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result && $result->num_rows > 0) {
+                $row = $result->fetch_assoc();
                 $details['loans'] = [
-                    'total_amount' => $row['total_amount'] ?? 0,
-                    'pending_count' => $row['pending_count'] ?? 0,
-                    'approved_count' => $row['approved_count'] ?? 0,
-                    'rejected_count' => $row['rejected_count'] ?? 0
+                    'total_amount' => $row['total_amount'],
+                    'pending_count' => $row['pending_count'],
+                    'approved_count' => $row['approved_count'],
+                    'rejected_count' => $row['rejected_count']
                 ];
             }
+            $stmt->close();
 
             // Death Welfare
-            $deathWelfareSql = "
+            $stmt = $conn->prepare("
                 SELECT 
-                    SUM(Amount) as total_amount,
-                    SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END) as pending_count,
-                    SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END) as approved_count,
-                    SUM(CASE WHEN Status = 'rejected' THEN 1 ELSE 0 END) as rejected_count
+                    COALESCE(SUM(Amount), 0) as total_amount,
+                    COALESCE(SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END), 0) as pending_count,
+                    COALESCE(SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END), 0) as approved_count,
+                    COALESCE(SUM(CASE WHEN Status = 'rejected' THEN 1 ELSE 0 END), 0) as rejected_count
                 FROM DeathWelfare 
-                WHERE Term = $term";
-            $deathWelfareResult = search($deathWelfareSql);
-            if ($deathWelfareResult && $deathWelfareResult->num_rows > 0) {
-                $row = $deathWelfareResult->fetch_assoc();
+                WHERE Term = ?
+            ");
+            $stmt->bind_param("i", $term);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result && $result->num_rows > 0) {
+                $row = $result->fetch_assoc();
                 $details['death_welfare'] = [
-                    'total_amount' => $row['total_amount'] ?? 0,
-                    'pending_count' => $row['pending_count'] ?? 0,
-                    'approved_count' => $row['approved_count'] ?? 0,
-                    'rejected_count' => $row['rejected_count'] ?? 0
+                    'total_amount' => $row['total_amount'],
+                    'pending_count' => $row['pending_count'],
+                    'approved_count' => $row['approved_count'],
+                    'rejected_count' => $row['rejected_count']
                 ];
             }
+            $stmt->close();
 
             // Fines
-            $fineSql = "
+            $stmt = $conn->prepare("
                 SELECT 
-                    SUM(Amount) as total_amount,
-                    SUM(CASE WHEN IsPaid = 'Yes' THEN 1 ELSE 0 END) as paid_count,
-                    SUM(CASE WHEN IsPaid = 'No' THEN 1 ELSE 0 END) as unpaid_count,
-                    SUM(CASE WHEN Description = 'late' THEN Amount ELSE 0 END) as late_fines,
-                    SUM(CASE WHEN Description = 'absent' THEN Amount ELSE 0 END) as absent_fines,
-                    SUM(CASE WHEN Description = 'violation' THEN Amount ELSE 0 END) as violation_fines
+                    COALESCE(SUM(Amount), 0) as total_amount,
+                    COALESCE(SUM(CASE WHEN IsPaid = 'Yes' THEN 1 ELSE 0 END), 0) as paid_count,
+                    COALESCE(SUM(CASE WHEN IsPaid = 'No' THEN 1 ELSE 0 END), 0) as unpaid_count,
+                    COALESCE(SUM(CASE WHEN Description = 'late' THEN Amount ELSE 0 END), 0) as late_fines,
+                    COALESCE(SUM(CASE WHEN Description = 'absent' THEN Amount ELSE 0 END), 0) as absent_fines,
+                    COALESCE(SUM(CASE WHEN Description = 'violation' THEN Amount ELSE 0 END), 0) as violation_fines
                 FROM Fine 
-                WHERE Term = $term";
-            $fineResult = search($fineSql);
-            if ($fineResult && $fineResult->num_rows > 0) {
-                $row = $fineResult->fetch_assoc();
+                WHERE Term = ?
+            ");
+            $stmt->bind_param("i", $term);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result && $result->num_rows > 0) {
+                $row = $result->fetch_assoc();
                 $details['fines'] = [
-                    'total_amount' => $row['total_amount'] ?? 0,
-                    'paid_count' => $row['paid_count'] ?? 0,
-                    'unpaid_count' => $row['unpaid_count'] ?? 0,
-                    'late_fines' => $row['late_fines'] ?? 0,
-                    'absent_fines' => $row['absent_fines'] ?? 0,
-                    'violation_fines' => $row['violation_fines'] ?? 0
+                    'total_amount' => $row['total_amount'],
+                    'paid_count' => $row['paid_count'],
+                    'unpaid_count' => $row['unpaid_count'],
+                    'late_fines' => $row['late_fines'],
+                    'absent_fines' => $row['absent_fines'],
+                    'violation_fines' => $row['violation_fines']
                 ];
             }
+            $stmt->close();
 
             // Expenses
-            $expensesSql = "
+            $stmt = $conn->prepare("
                 SELECT 
-                    SUM(Amount) as total_amount,
+                    COALESCE(SUM(Amount), 0) as total_amount,
                     Category,
-                    SUM(Amount) as category_total
+                    COALESCE(SUM(Amount), 0) as category_total
                 FROM Expenses 
-                WHERE Term = $term
-                GROUP BY Category";
-            $expensesResult = search($expensesSql);
+                WHERE Term = ?
+                GROUP BY Category
+            ");
+            $stmt->bind_param("i", $term);
+            $stmt->execute();
+            $result = $stmt->get_result();
             $details['expenses']['total_amount'] = 0;
             $details['expenses']['categories'] = [];
-            if ($expensesResult) {
-                while ($row = $expensesResult->fetch_assoc()) {
-                    $details['expenses']['total_amount'] += $row['total_amount'];
-                    $details['expenses']['categories'][] = [
-                        'name' => $row['Category'],
-                        'amount' => $row['category_total']
-                    ];
-                }
+            while ($row = $result->fetch_assoc()) {
+                $details['expenses']['total_amount'] += $row['total_amount'];
+                $details['expenses']['categories'][] = [
+                    'name' => $row['Category'],
+                    'amount' => $row['category_total']
+                ];
             }
+            $stmt->close();
+
         } catch (Exception $e) {
             // Log error or handle as needed
             error_log("Error fetching financial details: " . $e->getMessage());
@@ -168,7 +199,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Financial Details - Term <?php echo $selectedYear; ?></title>
+    <title>Financial Details - Term <?php echo htmlspecialchars($selectedYear); ?></title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         .home-container {
@@ -262,9 +293,12 @@
 <?php include '../templates/navbar-admin.php'; ?>
     <div class="container">
         <div class="header">
-            <h1>Financial Details - Term <?php echo $selectedYear; ?></h1>
+            <h1>Financial Details - Term <?php echo htmlspecialchars($selectedYear); ?></h1>
             <select class="term-select" onchange="updateTerm(this.value)">
-                <?php for($y = $currentTerm; $y >= $currentTerm - 2; $y--): ?>
+                <?php 
+                $startYear = max(2020, $currentTerm - 2); // Prevent negative or unreasonable years
+                for($y = $currentTerm; $y >= $startYear; $y--): 
+                ?>
                     <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
                         Term <?php echo $y; ?>
                     </option>
@@ -315,7 +349,6 @@
                 </div>
             </div>
         </div>
-    
 
         <h2 class="section-title">Fines Breakdown</h2>
         <div class="financial-grid">
@@ -348,8 +381,8 @@
     
     <script>
     function updateTerm(year) {
-        // Reload the page with the selected year
-        window.location.href = `financialDetails.php?year=${year}`;
+        // Use built-in PHP URL encoding to prevent XSS
+        window.location.href = 'financialDetails.php?year=' + encodeURIComponent(year);
     }
     </script>
 </body>
