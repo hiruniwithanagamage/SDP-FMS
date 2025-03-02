@@ -8,6 +8,9 @@ if (!isset($_SESSION["u"]) || $_SESSION["role"] !== "admin") {
     exit();
 }
 
+// Get database connection
+$conn = getConnection();
+
 $errors = [];
 
 // Validation helper functions
@@ -33,18 +36,34 @@ function validateDOB($dob) {
     return $age >= 18; // Minimum age requirement
 }
 
-// Generate new Member ID
-$query = "SELECT MemberID FROM Member ORDER BY MemberID DESC LIMIT 1";
-$result = search($query);
-
-if ($result->num_rows > 0) {
-    $lastId = $result->fetch_assoc()['MemberID'];
-    $numericPart = intval(substr($lastId, 6)); // Assuming format is "MEMBER1", "MEMBER2", etc.
-    $newNumericPart = $numericPart + 1;
-    $newMemberId = "Member" . $newNumericPart;
-} else {
-    $newMemberId = "Member1";
+// Check if NIC already exists
+function checkNICExists($conn, $nic) {
+    $query = "SELECT COUNT(*) as count FROM Member WHERE NIC = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("s", $nic);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->fetch_assoc()['count'] > 0;
 }
+
+// Generate new Member ID using prepared statement
+function generateNewMemberId($conn) {
+    $query = "SELECT MemberID FROM Member ORDER BY MemberID DESC LIMIT 1";
+    $stmt = $conn->prepare($query);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($result->num_rows > 0) {
+        $lastId = $result->fetch_assoc()['MemberID'];
+        $numericPart = intval(substr($lastId, 6)); // Assuming format is "Member1", "Member2", etc.
+        $newNumericPart = $numericPart + 1;
+        return "Member" . $newNumericPart;
+    } else {
+        return "Member1";
+    }
+}
+
+$newMemberId = generateNewMemberId($conn);
 
 // Handle form submission with validation
 if (isset($_POST['add'])) {
@@ -88,7 +107,7 @@ if (isset($_POST['add'])) {
         if (!validateMobile($mobile)) {
             $errors['mobile'] = "Invalid mobile number format";
         } else {
-            // Convert to integer by removing non-numeric characters
+            // Clean the mobile number
             $mobile = preg_replace('/[^0-9]/', '', $mobile);
         }
     }
@@ -104,14 +123,12 @@ if (isset($_POST['add'])) {
     }
 
     // Check for duplicate NIC
-    $conn = getConnection();
-    $checkNICQuery = "SELECT COUNT(*) as count FROM Member WHERE NIC = '" . $conn->real_escape_string($nic) . "'";
-    $result = search($checkNICQuery);
-    if ($result->fetch_assoc()['count'] > 0) {
+    if (empty($errors['nic']) && checkNICExists($conn, $nic)) {
         $errors['nic'] = "This NIC is already registered";
     }
 
     // Handle file upload
+    $fileName = null;
     if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === 0) {
         $allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
         $maxSize = 20 * 1024 * 1024; // 20MB
@@ -120,6 +137,9 @@ if (isset($_POST['add'])) {
             $errors['profile_photo'] = "Only JPG, JPEG & PNG files are allowed";
         } elseif ($_FILES['profile_photo']['size'] > $maxSize) {
             $errors['profile_photo'] = "File size must be less than 20MB";
+        } else {
+            // Generate a unique filename
+            $fileName = $newMemberId . '_' . time() . '.' . pathinfo($_FILES['profile_photo']['name'], PATHINFO_EXTENSION);
         }
     }
 
@@ -127,36 +147,34 @@ if (isset($_POST['add'])) {
     if (empty($errors)) {
         try {
             // Begin transaction
-            $conn = getConnection(); // Get the database connection
             $conn->begin_transaction();
 
-            $mobileValue = $mobile === null ? "NULL" : "'" . $conn->real_escape_string($mobile) . "'";
-
+            // Insert new member with prepared statement
             $insertQuery = "INSERT INTO Member (MemberID, Name, NIC, DoB, Address, Mobile_Number, 
-                        No_of_Family_Members, Other_Members, Status, Joined_Date) 
-                        VALUES ('" . $conn->real_escape_string($newMemberId) . "', 
-                                '" . $conn->real_escape_string($name) . "', 
-                                '" . $conn->real_escape_string($nic) . "', 
-                                '" . $conn->real_escape_string($dob) . "', 
-                                '" . $conn->real_escape_string($address) . "', 
-                                $mobileValue, 
-                                " . intval($familyMembers) . ", 
-                                " . intval($otherMembers) . ", 
-                                '" . $conn->real_escape_string($status) . "', 
-                                CURRENT_DATE())";
-
-            iud($insertQuery);
+                            No_of_Family_Members, Other_Members, Status, Image, Joined_Date) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE())";
+            
+            $stmt = $conn->prepare($insertQuery);
+            $stmt->bind_param("sssssiiiss", 
+                $newMemberId, 
+                $name, 
+                $nic, 
+                $dob, 
+                $address, 
+                $mobile, 
+                $familyMembers, 
+                $otherMembers, 
+                $status,
+                $fileName
+            );
+            
+            $stmt->execute();
 
             // Handle file upload if exists
-            if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === 0) {
-                $fileName = $newMemberId . '_' . time() . '.' . pathinfo($_FILES['profile_photo']['name'], PATHINFO_EXTENSION);
+            if ($fileName && isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === 0) {
                 $uploadPath = "../uploads/" . $fileName;
-
-                if (move_uploaded_file($_FILES['profile_photo']['tmp_name'], $uploadPath)) {
-                    // Update member record with image path
-                    $updateImageQuery = "UPDATE Member SET Image = '" . $conn->real_escape_string($fileName) . "' 
-                    WHERE MemberID = '" . $conn->real_escape_string($newMemberId) . "'";
-                    iud($updateImageQuery);
+                if (!move_uploaded_file($_FILES['profile_photo']['tmp_name'], $uploadPath)) {
+                    throw new Exception("Failed to upload image");
                 }
             }
 
@@ -169,7 +187,6 @@ if (isset($_POST['add'])) {
 
         } catch (Exception $e) {
             // Rollback transaction on error
-            $conn = getConnection(); // Get the database connection
             $conn->rollback();
             $errors['db'] = "Error adding member: " . $e->getMessage();
         }
@@ -214,13 +231,14 @@ if (isset($_POST['add'])) {
 
         .form-row {
             display: flex;
+            flex-wrap: wrap;
             gap: 1rem;
             margin-bottom: 1.5rem;
         }
 
         .form-column {
             flex: 1;
-            min-width: 0;
+            min-width: 250px; /* Ensure columns don't get too narrow */
         }
 
         label {
@@ -232,6 +250,7 @@ if (isset($_POST['add'])) {
 
         .input-container {
             width: 100%;
+            margin-bottom: 1rem;
         }
 
         input[type="text"],
@@ -269,23 +288,27 @@ if (isset($_POST['add'])) {
         .terms-group {
             margin: 2rem 0;
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             gap: 0.5rem;
+            flex-wrap: wrap;
         }
 
         .terms-group input[type="checkbox"] {
             width: 1.2rem;
             height: 1.2rem;
+            margin-top: 0.2rem;
         }
 
         .button-group {
             display: flex;
             gap: 1rem;
             margin-top: 2rem;
+            flex-wrap: wrap;
+            width: 100%;
         }
 
         .btn {
-            padding: 0.8rem 2rem;
+            padding: 1rem 2rem;
             border: none;
             border-radius: 6px;
             font-size: 1rem;
@@ -297,6 +320,9 @@ if (isset($_POST['add'])) {
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            flex: 1;
+            max-width: 100%; 
+            box-sizing: border-box;
         }
 
         .btn-submit {
@@ -325,56 +351,57 @@ if (isset($_POST['add'])) {
             display: block;
         }
 
-        input.error {
+        input.error,
+        select.error {
             border-color: #dc3545;
         }
 
         @media (max-width: 768px) {
             .container {
-                width: 100%;
-                margin: 0;
-                padding: 1rem;
-                border-radius: 0;
-            }
-
-            .form-row {
-                flex-direction: column;
-                gap: 1.5rem;
+                width: 95%;
+                margin: 1rem auto;
+                padding: 1.5rem;
             }
 
             .button-group {
-                flex-direction: column-reverse;
+                flex-direction: column;
             }
-
+            
             .btn {
                 width: 100%;
-            }
-
-            .terms-group {
-                flex-wrap: wrap;
             }
         }
 
         @media (max-width: 480px) {
             .main-container {
-                padding: 0;
+                padding: 0.5rem;
+            }
+            
+            .container {
+                padding: 1rem;
+                margin: 0.5rem auto;
+                width: 100%;
             }
 
             input[type="file"] {
                 font-size: 0.9rem;
             }
+            
+            .form-column {
+                min-width: 100%;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">
+    <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 1rem;">
         <?php include '../templates/navbar-admin.php'; ?>
         <div class="container">
-            <h1>Membership Details</h1>
+            <h1>Add New Member</h1>
 
-            <form method="POST" action="" enctype="multipart/form-data">
+            <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" enctype="multipart/form-data" novalidate>
                 <?php if (isset($errors['db'])): ?>
-                    <div class="alert alert-danger"><?php echo $errors['db']; ?></div>
+                    <div class="alert alert-danger"><?php echo htmlspecialchars($errors['db']); ?></div>
                 <?php endif; ?>
 
                 <div class="form-row">
@@ -385,13 +412,15 @@ if (isset($_POST['add'])) {
                                    value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>" 
                                    class="<?php echo isset($errors['name']) ? 'error' : ''; ?>" required>
                             <?php if (isset($errors['name'])): ?>
-                                <span class="error-message"><?php echo $errors['name']; ?></span>
+                                <span class="error-message"><?php echo htmlspecialchars($errors['name']); ?></span>
                             <?php endif; ?>
                         </div>
                     </div>
                     <div class="form-column">
                         <label for="member_id">Member ID</label>
-                        <input type="text" id="member_id" value="<?php echo $newMemberId; ?>" disabled>
+                        <div class="input-container">
+                            <input type="text" id="member_id" value="<?php echo htmlspecialchars($newMemberId); ?>" disabled>
+                        </div>
                     </div>
                 </div>
 
@@ -403,7 +432,7 @@ if (isset($_POST['add'])) {
                                    value="<?php echo isset($_POST['nic']) ? htmlspecialchars($_POST['nic']) : ''; ?>"
                                    class="<?php echo isset($errors['nic']) ? 'error' : ''; ?>" required>
                             <?php if (isset($errors['nic'])): ?>
-                                <span class="error-message"><?php echo $errors['nic']; ?></span>
+                                <span class="error-message"><?php echo htmlspecialchars($errors['nic']); ?></span>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -412,9 +441,10 @@ if (isset($_POST['add'])) {
                         <div class="input-container">
                             <input type="text" id="mobile" name="mobile"
                                    value="<?php echo isset($_POST['mobile']) ? htmlspecialchars($_POST['mobile']) : ''; ?>"
-                                   class="<?php echo isset($errors['mobile']) ? 'error' : ''; ?>">
+                                   class="<?php echo isset($errors['mobile']) ? 'error' : ''; ?>"
+                                   placeholder="07XXXXXXXX">
                             <?php if (isset($errors['mobile'])): ?>
-                                <span class="error-message"><?php echo $errors['mobile']; ?></span>
+                                <span class="error-message"><?php echo htmlspecialchars($errors['mobile']); ?></span>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -426,15 +456,19 @@ if (isset($_POST['add'])) {
                         <div class="input-container">
                             <input type="date" id="dob" name="dob" 
                                    value="<?php echo isset($_POST['dob']) ? htmlspecialchars($_POST['dob']) : ''; ?>"
+                                   max="<?php echo date('Y-m-d', strtotime('-18 years')); ?>"
                                    class="<?php echo isset($errors['dob']) ? 'error' : ''; ?>" required>
                             <?php if (isset($errors['dob'])): ?>
-                                <span class="error-message"><?php echo $errors['dob']; ?></span>
+                                <span class="error-message"><?php echo htmlspecialchars($errors['dob']); ?></span>
                             <?php endif; ?>
                         </div>
                     </div>
                     <div class="form-column">
                         <label for="joined_date">Joined Date</label>
-                        <input type="date" id="joined_date" name="joined_date" value="<?php echo date('Y-m-d'); ?>" required>
+                        <div class="input-container">
+                            <input type="date" id="joined_date" name="joined_date" value="<?php echo date('Y-m-d'); ?>" readonly>
+                            <span class="hint-text">Automatically set to today's date</span>
+                        </div>
                     </div>
                 </div>
 
@@ -446,16 +480,18 @@ if (isset($_POST['add'])) {
                                    value="<?php echo isset($_POST['address']) ? htmlspecialchars($_POST['address']) : ''; ?>"
                                    class="<?php echo isset($errors['address']) ? 'error' : ''; ?>" required>
                             <?php if (isset($errors['address'])): ?>
-                                <span class="error-message"><?php echo $errors['address']; ?></span>
+                                <span class="error-message"><?php echo htmlspecialchars($errors['address']); ?></span>
                             <?php endif; ?>
                         </div>
                     </div>
                     <div class="form-column">
                         <label for="status">Status</label>
-                        <select id="status" name="status" required>
-                            <option value="FAIL">Pending</option>
-                            <option value="TRUE">Full Member</option>
-                        </select>
+                        <div class="input-container">
+                            <select id="status" name="status" required>
+                                <option value="FAIL" <?php echo (isset($_POST['status']) && $_POST['status'] === 'FAIL') ? 'selected' : ''; ?>>Pending</option>
+                                <option value="TRUE" <?php echo (isset($_POST['status']) && $_POST['status'] === 'TRUE') ? 'selected' : ''; ?>>Full Member</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -469,10 +505,10 @@ if (isset($_POST['add'])) {
                                        value="<?php echo isset($_POST['family_members']) ? htmlspecialchars($_POST['family_members']) : '0'; ?>"
                                        class="<?php echo isset($errors['family_members']) ? 'error' : ''; ?>">
                                 <?php if (isset($errors['family_members'])): ?>
-                                    <span class="error-message"><?php echo $errors['family_members']; ?></span>
+                                    <span class="error-message"><?php echo htmlspecialchars($errors['family_members']); ?></span>
                                 <?php endif; ?>
+                                <p class="hint-text">Only consider wife, children & Parents</p>
                             </div>
-                            <p class="hint-text">Only consider wife, children & Parents</p>
                         </div>
                         <div class="form-column">
                             <label for="other_members">Other Members Living at Home</label>
@@ -481,7 +517,7 @@ if (isset($_POST['add'])) {
                                        value="<?php echo isset($_POST['other_members']) ? htmlspecialchars($_POST['other_members']) : '0'; ?>"
                                        class="<?php echo isset($errors['other_members']) ? 'error' : ''; ?>">
                                 <?php if (isset($errors['other_members'])): ?>
-                                    <span class="error-message"><?php echo $errors['other_members']; ?></span>
+                                    <span class="error-message"><?php echo htmlspecialchars($errors['other_members']); ?></span>
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -495,7 +531,7 @@ if (isset($_POST['add'])) {
                             <input type="file" name="profile_photo" accept="image/*"
                                    class="<?php echo isset($errors['profile_photo']) ? 'error' : ''; ?>">
                             <?php if (isset($errors['profile_photo'])): ?>
-                                <span class="error-message"><?php echo $errors['profile_photo']; ?></span>
+                                <span class="error-message"><?php echo htmlspecialchars($errors['profile_photo']); ?></span>
                             <?php endif; ?>
                             <p class="hint-text">(jpeg / jpg / png , 20MB max)</p>
                         </div>
@@ -507,7 +543,7 @@ if (isset($_POST['add'])) {
                            class="<?php echo isset($errors['terms']) ? 'error' : ''; ?>">
                     <label for="terms">I agree to the Terms & Conditions</label>
                     <?php if (isset($errors['terms'])): ?>
-                        <span class="error-message"><?php echo $errors['terms']; ?></span>
+                        <span class="error-message"><?php echo htmlspecialchars($errors['terms']); ?></span>
                     <?php endif; ?>
                 </div>
 
@@ -520,46 +556,56 @@ if (isset($_POST['add'])) {
     </div>
 
     <script>
-        document.querySelector('form').addEventListener('submit', function(e) {
-        let hasError = false;
-        
-        // Clear previous errors
-        document.querySelectorAll('.error-message').forEach(el => el.remove());
-        document.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form');
+            
+            form.addEventListener('submit', function(e) {
+                let hasError = false;
+                
+                // Clear previous errors
+                document.querySelectorAll('.error-message').forEach(el => el.remove());
+                document.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
 
-        // Validate name
-        const name = document.getElementById('name').value.trim();
-        if (!/^[a-zA-Z\s]{3,}$/.test(name)) {
-            showError('name', 'Name should contain only letters and spaces');
-            hasError = true;
-        }
+                // Validate name
+                const name = document.getElementById('name').value.trim();
+                if (!/^[a-zA-Z\s]{3,}$/.test(name)) {
+                    showError('name', 'Name should contain only letters and spaces');
+                    hasError = true;
+                }
 
-        // Validate NIC
-        const nic = document.getElementById('nic').value.trim();
-        if (!/^([0-9]{9}[vVxX]|[0-9]{12})$/.test(nic)) {
-            showError('nic', 'Invalid NIC format');
-            hasError = true;
-        }
+                // Validate NIC
+                const nic = document.getElementById('nic').value.trim();
+                if (!/^([0-9]{9}[vVxX]|[0-9]{12})$/.test(nic)) {
+                    showError('nic', 'Invalid NIC format');
+                    hasError = true;
+                }
 
-        // Validate Terms & Conditions
-        if (!document.getElementById('terms').checked) {
-            showError('terms', 'Please accept the Terms & Conditions');
-            hasError = true;
-        }
+                // Validate Terms & Conditions
+                if (!document.getElementById('terms').checked) {
+                    showError('terms', 'Please accept the Terms & Conditions');
+                    hasError = true;
+                }
 
-        if (hasError) {
-            e.preventDefault();
-        }
-    });
+                if (hasError) {
+                    e.preventDefault();
+                }
+            });
 
-    function showError(fieldId, message) {
-        const field = document.getElementById(fieldId);
-        field.classList.add('error');
-        const errorDiv = document.createElement('span');
-        errorDiv.className = 'error-message';
-        errorDiv.textContent = message;
-        field.parentNode.appendChild(errorDiv);
-    }
+            function showError(fieldId, message) {
+                const field = document.getElementById(fieldId);
+                field.classList.add('error');
+                const errorDiv = document.createElement('span');
+                errorDiv.className = 'error-message';
+                errorDiv.textContent = message;
+                field.parentNode.appendChild(errorDiv);
+            }
+            
+            // Set max date for DOB to 18 years ago
+            const dobInput = document.getElementById('dob');
+            const maxDate = new Date();
+            maxDate.setFullYear(maxDate.getFullYear() - 18);
+            dobInput.max = maxDate.toISOString().split('T')[0];
+        });
     </script>
 </body>
 </html>

@@ -1,33 +1,44 @@
 <?php
     session_start();
     require_once "../../config/database.php";
-    // require_once "../config/session_auth.php";
 
-    // // Verify this is an admin accessing the page
-    // verifySession('admin');
-
-    // Get total members count
+    // Get total members count using prepared statement
     $totalMembers = 0;
     try {
         $memberCountQuery = "SELECT COUNT(*) as total FROM Member";
-        $result = search($memberCountQuery);
+        $stmt = prepare($memberCountQuery);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
         if ($result && $result->num_rows > 0) {
             $totalMembers = $result->fetch_assoc()['total'];
         }
+        $stmt->close();
     } catch(Exception $e) {
-        // Handle error if needed
+        // Log error securely
         error_log("Error getting member count: " . $e->getMessage());
+        // Avoid exposing error details to user
+        $totalMembers = 0;
     }
 
     $memberName = "Guest";
 
-    if (isset($userData['Admin_AdminID'])) {
-        $memberQuery = "SELECT Name FROM Admin WHERE AdminID = '" . $userData['Admin_AdminID'] . "'";
-        $memberResult = search($memberQuery);
-        
-        if ($memberResult && $memberResult->num_rows > 0) {
-            $memberData = $memberResult->fetch_assoc();
-            $memberName = $memberData['Name'];
+    // Safely retrieve admin name using prepared statement
+    if (isset($_SESSION['Admin_AdminID'])) {
+        try {
+            $memberQuery = "SELECT Name FROM Admin WHERE AdminID = ?";
+            $stmt = getConnection()->prepare($memberQuery);
+            $stmt->bind_param("i", $_SESSION['Admin_AdminID']);
+            $stmt->execute();
+            $memberResult = $stmt->get_result();
+            
+            if ($memberResult && $memberResult->num_rows > 0) {
+                $memberData = $memberResult->fetch_assoc();
+                $memberName = htmlspecialchars($memberData['Name'], ENT_QUOTES, 'UTF-8');
+            }
+            $stmt->close();
+        } catch(Exception $e) {
+            error_log("Error retrieving admin name: " . $e->getMessage());
         }
     }
 ?>
@@ -363,6 +374,6 @@ h3 {
                 btn.innerHTML = 'Show Management Options <i class="fas fa-chevron-down rotate-icon" id="chevron-icon"></i>';
             }
         }
-        </script>
+   </script>
 </body>
 </html>

@@ -2,6 +2,9 @@
 session_start();
 require_once "../../config/database.php";
 
+// Get database connection
+$conn = getConnection();
+
 // Check for success message
 $successMessage = isset($_SESSION['success_message']) ? $_SESSION['success_message'] : null;
 
@@ -10,42 +13,109 @@ if($successMessage) {
     unset($_SESSION['success_message']);
 }
 
-// Fetch all auditors
-$query = "SELECT * FROM Auditor ORDER BY Term DESC";
-$result = search($query);
+// Fetch all auditors with prepared statement
+try {
+    $query = "SELECT * FROM Auditor ORDER BY Term DESC";
+    $stmt = $conn->prepare($query);
+    $stmt->execute();
+    $result = $stmt->get_result();
+} catch(Exception $e) {
+    $error = "Error fetching auditors: " . $e->getMessage();
+}
+
+// Check if name already exists for another auditor
+function checkDuplicateName($conn, $name, $auditorId) {
+    $query = "SELECT AuditorID FROM Auditor WHERE Name = ? AND AuditorID != ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("ss", $name, $auditorId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->num_rows > 0;
+}
+
+// Check if auditor is used in User table
+function isAuditorInUse($conn, $auditorId) {
+    $query = "SELECT UserId FROM User WHERE Auditor_AuditorID = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("s", $auditorId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->num_rows > 0;
+}
 
 // Handle Update
 if(isset($_POST['update'])) {
-    $auditorId = $_POST['auditor_id'];
-    $name = $_POST['name'];
-    $term = $_POST['term'];
+    $auditorId = trim($_POST['auditor_id']);
+    $name = trim($_POST['name']);
+    $term = trim($_POST['term']);
     $isActive = $_POST['is_active'];
     
-    $updateQuery = "UPDATE Auditor SET 
-                   Name = '$name',
-                   Term = '$term',
-                   isActive = '$isActive'
-                   WHERE AuditorID = '$auditorId'";
+    // Validate inputs
+    $errors = [];
     
-    iud($updateQuery);
-    $_SESSION['success_message'] = "Auditor updated successfully";
-    header("Location: " . $_SERVER['PHP_SELF']);
-    exit();
+    if(empty($name)) $errors[] = "Name is required";
+    if(empty($term)) $errors[] = "Term is required";
+    if(!is_numeric($term)) $errors[] = "Term must be a number";
+    
+    // Check for duplicate name
+    if(empty($errors) && checkDuplicateName($conn, $name, $auditorId)) {
+        $errors[] = "An auditor with this name already exists";
+    }
+    
+    if(empty($errors)) {
+        try {
+            // Use prepared statement for update
+            $updateQuery = "UPDATE Auditor SET 
+                          Name = ?,
+                          Term = ?,
+                          isActive = ?
+                          WHERE AuditorID = ?";
+            
+            $stmt = $conn->prepare($updateQuery);
+            $stmt->bind_param("siis", $name, $term, $isActive, $auditorId);
+            $stmt->execute();
+            
+            if($stmt->affected_rows > 0) {
+                $_SESSION['success_message'] = "Auditor updated successfully";
+            } else {
+                $_SESSION['success_message'] = "No changes were made";
+            }
+            
+            header("Location: " . $_SERVER['PHP_SELF']);
+            exit();
+        } catch(Exception $e) {
+            $updateError = "Error updating auditor: " . $e->getMessage();
+        }
+    } else {
+        $updateError = implode("<br>", $errors);
+    }
 }
 
 // Handle Delete
 if(isset($_POST['delete'])) {
-    $auditorId = $_POST['auditor_id'];
-    
-    $deleteQuery = "DELETE FROM Auditor WHERE AuditorID = '$auditorId'";
+    $auditorId = trim($_POST['auditor_id']);
     
     try {
-        iud($deleteQuery);
-        $_SESSION['success_message'] = "Auditor deleted successfully";
-        header("Location: " . $_SERVER['PHP_SELF']);
-        $deleteSuccess = true;
+        // Check if auditor is used in User table
+        if(isAuditorInUse($conn, $auditorId)) {
+            throw new Exception("Cannot delete this auditor as they are associated with one or more users");
+        }
+        
+        // Use prepared statement for deletion
+        $deleteQuery = "DELETE FROM Auditor WHERE AuditorID = ?";
+        $stmt = $conn->prepare($deleteQuery);
+        $stmt->bind_param("s", $auditorId);
+        $stmt->execute();
+        
+        if($stmt->affected_rows > 0) {
+            $_SESSION['success_message'] = "Auditor deleted successfully";
+            header("Location: " . $_SERVER['PHP_SELF']);
+            exit();
+        } else {
+            $deleteError = "Auditor not found or already deleted";
+        }
     } catch(Exception $e) {
-        $deleteError = "Cannot delete this auditor. They may have associated records.";
+        $deleteError = $e->getMessage();
     }
 }
 ?>
@@ -57,19 +127,26 @@ if(isset($_POST['delete'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Manage Auditors</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-    <link rel="stylesheet" href="../../assets/css/adminActorDetails.css">
+    <link rel="stylesheet" href="../../assets/css/adminDetails.css">
     <link rel="stylesheet" href="../../assets/css/alert.css">
     <script src="../../assets/js/alertHandler.js"></script>
+    <style>
+        .modal-content, .delete-modal-content {
+            background-color: #fefefe;
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            border-radius: 8px;
+            width: 50%;
+            max-width: 600px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+    </style>
 </head>
 <body>
     <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">
     <?php include '../templates/navbar-admin.php'; ?>
     <div class="container">
-        <?php if($successMessage): ?>
-            <div class="alert alert-success">
-                <?php echo htmlspecialchars($successMessage); ?>
-            </div>
-        <?php endif; ?>
         <div class="header-section">
             <h1>Manage Auditors</h1>
             <a href="addAuditor.php" class="add-btn">
@@ -77,12 +154,24 @@ if(isset($_POST['delete'])) {
             </a>
         </div>
 
-        <?php if(isset($deleteSuccess)): ?>
-            <div class="alert alert-success">Auditor deleted successfully!</div>
+        <?php if($successMessage): ?>
+            <div class="alert alert-success">
+                <?php echo htmlspecialchars($successMessage); ?>
+            </div>
+        <?php endif; ?>
+        
+        <?php if(isset($error)): ?>
+            <div class="alert alert-danger">
+                <?php echo htmlspecialchars($error); ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if(isset($updateError)): ?>
+            <div class="alert alert-danger"><?php echo htmlspecialchars($updateError); ?></div>
         <?php endif; ?>
 
         <?php if(isset($deleteError)): ?>
-            <div class="alert alert-danger"><?php echo $deleteError; ?></div>
+            <div class="alert alert-danger"><?php echo htmlspecialchars($deleteError); ?></div>
         <?php endif; ?>
         
         <div class="table-responsive">
@@ -97,28 +186,39 @@ if(isset($_POST['delete'])) {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php while($row = $result->fetch_assoc()): ?>
-                    <tr>
-                        <td><?php echo htmlspecialchars($row['AuditorID']); ?></td>
-                        <td><?php echo htmlspecialchars($row['Name']); ?></td>
-                        <td><?php echo htmlspecialchars($row['Term']); ?></td>
-                        <td>
-                            <span class="status-badge status-<?php echo $row['isActive'] ? 'active' : 'inactive'; ?>">
-                                <?php echo $row['isActive'] ? 'Active' : 'Inactive'; ?>
-                            </span>
-                        </td>
-                        <td>
-                            <div class="action-buttons">
-                                <button class="action-btn edit-btn" onclick="openEditModal('<?php echo $row['AuditorID']; ?>', '<?php echo $row['Name']; ?>', '<?php echo $row['Term']; ?>', '<?php echo $row['isActive']; ?>')">
-                                    <i class="fas fa-edit"></i> Edit
-                                </button>
-                                <button class="action-btn delete-btn" onclick="openDeleteModal('<?php echo $row['AuditorID']; ?>')">
-                                    <i class="fas fa-trash"></i> Delete
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                    <?php endwhile; ?>
+                    <?php if(isset($result) && $result->num_rows > 0): ?>
+                        <?php while($row = $result->fetch_assoc()): ?>
+                        <tr>
+                            <td><?php echo htmlspecialchars($row['AuditorID']); ?></td>
+                            <td><?php echo htmlspecialchars($row['Name']); ?></td>
+                            <td><?php echo htmlspecialchars($row['Term']); ?></td>
+                            <td>
+                                <span class="status-badge status-<?php echo $row['isActive'] ? 'active' : 'inactive'; ?>">
+                                    <?php echo $row['isActive'] ? 'Active' : 'Inactive'; ?>
+                                </span>
+                            </td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="action-btn edit-btn" onclick="openEditModal(
+                                        '<?php echo htmlspecialchars($row['AuditorID']); ?>',
+                                        '<?php echo htmlspecialchars(addslashes($row['Name'])); ?>',
+                                        '<?php echo htmlspecialchars($row['Term']); ?>',
+                                        '<?php echo htmlspecialchars($row['isActive']); ?>'
+                                    )">
+                                        <i class="fas fa-edit"></i> Edit
+                                    </button>
+                                    <button class="action-btn delete-btn" onclick="openDeleteModal('<?php echo htmlspecialchars($row['AuditorID']); ?>')">
+                                        <i class="fas fa-trash"></i> Delete
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="5" style="text-align: center;">No auditors found</td>
+                        </tr>
+                    <?php endif; ?>
                 </tbody>
             </table>
         </div>
@@ -129,7 +229,7 @@ if(isset($_POST['delete'])) {
         <div class="modal-content">
             <span class="close" onclick="closeModal()">&times;</span>
             <h2>Edit Auditor</h2>
-            <form id="editForm" method="POST">
+            <form id="editForm" method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
                 <input type="hidden" id="edit_auditor_id" name="auditor_id">
                 
                 <div class="form-group">
@@ -151,8 +251,8 @@ if(isset($_POST['delete'])) {
                 </div>
 
                 <div class="modal-footer">
-                    <button type="button" class="cancel-btn" onclick="closeModal()">Cancel</button>
                     <button type="submit" name="update" class="save-btn">Save Changes</button>
+                    <button type="button" class="cancel-btn" onclick="closeModal()">Cancel</button>
                 </div>
             </form>
         </div>
@@ -163,7 +263,7 @@ if(isset($_POST['delete'])) {
         <div class="delete-modal-content">
             <h2>Confirm Delete</h2>
             <p>Are you sure you want to delete this auditor? This action cannot be undone.</p>
-            <form method="POST" id="deleteForm">
+            <form method="POST" id="deleteForm" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
                 <input type="hidden" id="delete_auditor_id" name="auditor_id">
                 <div class="delete-modal-buttons">
                     <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>
@@ -178,7 +278,7 @@ if(isset($_POST['delete'])) {
         function openEditModal(id, name, term, isActive) {
             document.getElementById('editModal').style.display = 'block';
             document.getElementById('edit_auditor_id').value = id;
-            document.getElementById('edit_name').value = name;
+            document.getElementById('edit_name').value = name.replace(/\\'/g, "'");
             document.getElementById('edit_term').value = term;
             document.getElementById('edit_status').value = isActive;
         }

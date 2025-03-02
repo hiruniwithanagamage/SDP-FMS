@@ -100,9 +100,21 @@ if(isset($_POST['delete'])) {
     <title>Manage Treasurers</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="../../assets/css/adminActorDetails.css">
+    <link rel="stylesheet" href="../../assets/css/adminDetails.css">
     <link rel="stylesheet" href="../../assets/css/alert.css">
     <script src="../../assets/js/alertHandler.js"></script>
+    <style>
+        .modal-content, .delete-modal-content {
+        background-color: #fefefe;
+        margin: 10% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        border-radius: 8px;
+        width: 50%;
+        max-width: 600px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+    </style>
 </head>
 <body>
     <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">
@@ -193,8 +205,8 @@ if(isset($_POST['delete'])) {
                 </div>
 
                 <div class="modal-footer">
-                    <button type="button" class="cancel-btn" onclick="closeModal()">Cancel</button>
                     <button type="submit" name="update" class="save-btn">Save Changes</button>
+                    <button type="button" class="cancel-btn" onclick="closeModal()">Cancel</button>
                 </div>
             </form>
         </div>

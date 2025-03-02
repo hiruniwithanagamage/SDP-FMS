@@ -2,30 +2,46 @@
 session_start();
 require_once "../../config/database.php";
 
-// Generate new Auditor ID
-$query = "SELECT AuditorID FROM Auditor ORDER BY AuditorID DESC LIMIT 1";
-$result = search($query);
+// Get database connection
+$conn = getConnection();
 
-if ($result && $result->num_rows > 0) {
-    $row = $result->fetch_assoc();
-    if ($row && isset($row['AuditorID'])) {
-        $lastId = $row['AuditorID'];
-        // Use preg_replace to extract only numeric part
-        $numericPart = preg_replace('/[^0-9]/', '', $lastId);
-        $newNumericPart = intval($numericPart) + 1;
-        $newAuditorId = "auditor" . $newNumericPart;
-    } else {
-        $newAuditorId = "auditor1";
+// Generate new Auditor ID
+function generateNewAuditorId($conn) {
+    $query = "SELECT AuditorID FROM Auditor ORDER BY AuditorID DESC LIMIT 1";
+    $stmt = $conn->prepare($query);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        if ($row && isset($row['AuditorID'])) {
+            $lastId = $row['AuditorID'];
+            // Use preg_replace to extract only numeric part
+            $numericPart = preg_replace('/[^0-9]/', '', $lastId);
+            $newNumericPart = intval($numericPart) + 1;
+            return "auditor" . $newNumericPart;
+        }
     }
-} else {
-    $newAuditorId = "auditor1";
+    return "auditor1";
 }
+
+// Check if auditor name already exists
+function checkExistingAuditor($conn, $name) {
+    $query = "SELECT AuditorID FROM Auditor WHERE Name = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("s", $name);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->num_rows > 0;
+}
+
+$newAuditorId = generateNewAuditorId($conn);
 
 // Check if form is submitted
 if(isset($_POST['add'])) {
-    $name = $_POST['name'];
+    $name = trim($_POST['name']);
     $auditorId = $newAuditorId;
-    $term = $_POST['term'];
+    $term = trim($_POST['term']);
     
     // Validate inputs
     $errors = [];
@@ -34,43 +50,35 @@ if(isset($_POST['add'])) {
     if(empty($term)) $errors[] = "Term is required";
     if(!is_numeric($term)) $errors[] = "Term must be a number";
     
+    // Check if auditor name already exists
+    if(empty($errors) && checkExistingAuditor($conn, $name)) {
+        $errors[] = "An auditor with this name already exists";
+    }
+    
     if(empty($errors)) {
-        // Get database connection for escaping strings
-        $conn = getConnection();
-        
-        // Prepare SQL insert statement with escaped values
-        $query = "INSERT INTO Auditor (AuditorID, Name, Term, isActive) 
-                  VALUES ('" . $conn->real_escape_string($auditorId) . "', 
-                          '" . $conn->real_escape_string($name) . "', 
-                          " . intval($term) . ", 
-                          1)";
-        
         try {
-            // Use the existing database method for insert/update/delete
-            iud($query);
+            // Use prepared statement for insert
+            $query = "INSERT INTO Auditor (AuditorID, Name, Term, isActive) VALUES (?, ?, ?, 1)";
+            $stmt = $conn->prepare($query);
+            $stmt->bind_param("ssi", $auditorId, $name, $term);
             
-            // Regenerate next Auditor ID
-            $query = "SELECT AuditorID FROM Auditor ORDER BY AuditorID DESC LIMIT 1";
-            $result = search($query);
-            if ($result && $result->num_rows > 0) {
-                $row = $result->fetch_assoc();
-                if ($row && isset($row['AuditorID'])) {
-                    $lastId = $row['AuditorID'];
-                    $numericPart = preg_replace('/[^0-9]/', '', $lastId);
-                    $newNumericPart = intval($numericPart) + 1;
-                    $newAuditorId = "auditor" . $newNumericPart;
-                }
+            // Execute the statement
+            $stmt->execute();
+            
+            if($stmt->affected_rows > 0) {
+                // Set session message
+                $_SESSION['success_message'] = "Auditor added successfully";
+                
+                // Redirect to auditorDetails.php
+                header("Location: auditorDetails.php");
+                exit();
+            } else {
+                $error = "Failed to add auditor. Please try again.";
             }
-            
-            // Set session message
-            $_SESSION['success_message'] = "Auditor added successfully";
-            
-            // Redirect to auditorDetails.php
-            header("Location: auditorDetails.php");
-            exit();
-            
         } catch(Exception $e) {
             $error = "Error adding auditor: " . $e->getMessage();
+            // Generate new ID in case we need to retry
+            $newAuditorId = generateNewAuditorId($conn);
         }
     } else {
         // Collect errors
@@ -177,16 +185,16 @@ if(isset($_POST['add'])) {
     <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">
     <?php include '../templates/navbar-admin.php'; ?>
     <div class="container">
-        <h1>Auditor Details</h1>
+        <h1>Add New Auditor</h1>
         
         <?php if(isset($error)): ?>
-            <div class="alert alert-error"><?php echo $error; ?></div>
+            <div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div>
         <?php endif; ?>
         
-        <form method="POST" action="">
+        <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
             <div class="form-group">
                 <label for="name">Name</label>
-                <input type="text" id="name" name="name" required>
+                <input type="text" id="name" name="name" required value="<?php echo isset($name) ? htmlspecialchars($name) : ''; ?>">
             </div>
 
             <div class="form-group">
@@ -196,11 +204,11 @@ if(isset($_POST['add'])) {
 
             <div class="form-group">
                 <label for="term">Term</label>
-                <input type="number" id="term" name="term" required>
+                <input type="number" id="term" name="term" required value="<?php echo isset($term) ? htmlspecialchars($term) : ''; ?>">
             </div>
 
             <div class="button-group">
-                <button type="submit" name="add" class="btn btn-add">Add</button>
+                <button type="submit" name="add" class="btn btn-add">Add Auditor</button>
                 <button type="button" onclick="window.location.href='auditorDetails.php'" class="btn btn-cancel">Cancel</button>
             </div>
         </form>

@@ -2,30 +2,46 @@
 session_start();
 require_once "../../config/database.php";
 
-// Generate new Admin ID
-$query = "SELECT AdminID FROM Admin ORDER BY AdminID DESC LIMIT 1";
-$result = search($query);
+// Get database connection
+$conn = getConnection(); // Assuming this function exists in database.php
 
-if ($result && $result->num_rows > 0) {
-    $row = $result->fetch_assoc();
-    if ($row && isset($row['AdminID'])) {
-        $lastId = $row['AdminID'];
-        // Use preg_replace to extract only numeric part
-        $numericPart = preg_replace('/[^0-9]/', '', $lastId);
-        $newNumericPart = intval($numericPart) + 1;
-        $newAdminId = "admin" . $newNumericPart;
-    } else {
-        $newAdminId = "admin1";
+// Generate new Admin ID
+function generateNewAdminId($conn) {
+    $query = "SELECT AdminID FROM Admin ORDER BY AdminID DESC LIMIT 1";
+    $stmt = $conn->prepare($query);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        if ($row && isset($row['AdminID'])) {
+            $lastId = $row['AdminID'];
+            // Use preg_replace to extract only numeric part
+            $numericPart = preg_replace('/[^0-9]/', '', $lastId);
+            $newNumericPart = intval($numericPart) + 1;
+            return "admin" . $newNumericPart;
+        }
     }
-} else {
-    $newAdminId = "admin1";
+    return "admin1";
 }
+
+// Check if admin name already exists
+function checkExistingAdmin($conn, $name) {
+    $query = "SELECT AdminID FROM Admin WHERE Name = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("s", $name);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->num_rows > 0;
+}
+
+$newAdminId = generateNewAdminId($conn);
 
 // Check if form is submitted
 if(isset($_POST['add'])) {
-    $name = $_POST['name'];
+    $name = trim($_POST['name']);
     $adminId = $newAdminId;
-    $contactNumber = $_POST['contact_number'];
+    $contactNumber = trim($_POST['contact_number']);
     
     // Validate inputs
     $errors = [];
@@ -33,31 +49,36 @@ if(isset($_POST['add'])) {
     if(empty($name)) $errors[] = "Name is required";
     if(empty($contactNumber)) $errors[] = "Contact Number is required";
     
-    // Additional validation for contact number (optional)
+    // Additional validation for contact number
     if(!preg_match('/^[0-9]{10}$/', $contactNumber)) {
-        $errors[] = "Invalid contact number format";
+        $errors[] = "Contact number must be 10 digits";
+    }
+    
+    // Check if admin name already exists
+    if(empty($errors) && checkExistingAdmin($conn, $name)) {
+        $errors[] = "An admin with this name already exists";
     }
     
     if(empty($errors)) {
-        // Get database connection for escaping strings
-        $conn = getConnection();
-
-        // Prepare SQL insert statement with escaped values
-        $query = "INSERT INTO Admin (AdminID, Name, Contact_Number) 
-                VALUES ('" . $conn->real_escape_string($adminId) . "', 
-                        '" . $conn->real_escape_string($name) . "', 
-                        '" . $conn->real_escape_string($contactNumber) . "')";
-                
         try {
-            // Use the existing database method for insert/update/delete
-            iud($query);
+            // Prepare SQL insert statement with parameters
+            $query = "INSERT INTO Admin (AdminID, Name, Contact_Number) VALUES (?, ?, ?)";
+            $stmt = $conn->prepare($query);
+            $stmt->bind_param("sss", $adminId, $name, $contactNumber);
             
-            // Set session message
-            $_SESSION['success_message'] = "Admin added successfully";
+            // Execute the statement
+            $stmt->execute();
             
-            // Redirect to adminDetails.php
-            header("Location: adminDetails.php");
-            exit();
+            if($stmt->affected_rows > 0) {
+                // Set session message
+                $_SESSION['success_message'] = "Admin added successfully";
+                
+                // Redirect to adminDetails.php
+                header("Location: adminDetails.php");
+                exit();
+            } else {
+                $error = "Failed to add admin. Please try again.";
+            }
         } catch(Exception $e) {
             $error = "Error adding admin: " . $e->getMessage();
         }
@@ -158,22 +179,40 @@ if(isset($_POST['add'])) {
         .btn-cancel:hover {
             background-color: #f5f7fa;
         }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        .alert-error, .alert-danger {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
+        .alert-success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
     </style>
 </head>
 <body>
     <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">
     <?php include '../templates/navbar-admin.php'; ?>
     <div class="container">
-        <h1>Admin Details</h1>
+        <h1>Add New Admin</h1>
         
         <?php if(isset($error)): ?>
-            <div class="alert alert-error"><?php echo $error; ?></div>
+            <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
         <?php endif; ?>
         
-        <form method="POST" action="">
+        <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
             <div class="form-group">
                 <label for="name">Name</label>
-                <input type="text" id="name" name="name" required>
+                <input type="text" id="name" name="name" required value="<?php echo isset($name) ? htmlspecialchars($name) : ''; ?>">
             </div>
 
             <div class="form-group">
@@ -183,11 +222,11 @@ if(isset($_POST['add'])) {
 
             <div class="form-group">
                 <label for="contact_number">Contact Number</label>
-                <input type="text" id="contact_number" name="contact_number" required>
+                <input type="text" id="contact_number" name="contact_number" required value="<?php echo isset($contactNumber) ? htmlspecialchars($contactNumber) : ''; ?>" placeholder="10 digits">
             </div>
 
             <div class="button-group">
-                <button type="submit" name="add" class="btn btn-add">Add</button>
+                <button type="submit" name="add" class="btn btn-add">Add Admin</button>
                 <button type="button" onclick="window.location.href='adminDetails.php'" class="btn btn-cancel">Cancel</button>
             </div>
         </form>

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login Page</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <style>
         :root {
             --primary-color: rgb(21, 21, 99);
@@ -96,6 +97,25 @@
             box-shadow: 0 0 0 3px rgba(21, 21, 99, 0.1);
         }
 
+        .password-container {
+            position: relative;
+            width: 100%;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: pointer;
+            color: #888;
+            z-index: 10;
+        }
+
+        .password-toggle:hover {
+            color: #1a237e;
+        }
+
         button {
             background-color: var(--primary-color);
             color: white;
@@ -181,7 +201,12 @@
             
             <div class="form-group">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="p" autocomplete="current-password">
+                <div class="password-container">
+                    <input type="password" id="password" name="p" autocomplete="current-password">
+                    <span class="password-toggle" onclick="togglePasswordVisibility()">
+                        <i class="fas fa-eye" id="password-toggle-icon"></i>
+                    </span>
+                </div>
             </div>
 
             <div id="msg" class="message-container"></div>
@@ -195,5 +220,21 @@
     </div>
     
     <script src="assets/js/loginProcess.js"></script>
+    <script>
+        function togglePasswordVisibility() {
+            const passwordInput = document.getElementById('password');
+            const toggleIcon = document.getElementById('password-toggle-icon');
+            
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                toggleIcon.classList.remove('fa-eye');
+                toggleIcon.classList.add('fa-eye-slash');
+            } else {
+                passwordInput.type = 'password';
+                toggleIcon.classList.remove('fa-eye-slash');
+                toggleIcon.classList.add('fa-eye');
+            }
+        }
+    </script>
 </body>
 </html>
