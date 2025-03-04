@@ -658,7 +658,7 @@ $currentTerm = getCurrentTerm();
 
 <div id="reports-section" class="category-section">
     <div class="category-cards">
-        <div class="action-card" onclick="window.location.href='financial_reports.php'">
+        <div class="action-card" onclick="window.location.href='../../reports/financialReports.php'">
             <i class="fas fa-chart-line icon"></i>
             <h3>Financial Reports</h3>
         </div>
@@ -675,7 +675,7 @@ $currentTerm = getCurrentTerm();
            <!-- Info Grid -->
            <div class="info-grid">
                 <div class="info-card">
-                    <h2>Recent Transactions</h2>
+                    <h2>Recent Activities</h2>
                     <?php while($transaction = $recentTransactions->fetch_assoc()): ?>
                         <div class="info-item">
                             <span>

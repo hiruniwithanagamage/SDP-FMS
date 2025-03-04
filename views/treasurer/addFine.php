@@ -21,7 +21,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     VALUES ('$fineID', '$amount', '$date', '$term', '$description', '$memberID', '$isPaid')";
     
     try {
-        Database::iud($insertQuery);
+        iud($insertQuery);
         $_SESSION['success_message'] = "Fine added successfully!";
         header("Location: home-treasurer.php");
         exit();
@@ -58,7 +58,7 @@ if ($membersResult->num_rows == 0) {
     <title>Add Fine</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="../../assets/css/adminActorDetails.css">
+    <link rel="stylesheet" href="../../assets/css/adminDetails.css">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>

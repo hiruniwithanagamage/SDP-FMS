@@ -6,6 +6,8 @@ function getBasePath() {
     // Check if we're in the Management subfolder
     if (strpos($currentPath, '/financialManagement/') !== false) {
         return "../../../";  // One level deeper, so need an extra ../
+    } else if (strpos($currentPath, '/reports/') !== false) {
+        return "../";     // Direct in reports folder
     } else {
         return "../../";     // Direct in treasurer folder
     }

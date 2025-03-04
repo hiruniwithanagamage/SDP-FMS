@@ -116,7 +116,7 @@ $months = [
     <meta charset="UTF-8">
     <title>Loan Details</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="../../../assets/css/adminActorDetails.css">
+    <link rel="stylesheet" href="../../../assets/css/adminDetails.css">
     <link rel="stylesheet" href="../../../assets/css/financialManagement.css">
 </head>
 <body>
@@ -126,12 +126,12 @@ $months = [
         <div class="header-card">
             <h1>Loan Details</h1>
             <select class="filter-select" onchange="updateFilters()" id="yearSelect">
-                    <?php for($y = $currentTerm; $y >= $currentTerm - 2; $y--): ?>
-                        <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
-                            Year <?php echo $y; ?>
-                        </option>
-                    <?php endfor; ?>
-                </select>
+                <?php for($y = $currentTerm; $y >= $currentTerm - 2; $y--): ?>
+                    <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
+                        Year <?php echo $y; ?>
+                    </option>
+                <?php endfor; ?>
+            </select>
         </div>
 
         <div id="stats-section" class="stats-cards">
