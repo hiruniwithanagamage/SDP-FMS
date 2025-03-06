@@ -1,4 +1,3 @@
-//processPayment.php
 <?php
 session_start();
 require_once "../../../config/database.php";
@@ -69,6 +68,40 @@ try {
         $receiptUrl = 'uploads/receipts/' . $fileName;
     }
 
+    // IMPORTANT: Always insert the payment record FIRST before creating any child records
+    // This ensures foreign key constraints are not violated
+    $cardNumber = isset($_POST['card_number']) ? $_POST['card_number'] : null;
+    $expireDate = isset($_POST['expire_date']) ? $_POST['expire_date'] : null;
+    $cvv = isset($_POST['cvv']) ? $_POST['cvv'] : null;
+    
+    $paymentQuery = "INSERT INTO Payment (
+        PaymentID, 
+        Payment_Type, 
+        Method, 
+        Amount, 
+        Date, 
+        Term, 
+        Image, 
+        card_number, 
+        expire_date, 
+        cvv, 
+        Member_MemberID
+    ) VALUES (
+        '$paymentId',
+        '$paymentType',
+        '$method',
+        $amount,
+        '$date',
+        $year,
+        " . ($receiptUrl ? "'$receiptUrl'" : "NULL") . ", 
+        " . ($cardNumber ? "'$cardNumber'" : "NULL") . ",
+        " . ($expireDate ? "'$expireDate'" : "NULL") . ",
+        " . ($cvv ? "'$cvv'" : "NULL") . ",
+        '$memberId'
+    )";
+    
+    iud($paymentQuery);
+
     // Process different payment types
     switch($paymentType) {
         case 'registration':
@@ -88,55 +121,42 @@ try {
                 throw new Exception("Payment amount cannot exceed remaining registration fee");
             }
 
-            // Create membership fee record if it doesn't exist
-            $existingFeeQuery = "SELECT FeeID FROM MembershipFee 
-                                WHERE Member_MemberID = '$memberId' 
-                                AND Term = $year 
-                                AND Type = 'registration'";
-            $existingFeeResult = search($existingFeeQuery);
-            
-            if ($existingFeeResult->num_rows === 0) {
-                $feeId = generateFeeId();
-                $query = "INSERT INTO MembershipFee (FeeID, Amount, Date, Term, Type, Member_MemberID, IsPaid) 
-                        VALUES ('$feeId', " . $feeStructure['registration_fee'] . ", 
-                        '$date', $year, 'registration', '$memberId', 'No')";
-                iud($query);
-            } else {
-                $feeId = $existingFeeResult->fetch_assoc()['FeeID'];
-            }
+            // Create a new registration fee record for this payment
+            $feeId = generateFeeId();
+            $feeQuery = "INSERT INTO MembershipFee (
+                FeeID, 
+                Amount, 
+                Date, 
+                Term, 
+                Type, 
+                Member_MemberID, 
+                IsPaid
+            ) VALUES (
+                '$feeId', 
+                $amount, 
+                '$date', 
+                $year, 
+                'registration', 
+                '$memberId', 
+                'Yes'
+            )";
+            iud($feeQuery);
 
-            // Insert payment record
-            $query = "INSERT INTO Payment (PaymentID, Payment_Type, Method, Amount, Date, Term, 
-                    Image, card_number, expire_date, cvv, Member_MemberID) 
-                    VALUES ('$paymentId', '$paymentType', '$method', $amount, '$date', $year,
-                    " . ($receiptUrl ? "'$receiptUrl'" : "NULL") . ", 
-                    " . (isset($_POST['card_number']) ? "'" . $_POST['card_number'] . "'" : "NULL") . ",
-                    " . ($expireDate ? "'$expireDate'" : "NULL") . ",
-                    " . ($cvv ? "'$cvv'" : "NULL") . ", 
-                    '$memberId')";
-            iud($query);
-  // " . ($cardNumber ? "'$cardNumber'" : "NULL") . ", Can be needed because this change into another one
-            // Insert into MembershipFeePayment
-            $query = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
-                    VALUES ('$feeId', '$paymentId')";
-            iud($query);
+            // Link payment to membership fee
+            $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
+                        VALUES ('$feeId', '$paymentId')";
+            iud($linkQuery);
 
             // Check if registration fee is fully paid
             $newTotalPaid = $regFeePaid + $amount;
             if ($newTotalPaid >= $feeStructure['registration_fee']) {
-                // Update membership fee status
-                $query = "UPDATE MembershipFee 
-                        SET IsPaid = 'Yes' 
-                        WHERE FeeID = '$feeId'";
-                iud($query);
-
                 // Update member status
-                $query = "UPDATE Member 
-                        SET Status = 'Full Member' 
-                        WHERE MemberID = '$memberId'";
-                iud($query);
+                $updateMemberQuery = "UPDATE Member 
+                                    SET Status = 'Full Member' 
+                                    WHERE MemberID = '$memberId'";
+                iud($updateMemberQuery);
             }
-        break;
+            break;
 
         case 'monthly':
             if (!isset($_POST['selected_months']) || empty($_POST['selected_months'])) {
@@ -144,37 +164,43 @@ try {
             }
         
             $selectedMonths = $_POST['selected_months'];
-            $expectedAmount = count($selectedMonths) * $feeStructure['monthly_fee'];
+            $expectedAmount = count($selectedMonths) * floatval($feeStructure['monthly_fee']);
             
             if ($amount != $expectedAmount) {
                 throw new Exception("Invalid monthly fee amount");
             }
-        
-            // Insert the payment record first
-            $query = "INSERT INTO Payment (PaymentID, Payment_Type, Method, Amount, Date, Term, 
-                    Image, card_number, expire_date, cvv, Member_MemberID) 
-                    VALUES ('$paymentId', '$paymentType', '$method', $amount, '$date', $year,
-                    " . ($receiptUrl ? "'$receiptUrl'" : "NULL") . ", 
-                    " . (isset($_POST['card_number']) ? "'" . $_POST['card_number'] . "'" : "NULL") . ", 
-                    " . (isset($_POST['expire_date']) ? "'" . $_POST['expire_date'] . "'" : "NULL") . ",
-                    " . (isset($_POST['cvv']) ? "'" . $_POST['cvv'] . "'" : "NULL") . ", 
-                    '$memberId')";
-            iud($query);
         
             // Process each selected month
             foreach ($selectedMonths as $month) {
                 $feeId = generateFeeId();
                 $monthDate = date('Y-m-d', strtotime("$year-$month-01"));
                 
+                // Calculate monthly fee amount with proper float conversion
+                $monthlyFeeAmount = floatval($feeStructure['monthly_fee']);
+                
                 // Insert membership fee record
-                $query = "INSERT INTO MembershipFee (FeeID, Amount, Date, Term, Type, Member_MemberID, IsPaid) 
-                         VALUES ('$feeId', " . $feeStructure['monthly_fee'] . ", 
-                         '$monthDate', $year, 'monthly', '$memberId', 'Yes')";
-                iud($query);
+                $monthlyFeeQuery = "INSERT INTO MembershipFee (
+                    FeeID, 
+                    Amount, 
+                    Date, 
+                    Term, 
+                    Type, 
+                    Member_MemberID, 
+                    IsPaid
+                ) VALUES (
+                    '$feeId', 
+                    $monthlyFeeAmount, 
+                    '$monthDate', 
+                    $year, 
+                    'monthly', 
+                    '$memberId', 
+                    'Yes'
+                )";
+                iud($monthlyFeeQuery);
                 
                 // Link the fee to the payment
                 $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
-                             VALUES ('$feeId', '$paymentId')";
+                            VALUES ('$feeId', '$paymentId')";
                 iud($linkQuery);
             }
             break;
