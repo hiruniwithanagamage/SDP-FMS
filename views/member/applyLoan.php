@@ -312,145 +312,144 @@ if (isset($_POST['apply'])) {
             <?php endif; ?>
 
             <form method="POST" action="" <?php echo $hasExistingApplication ? 'style="display: none;"' : ''; ?>>
-                <!-- Original form fields with fixes -->
-<div class="form-row">
-    <div class="form-group">
-        <label for="member_name">Name</label>
-        <input type="text" id="member_name" name="name" 
-               value="<?php echo htmlspecialchars($userName); ?>" 
-               readonly autocomplete="name">
-    </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="member_name">Name</label>
+                        <input type="text" id="member_name" name="name" 
+                            value="<?php echo htmlspecialchars($userName); ?>" 
+                            readonly autocomplete="name">
+                    </div>
 
-    <div class="form-group">
-        <label for="member_id">Member ID</label>
-        <input type="text" id="member_id" name="member_id" 
-               value="<?php echo htmlspecialchars($memberId); ?>" 
-               readonly autocomplete="off">
-    </div>
-</div>
+                    <div class="form-group">
+                        <label for="member_id">Member ID</label>
+                        <input type="text" id="member_id" name="member_id" 
+                            value="<?php echo htmlspecialchars($memberId); ?>" 
+                            readonly autocomplete="off">
+                    </div>
+                </div>
 
-<div class="form-row">
-    <div class="form-group">
-        <label for="issue_date">Date</label>
-        <input type="date" id="issue_date" name="date" 
-               value="<?php echo date('Y-m-d'); ?>" 
-               readonly autocomplete="off">
-    </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="issue_date">Date</label>
+                        <input type="date" id="issue_date" name="date" 
+                            value="<?php echo date('Y-m-d'); ?>" 
+                            readonly autocomplete="off">
+                    </div>
 
-    <div class="form-group">
-        <label for="loan_term">Term (Year)</label>
-        <input type="text" id="loan_term" name="term" 
-               value="<?php echo $currentYear; ?>" 
-               readonly autocomplete="off">
-    </div>
-</div>
+                    <div class="form-group">
+                        <label for="loan_term">Term (Year)</label>
+                        <input type="text" id="loan_term" name="term" 
+                            value="<?php echo $currentYear; ?>" 
+                            readonly autocomplete="off">
+                    </div>
+                </div>
 
-<div class="form-row">
-    <div class="form-group">
-        <label for="loan_amount">Amount</label>
-        <input type="number" id="loan_amount" name="amount" 
-               min="0" step="0.01" required 
-               class="<?php echo isset($errors['amount']) ? 'error' : ''; ?>"
-               autocomplete="off">
-        <?php if (isset($errors['amount'])): ?>
-            <span class="error-message"><?php echo $errors['amount']; ?></span>
-        <?php endif; ?>
-        <span class="hint-text">3% monthly decreasing interest rate will be applied</span>
-    </div>
-</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="loan_amount">Amount</label>
+                        <input type="number" id="loan_amount" name="amount" 
+                            min="0" step="0.01" required 
+                            class="<?php echo isset($errors['amount']) ? 'error' : ''; ?>"
+                            autocomplete="off">
+                        <?php if (isset($errors['amount'])): ?>
+                            <span class="error-message"><?php echo $errors['amount']; ?></span>
+                        <?php endif; ?>
+                        <span class="hint-text">3% monthly decreasing interest rate will be applied</span>
+                    </div>
+                </div>
 
-<div class="form-row">
-    <div class="form-group full-width">
-        <label for="loan_reason">Reason</label>
-        <input type="text" id="loan_reason" name="reason" required 
-               class="<?php echo isset($errors['reason']) ? 'error' : ''; ?>"
-               autocomplete="off">
-        <?php if (isset($errors['reason'])): ?>
-            <span class="error-message"><?php echo $errors['reason']; ?></span>
-        <?php endif; ?>
-    </div>
-</div>
+                <div class="form-row">
+                    <div class="form-group full-width">
+                        <label for="loan_reason">Reason</label>
+                        <input type="text" id="loan_reason" name="reason" required 
+                            class="<?php echo isset($errors['reason']) ? 'error' : ''; ?>"
+                            autocomplete="off">
+                        <?php if (isset($errors['reason'])): ?>
+                            <span class="error-message"><?php echo $errors['reason']; ?></span>
+                        <?php endif; ?>
+                    </div>
+                </div>
 
-<!-- Guarantor 1 Section -->
-<h2>Guarantor Details (1)</h2>
-<div class="guarantor-section">
-    <div class="form-row">
-        <div class="form-group">
-            <label for="guarantor1_name_select">Name</label>
-            <select id="guarantor1_name_select" class="guarantor-select" required>
-                <option value="">Select or search for a member...</option>
-                <?php foreach ($eligibleMembers as $member): ?>
-                    <option value="<?php echo $member['id']; ?>"><?php echo $member['text']; ?></option>
-                <?php endforeach; ?>
-            </select>
-            <input type="hidden" id="guarantor1_name" name="guarantor1_name">
-        </div>
-        <div class="form-group">
-            <label for="guarantor1_member_id">Member ID</label>
-            <input type="text" id="guarantor1_member_id" name="guarantor1_member_id" 
-                   readonly required autocomplete="off">
-        </div>
-    </div>
+                <!-- Guarantor 1 Section -->
+                <h2>Guarantor Details (1)</h2>
+                <div class="guarantor-section">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="guarantor1_name_select">Name</label>
+                            <select id="guarantor1_name_select" class="guarantor-select" required>
+                                <option value="">Select or search for a member...</option>
+                                <?php foreach ($eligibleMembers as $member): ?>
+                                    <option value="<?php echo $member['id']; ?>"><?php echo $member['text']; ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <input type="hidden" id="guarantor1_name" name="guarantor1_name">
+                        </div>
+                        <div class="form-group">
+                            <label for="guarantor1_member_id">Member ID</label>
+                            <input type="text" id="guarantor1_member_id" name="guarantor1_member_id" 
+                                readonly required autocomplete="off">
+                        </div>
+                    </div>
 
-    <div class="form-row">
-        <div class="form-group">
-            <label for="guarantor1_loan_status">Loan Status</label>
-            <select id="guarantor1_loan_status" name="guarantor1_loan_status" required>
-                <option value="1">Active</option>
-                <option value="0">Inactive</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label for="guarantor1_guaranteed_count">Guaranteed Count</label>
-            <input type="number" id="guarantor1_guaranteed_count" 
-                   name="guarantor1_guaranteed_count" 
-                   min="0" value="0" required autocomplete="off">
-        </div>
-    </div>
-</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="guarantor1_loan_status">Loan Status</label>
+                            <select id="guarantor1_loan_status" name="guarantor1_loan_status" required>
+                                <option value="1">Active</option>
+                                <option value="0">Inactive</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="guarantor1_guaranteed_count">Guaranteed Count</label>
+                            <input type="number" id="guarantor1_guaranteed_count" 
+                                name="guarantor1_guaranteed_count" 
+                                min="0" value="0" required autocomplete="off">
+                        </div>
+                    </div>
+                </div>
 
-<!-- Guarantor 2 Section -->
-<h2>Guarantor Details (2)</h2>
-<div class="guarantor-section">
-    <div class="form-row">
-        <div class="form-group">
-            <label for="guarantor2_name_select">Name</label>
-            <select id="guarantor2_name_select" class="guarantor-select" required>
-                <option value="">Select or search for a member...</option>
-                <?php foreach ($eligibleMembers as $member): ?>
-                    <option value="<?php echo $member['id']; ?>"><?php echo $member['text']; ?></option>
-                <?php endforeach; ?>
-            </select>
-            <input type="hidden" id="guarantor2_name" name="guarantor2_name">
-        </div>
-        <div class="form-group">
-            <label for="guarantor2_member_id">Member ID</label>
-            <input type="text" id="guarantor2_member_id" name="guarantor2_member_id" 
-                   readonly required autocomplete="off">
-        </div>
-    </div>
+                <!-- Guarantor 2 Section -->
+                <h2>Guarantor Details (2)</h2>
+                <div class="guarantor-section">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="guarantor2_name_select">Name</label>
+                            <select id="guarantor2_name_select" class="guarantor-select" required>
+                                <option value="">Select or search for a member...</option>
+                                <?php foreach ($eligibleMembers as $member): ?>
+                                    <option value="<?php echo $member['id']; ?>"><?php echo $member['text']; ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <input type="hidden" id="guarantor2_name" name="guarantor2_name">
+                        </div>
+                        <div class="form-group">
+                            <label for="guarantor2_member_id">Member ID</label>
+                            <input type="text" id="guarantor2_member_id" name="guarantor2_member_id" 
+                                readonly required autocomplete="off">
+                        </div>
+                    </div>
 
-    <div class="form-row">
-        <div class="form-group">
-            <label for="guarantor2_loan_status">Loan Status</label>
-            <select id="guarantor2_loan_status" name="guarantor2_loan_status" required>
-                <option value="1">Active</option>
-                <option value="0">Inactive</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label for="guarantor2_guaranteed_count">Guaranteed Count</label>
-            <input type="number" id="guarantor2_guaranteed_count" 
-                   name="guarantor2_guaranteed_count" 
-                   min="0" value="0" required autocomplete="off">
-        </div>
-    </div>
-</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="guarantor2_loan_status">Loan Status</label>
+                            <select id="guarantor2_loan_status" name="guarantor2_loan_status" required>
+                                <option value="1">Active</option>
+                                <option value="0">Inactive</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="guarantor2_guaranteed_count">Guaranteed Count</label>
+                            <input type="number" id="guarantor2_guaranteed_count" 
+                                name="guarantor2_guaranteed_count" 
+                                min="0" value="0" required autocomplete="off">
+                        </div>
+                    </div>
+                </div>
 
-<div class="terms-group">
-    <input type="checkbox" id="terms_agreement" name="terms" required>
-    <label for="terms_agreement">I agree to the Terms & Conditions</label>
-</div>
+                <div class="terms-group">
+                    <input type="checkbox" id="terms_agreement" name="terms" required>
+                    <label for="terms_agreement">I agree to the Terms & Conditions</label>
+                </div>
 
                 <div class="button-group">
                     <button type="submit" name="apply" class="btn btn-apply" 
