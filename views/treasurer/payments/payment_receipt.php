@@ -9,7 +9,10 @@ if (!isset($_GET['payment_id'])) {
 
 $paymentId = $_GET['payment_id'];
 
-// Fetch comprehensive payment details
+// Connect to database
+$conn = getConnection();
+
+// Fetch comprehensive payment details using prepared statements
 $paymentQuery = "
     SELECT 
         p.PaymentID, 
@@ -23,52 +26,78 @@ $paymentQuery = "
     FROM Payment p
     JOIN Member m ON p.Member_MemberID = m.MemberID
     JOIN Static s ON p.Term = s.year
-    WHERE p.PaymentID = '$paymentId'
+    WHERE p.PaymentID = ?
 ";
-$paymentResult = search($paymentQuery);
+
+$stmt = $conn->prepare($paymentQuery);
+$stmt->bind_param("s", $paymentId);
+$stmt->execute();
+$paymentResult = $stmt->get_result();
 
 if (!$paymentResult || $paymentResult->num_rows == 0) {
+    $stmt->close();
     die("Payment not found");
 }
 
 $paymentDetails = $paymentResult->fetch_assoc();
+$stmt->close();
 
 // Fetch additional details based on payment type
 function getAdditionalPaymentDetails($paymentId, $paymentType) {
+    $conn = getConnection();
+    $result = null;
+    
     switch ($paymentType) {
         case 'monthly':
             $query = "
                 SELECT GROUP_CONCAT(DISTINCT MONTHNAME(mf.Date)) as months 
                 FROM MembershipFee mf
                 JOIN MembershipFeePayment mfp ON mf.FeeID = mfp.FeeID
-                WHERE mfp.PaymentID = '$paymentId'
+                WHERE mfp.PaymentID = ?
             ";
+            $stmt = $conn->prepare($query);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $stmt->close();
             break;
+            
         case 'registration':
-            $query = "
-                SELECT 'Registration Fee' as details
-            ";
-            break;
+            // For registration, we just need a static detail
+            $details = ['details' => 'Registration Fee'];
+            return $details;
+            
         case 'loan':
             $query = "
                 SELECT LoanID, Remain_Loan, Remain_Interest
                 FROM LoanPayment lp
                 JOIN Loan l ON lp.LoanID = l.LoanID
-                WHERE lp.PaymentID = '$paymentId'
+                WHERE lp.PaymentID = ?
             ";
+            $stmt = $conn->prepare($query);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $stmt->close();
             break;
+            
         case 'fine':
             $query = "
                 SELECT Description 
                 FROM Fine 
-                WHERE Payment_PaymentID = '$paymentId'
+                WHERE Payment_PaymentID = ?
             ";
+            $stmt = $conn->prepare($query);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $stmt->close();
             break;
+            
         default:
             return null;
     }
 
-    $result = Database::search($query);
     return $result ? $result->fetch_assoc() : null;
 }
 
@@ -218,6 +247,9 @@ $additionalDetails = getAdditionalPaymentDetails($paymentId, $paymentDetails['Pa
                                 case 'monthly':
                                     echo htmlspecialchars($additionalDetails['months'] ?? 'N/A');
                                     break;
+                                case 'registration':
+                                    echo htmlspecialchars($additionalDetails['details'] ?? 'N/A');
+                                    break;
                                 case 'loan':
                                     echo "Loan Remaining: Rs. " . 
                                          number_format($additionalDetails['Remain_Loan'] ?? 0, 2);
@@ -279,7 +311,7 @@ $additionalDetails = getAdditionalPaymentDetails($paymentId, $paymentDetails['Pa
             const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
             
             doc.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-            doc.save(`Receipt_<?php echo $paymentId; ?>.pdf`);
+            doc.save(`Receipt_<?php echo htmlspecialchars($paymentId); ?>.pdf`);
             
             // Restore print actions after PDF generation
             document.querySelector('.print-actions').style.display = 'flex';

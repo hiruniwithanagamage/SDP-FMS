@@ -4,7 +4,7 @@ require_once "../../../config/database.php";
 
 // Check if payment ID exists in session
 if (!isset($_SESSION['last_payment_id'])) {
-    header('Location: dashboard.php');
+    header('Location: ../home-treasurer.php');
     exit();
 }
 
@@ -58,10 +58,10 @@ unset($_SESSION['last_payment_id']); // Clear the session variable
     <div class="receipt-container">
         <h2>Payment Processed Successfully!</h2>
         <div class="receipt-actions">
-            <a href="payment_receipt.php?payment_id=<?php echo urlencode($paymentId); ?>&action=print" target="_blank">
+            <a href="payment_receipt.php?payment_id=<?php echo urlencode($paymentId); ?>" target="_blank">
                 <i class="fas fa-print"></i>Print Receipt
             </a>
-            <a href="payment_receipt.php?payment_id=<?php echo urlencode($paymentId); ?>&action=download" target="_blank">
+            <a href="payment_receipt.php?payment_id=<?php echo urlencode($paymentId); ?>" target="_blank">
                 <i class="fas fa-file-download"></i>Download Receipt
             </a>
             <a href="../home-treasurer.php">

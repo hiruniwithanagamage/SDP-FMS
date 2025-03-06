@@ -26,18 +26,24 @@ try {
     $treasurerId = $_SESSION['treasurer_id'];
 
     // Start transaction
-    Database::iud("START TRANSACTION");
+    $conn = getConnection();
+    $conn->begin_transaction();
 
     // Generate payment ID
     $paymentId = generatePaymentId();
 
     // Get fee structure for the year
-    $query = "SELECT * FROM Static WHERE year = $year";
-    $result = search($query);
+    $query = "SELECT * FROM Static WHERE year = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
     if ($result->num_rows === 0) {
         throw new Exception("Fee structure not found for selected year");
     }
     $feeStructure = $result->fetch_assoc();
+    $stmt->close();
 
     // First, always insert the payment record
     $paymentQuery = "INSERT INTO Payment (
@@ -48,16 +54,12 @@ try {
         Date, 
         Term, 
         Member_MemberID
-    ) VALUES (
-        '$paymentId',
-        '$paymentType',
-        '$method',
-        $amount,
-        '$date',
-        $year,
-        '$memberId'
-    )";
-    Database::iud($paymentQuery);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    
+    $stmt = $conn->prepare($paymentQuery);
+    $stmt->bind_param("sssdsss", $paymentId, $paymentType, $method, $amount, $date, $year, $memberId);
+    $stmt->execute();
+    $stmt->close();
 
     // Process different payment types
     switch($paymentType) {
@@ -67,67 +69,59 @@ try {
                                 FROM MembershipFee MF
                                 JOIN MembershipFeePayment MFP ON MF.FeeID = MFP.FeeID
                                 JOIN Payment P ON MFP.PaymentID = P.PaymentID
-                                WHERE MF.Member_MemberID = '$memberId'
+                                WHERE MF.Member_MemberID = ?
                                 AND MF.Type = 'registration'
-                                AND MF.Term = $year";
-            $regFeePaidResult = search($regFeePaidQuery);
+                                AND MF.Term = ?";
+            
+            $stmt = $conn->prepare($regFeePaidQuery);
+            $stmt->bind_param("si", $memberId, $year);
+            $stmt->execute();
+            $regFeePaidResult = $stmt->get_result();
             $regFeePaid = $regFeePaidResult->fetch_assoc()['total_paid'];
             $remainingRegFee = $feeStructure['registration_fee'] - $regFeePaid;
-
+            $stmt->close();
+        
             if ($amount > $remainingRegFee) {
                 throw new Exception("Payment amount cannot exceed remaining registration fee");
             }
-
-            // Create or find existing membership fee record
-            $existingFeeQuery = "SELECT FeeID FROM MembershipFee 
-                                WHERE Member_MemberID = '$memberId' 
-                                AND Term = $year 
-                                AND Type = 'registration'";
-            $existingFeeResult = search($existingFeeQuery);
+        
+            // Always create a new registration fee record for the payment amount
+            $feeId = generateFeeId();
+            $feeQuery = "INSERT INTO MembershipFee (
+                FeeID, 
+                Amount, 
+                Date, 
+                Term, 
+                Type, 
+                Member_MemberID, 
+                IsPaid
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)";
             
-            if ($existingFeeResult->num_rows === 0) {
-                $feeId = generateFeeId();
-                $feeQuery = "INSERT INTO MembershipFee (
-                    FeeID, 
-                    Amount, 
-                    Date, 
-                    Term, 
-                    Type, 
-                    Member_MemberID, 
-                    IsPaid
-                ) VALUES (
-                    '$feeId', 
-                    " . $feeStructure['registration_fee'] . ", 
-                    '$date', 
-                    $year, 
-                    'registration', 
-                    '$memberId', 
-                    'No'
-                )";
-                Database::iud($feeQuery);
-            } else {
-                $feeId = $existingFeeResult->fetch_assoc()['FeeID'];
-            }
-
+            $type = 'registration';
+            $isPaid = 'Yes';
+            
+            $stmt = $conn->prepare($feeQuery);
+            $stmt->bind_param("sdsisss", $feeId, $amount, $date, $year, $type, $memberId, $isPaid);
+            $stmt->execute();
+            $stmt->close();
+        
             // Link payment to membership fee
-            $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
-                        VALUES ('$feeId', '$paymentId')";
-            Database::iud($linkQuery);
-
+            $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) VALUES (?, ?)";
+            $stmt = $conn->prepare($linkQuery);
+            $stmt->bind_param("ss", $feeId, $paymentId);
+            $stmt->execute();
+            $stmt->close();
+        
             // Check if registration fee is fully paid
             $newTotalPaid = $regFeePaid + $amount;
             if ($newTotalPaid >= $feeStructure['registration_fee']) {
-                // Update membership fee status
-                $updateFeeQuery = "UPDATE MembershipFee 
-                                SET IsPaid = 'Yes' 
-                                WHERE FeeID = '$feeId'";
-                Database::iud($updateFeeQuery);
-
                 // Update member status
-                $updateMemberQuery = "UPDATE Member 
-                                    SET Status = 'Full Member' 
-                                    WHERE MemberID = '$memberId'";
-                Database::iud($updateMemberQuery);
+                $status = 'Full Member';
+                $updateMemberQuery = "UPDATE Member SET Status = ? WHERE MemberID = ?";
+                $stmt = $conn->prepare($updateMemberQuery);
+                $stmt->bind_param("ss", $status, $memberId);
+                $stmt->execute();
+                $stmt->close();
             }
             break;
 
@@ -137,7 +131,7 @@ try {
             }
 
             $selectedMonths = $_POST['selected_months'];
-            $expectedAmount = count($selectedMonths) * $feeStructure['monthly_fee'];
+            $expectedAmount = count($selectedMonths) * floatval($feeStructure['monthly_fee']);
             
             if ($amount != $expectedAmount) {
                 throw new Exception("Invalid monthly fee amount");
@@ -148,7 +142,7 @@ try {
                 $feeId = generateFeeId();
                 $monthDate = date('Y-m-d', strtotime("$year-$month-01"));
                 
-                // Insert monthly fee
+                $monthlyFeeAmount = floatval($feeStructure['monthly_fee']);
                 $monthlyFeeQuery = "INSERT INTO MembershipFee (
                     FeeID, 
                     Amount, 
@@ -157,21 +151,22 @@ try {
                     Type, 
                     Member_MemberID, 
                     IsPaid
-                ) VALUES (
-                    '$feeId', 
-                    " . $feeStructure['monthly_fee'] . ", 
-                    '$monthDate', 
-                    $year, 
-                    'monthly', 
-                    '$memberId', 
-                    'Yes'
-                )";
-                Database::iud($monthlyFeeQuery);
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                
+                $type = 'monthly';
+                $isPaid = 'Yes';
+                
+                $stmt = $conn->prepare($monthlyFeeQuery);
+                $stmt->bind_param("sdsisss", $feeId, $monthlyFeeAmount, $monthDate, $year, $type, $memberId, $isPaid);
+                $stmt->execute();
+                $stmt->close();
 
                 // Link payment to monthly fee
-                $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
-                            VALUES ('$feeId', '$paymentId')";
-                Database::iud($linkQuery);
+                $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) VALUES (?, ?)";
+                $stmt = $conn->prepare($linkQuery);
+                $stmt->bind_param("ss", $feeId, $paymentId);
+                $stmt->execute();
+                $stmt->close();
             }
             break;
 
@@ -184,26 +179,37 @@ try {
             
             // Validate fine payment
             $fineQuery = "SELECT Amount FROM Fine 
-                         WHERE FineID = '$fineId' 
-                         AND Member_MemberID = '$memberId' 
+                         WHERE FineID = ? 
+                         AND Member_MemberID = ? 
                          AND IsPaid = 'No'";
-            $result = search($fineQuery);
+            
+            $stmt = $conn->prepare($fineQuery);
+            $stmt->bind_param("ss", $fineId, $memberId);
+            $stmt->execute();
+            $result = $stmt->get_result();
             
             if ($result->num_rows === 0) {
                 throw new Exception("Invalid fine payment");
             }
 
             $fineData = $result->fetch_assoc();
+            $stmt->close();
+            
             if ($amount != $fineData['Amount']) {
                 throw new Exception("Invalid fine amount");
             }
 
             // Update fine record
+            $isPaid = 'Yes';
             $updateFineQuery = "UPDATE Fine SET 
-                               IsPaid = 'Yes',
-                               Payment_PaymentID = '$paymentId' 
-                               WHERE FineID = '$fineId'";
-            Database::iud($updateFineQuery);
+                               IsPaid = ?,
+                               Payment_PaymentID = ? 
+                               WHERE FineID = ?";
+            
+            $stmt = $conn->prepare($updateFineQuery);
+            $stmt->bind_param("sss", $isPaid, $paymentId, $fineId);
+            $stmt->execute();
+            $stmt->close();
             break;
 
         case 'loan':
@@ -215,16 +221,22 @@ try {
 
             // Validate loan payment
             $loanQuery = "SELECT Amount, Remain_Loan, Remain_Interest FROM Loan 
-                         WHERE LoanID = '$loanId' 
-                         AND Member_MemberID = '$memberId' 
+                         WHERE LoanID = ? 
+                         AND Member_MemberID = ? 
                          AND Status = 'approved'";
-            $result = search($loanQuery);
+            
+            $stmt = $conn->prepare($loanQuery);
+            $stmt->bind_param("ss", $loanId, $memberId);
+            $stmt->execute();
+            $result = $stmt->get_result();
             
             if ($result->num_rows === 0) {
                 throw new Exception("Invalid loan payment");
             }
 
             $loanData = $result->fetch_assoc();
+            $stmt->close();
+            
             $totalRemaining = $loanData['Remain_Loan'] + $loanData['Remain_Interest'];
             
             if ($amount <= 0 || $amount > $totalRemaining) {
@@ -237,17 +249,23 @@ try {
 
             // Update loan record
             $updateLoanQuery = "UPDATE Loan SET 
-                               Paid_Loan = Paid_Loan + $principalPayment,
-                               Remain_Loan = Remain_Loan - $principalPayment,
-                               Paid_Interest = Paid_Interest + $interestPayment,
-                               Remain_Interest = Remain_Interest - $interestPayment
-                               WHERE LoanID = '$loanId'";
-            Database::iud($updateLoanQuery);
+                               Paid_Loan = Paid_Loan + ?,
+                               Remain_Loan = Remain_Loan - ?,
+                               Paid_Interest = Paid_Interest + ?,
+                               Remain_Interest = Remain_Interest - ?
+                               WHERE LoanID = ?";
+            
+            $stmt = $conn->prepare($updateLoanQuery);
+            $stmt->bind_param("dddds", $principalPayment, $principalPayment, $interestPayment, $interestPayment, $loanId);
+            $stmt->execute();
+            $stmt->close();
 
             // Insert into LoanPayment table
-            $loanPaymentQuery = "INSERT INTO LoanPayment (LoanID, PaymentID) 
-                                VALUES ('$loanId', '$paymentId')";
-            Database::iud($loanPaymentQuery);
+            $loanPaymentQuery = "INSERT INTO LoanPayment (LoanID, PaymentID) VALUES (?, ?)";
+            $stmt = $conn->prepare($loanPaymentQuery);
+            $stmt->bind_param("ss", $loanId, $paymentId);
+            $stmt->execute();
+            $stmt->close();
             break;
 
         default:
@@ -255,7 +273,7 @@ try {
     }
 
     // Commit transaction
-    Database::iud("COMMIT");
+    $conn->commit();
     
     // Store payment ID in session for receipt
     $_SESSION['last_payment_id'] = $paymentId;
@@ -267,14 +285,13 @@ try {
 
 } catch (Exception $e) {
     // Rollback transaction on error
-    Database::iud("ROLLBACK");
+    if (isset($conn) && $conn instanceof mysqli) {
+        $conn->rollback();
+    }
     $_SESSION['error_message'] = "Error processing payment: " . $e->getMessage();
     header('Location: treasurerPayment.php');
     exit();
 }
-
-// The rest of the helper functions remain the same as in your original script
-
 
 // Helper Functions
 function validateCardDetails($cardNumber, $expireDate, $cvv) {
@@ -324,11 +341,8 @@ function validateFileUpload($file) {
 
 function generatePaymentId() {
     try {
-        // Set the isolation level before starting the transaction
-        Database::iud("SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-        
-        // Now start the transaction
-        Database::iud("START TRANSACTION");
+        $conn = getConnection();
+        $conn->begin_transaction(MYSQLI_TRANS_START_WITH_CONSISTENT_SNAPSHOT);
         
         // Get the highest ID with a lock
         $query = "SELECT CAST(SUBSTRING(PaymentID, 4) AS UNSIGNED) as max_num 
@@ -336,8 +350,8 @@ function generatePaymentId() {
                  WHERE PaymentID LIKE 'PAY%'
                  ORDER BY PaymentID DESC 
                  LIMIT 1 FOR UPDATE";
-                 
-        $result = search($query);
+        
+        $result = $conn->query($query);
         
         // Determine the next number
         if ($result && $result->num_rows > 0) {
@@ -351,28 +365,36 @@ function generatePaymentId() {
         $newId = "PAY" . str_pad($nextNum, 3, '0', STR_PAD_LEFT);
         
         // Verify it doesn't exist (double check)
-        $verifyQuery = "SELECT COUNT(*) as count FROM Payment WHERE PaymentID = '$newId'";
-        $verifyResult = search($verifyQuery);
+        $verifyQuery = "SELECT COUNT(*) as count FROM Payment WHERE PaymentID = ?";
+        $stmt = $conn->prepare($verifyQuery);
+        $stmt->bind_param("s", $newId);
+        $stmt->execute();
+        $verifyResult = $stmt->get_result();
         
         if ($verifyResult->fetch_assoc()['count'] > 0) {
-            Database::iud("ROLLBACK");
+            $conn->rollback();
             throw new Exception("Generated ID already exists: " . $newId);
         }
         
+        $stmt->close();
+        
         // Commit the transaction
-        Database::iud("COMMIT");
+        $conn->commit();
         
         return $newId;
         
     } catch (Exception $e) {
-        Database::iud("ROLLBACK");
+        if (isset($conn) && $conn instanceof mysqli) {
+            $conn->rollback();
+        }
         throw new Exception("Error generating payment ID: " . $e->getMessage());
     }
 }
 
 function generateFeeId() {
+    $conn = getConnection();
     $query = "SELECT FeeID FROM MembershipFee ORDER BY FeeID DESC LIMIT 1";
-    $result = search($query);
+    $result = $conn->query($query);
     
     if ($result && $result->num_rows > 0) {
         $row = $result->fetch_assoc();
@@ -385,13 +407,18 @@ function generateFeeId() {
 }
 
 function checkDuplicatePayment($memberId, $paymentType, $year) {
+    $conn = getConnection();
     $query = "SELECT COUNT(*) as count FROM Payment 
-              WHERE Member_MemberID = '$memberId' 
-              AND Payment_Type = '$paymentType' 
-              AND Term = $year";
+              WHERE Member_MemberID = ? 
+              AND Payment_Type = ?
+              AND Term = ?";
     
-    $result = search($query);
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("ssi", $memberId, $paymentType, $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
     $row = $result->fetch_assoc();
+    $stmt->close();
     
     if ($row['count'] > 0) {
         throw new Exception("Payment already exists for this period");

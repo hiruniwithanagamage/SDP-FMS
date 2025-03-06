@@ -192,7 +192,7 @@ h3 {
     max-width: 1200px;
     opacity: 0;
     height: 0;
-    overflow: hidden;
+    /* overflow: hidden; */
     transition: all 0.5s ease;
     overflow-x: auto;  /* Allows horizontal scrolling if needed */
     padding: 0.5rem;   /* Adds space for the shadow effect */
@@ -279,44 +279,38 @@ h3 {
            </div>
 
            <!-- Quick Statistics -->
-<div class="statistics-grid">
-    <div class="statistics-card view-only">
-        <i class="fas fa-users icon"></i>
-        <div class="stat-number"><?php echo $totalMembers; ?></div>
-        <div class="stat-label" style="font-weight: bold;">Total Members</div>
+    <div class="statistics-grid">
+        <div class="statistics-card view-only">
+            <i class="fas fa-users icon"></i>
+            <div class="stat-number"><?php echo $totalMembers; ?></div>
+            <div class="stat-label" style="font-weight: bold;">Total Members</div>
+        </div>
+        <div class="statistics-card interactive" onclick="window.location.href='userDetails.php'">
+            <i class="fas fa-users-cog icon"></i>
+            <h3>Manage Users</h3>
+            <div class="stat-label">Click to View All Users</div>
+        </div>
     </div>
-    <div class="statistics-card interactive" onclick="window.location.href='userDetails.php'">
-        <i class="fas fa-users-cog icon"></i>
-        <h3>Manage Users</h3>
-        <div class="stat-label">Click to View All Users</div>
-    </div>
-</div>
 
-<!-- Management Controls -->
-<button class="manage-users-btn" onclick="toggleManageUsers()">
-    Show Management Options
-    <i class="fas fa-chevron-down rotate-icon" id="chevron-icon"></i>
-</button>
-
-<!-- Action Cards (Initially Hidden) -->
-<div class="action-cards" id="actionCards">
-    <div class="action-card" onclick="window.location.href='memberDetails.php'">
-        <i class="fas fa-user-plus icon"></i>
-        <h3>Manage Members</h3>
-    </div>
-    <div class="action-card" onclick="window.location.href='treasurerDetails.php'">
-        <i class="fas fa-user-tie icon"></i>
-        <h3>Manage Treasurers</h3>
-    </div>
-    <div class="action-card" onclick="window.location.href='auditorDetails.php'">
-        <i class="fas fa-user-shield icon"></i>
-        <h3>Manage Auditors</h3>
-    </div>
-    <div class="action-card" onclick="window.location.href='adminDetails.php'">
-        <i class="fas fa-user-cog icon"></i>
-        <h3>Manage Admins</h3>
-    </div>
-</div>
+            <!-- Action Cards (Initially Hidden) -->
+            <div class="action-cards show" id="actionCards">
+                <div class="action-card" onclick="window.location.href='memberDetails.php'">
+                    <i class="fas fa-user-plus icon"></i>
+                    <h3>Manage Members</h3>
+                </div>
+                <div class="action-card" onclick="window.location.href='treasurerDetails.php'">
+                    <i class="fas fa-user-tie icon"></i>
+                    <h3>Manage Treasurers</h3>
+                </div>
+                <div class="action-card" onclick="window.location.href='auditorDetails.php'">
+                    <i class="fas fa-user-shield icon"></i>
+                    <h3>Manage Auditors</h3>
+                </div>
+                <div class="action-card" onclick="window.location.href='adminDetails.php'">
+                    <i class="fas fa-user-cog icon"></i>
+                    <h3>Manage Admins</h3>
+                </div>
+            </div>
 
            <!-- Info Grid -->
            <div class="info-grid">
@@ -357,23 +351,5 @@ h3 {
        <br><br>
        <?php include '../templates/footer.php'; ?>
    </div>
-
-   <script>
-        function toggleManageUsers() {
-            const actionCards = document.getElementById('actionCards');
-            const chevronIcon = document.getElementById('chevron-icon');
-            const btn = document.querySelector('.manage-users-btn');
-            
-            actionCards.classList.toggle('show');
-            chevronIcon.classList.toggle('active');
-            
-            // Update button text
-            if (actionCards.classList.contains('show')) {
-                btn.innerHTML = 'Hide Management Options <i class="fas fa-chevron-up rotate-icon active" id="chevron-icon"></i>';
-            } else {
-                btn.innerHTML = 'Show Management Options <i class="fas fa-chevron-down rotate-icon" id="chevron-icon"></i>';
-            }
-        }
-   </script>
 </body>
 </html>
