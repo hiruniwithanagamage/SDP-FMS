@@ -2,17 +2,30 @@
 session_start();
 require_once "../config/database.php";
 
-// Check if user is logged in and is a treasurer or admin
-if (!isset($_SESSION['user_id']) || ($_SESSION['role'] !== 'treasurer' && $_SESSION['role'] !== 'admin')) {
+// Check if user is logged in
+if (!isset($_SESSION['user_id'])) {
     header("Location: ../loginProcess.php");
     exit();
 }
 
 // Get member ID from URL parameter
 $memberID = isset($_GET['id']) ? $_GET['id'] : null;
+$download = isset($_GET['download']) ? true : false;
 
 if (!$memberID) {
-    header("Location: memberFinancialSummary.php");
+    // Redirect based on user role
+    if ($_SESSION['role'] === 'member') {
+        header("Location: ../views/member/memberSummary.php");
+    } else {
+        header("Location: ../views/treasurer/memberFinancialSummary.php");
+    }
+    exit();
+}
+
+// Security check: Make sure user can only access their own data if they're a member
+if ($_SESSION['role'] === 'member' && $_SESSION['member_id'] !== $memberID) {
+    // Members can only view their own data
+    header("Location: ../views/member/memberSummary.php");
     exit();
 }
 
@@ -406,7 +419,7 @@ $totalOutstanding = $membershipFee['due'] + $fines['due'] + $loans['due'];
 </head>
 <body>
 <div class="container">
-        <?php include '../views/templates/navbar-treasurer.php'; ?>
+        <!-- <?php include '../views/templates/navbar-treasurer.php'; ?> -->
     <div class="summary-page" id="summary-content">
         <div class="header">
             <img src="../assets/images/society_logo.png" alt="Logo" class="logo">
@@ -538,9 +551,15 @@ $totalOutstanding = $membershipFee['due'] + $fines['due'] + $loans['due'];
         <button class="btn" id="downloadPdfBtn">
             <i class="fas fa-file-download"></i> Download PDF
         </button>
-        <a href="memberFinancialSummary.php?id=<?php echo $memberID; ?>" class="btn btn-secondary">
-            <i class="fas fa-arrow-left"></i> Back to Details
-        </a>
+        <?php if ($_SESSION['role'] === 'member'): ?>
+                <a href="../views/member/memberSummary.php" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </a>
+            <?php else: ?>
+                <a href="../views/treasurer/reportsAnalytics/memberFinancialSummary.php" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Back to Member List
+                </a>
+            <?php endif; ?>
     </div>
     </div>
     

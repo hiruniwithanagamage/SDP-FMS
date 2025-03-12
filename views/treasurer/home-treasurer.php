@@ -662,7 +662,7 @@ $currentTerm = getCurrentTerm();
             <i class="fas fa-chart-line icon"></i>
             <h3>Financial Reports</h3>
         </div>
-        <div class="action-card" onclick="window.location.href='../../reports/memberFinancialSummary.php'">
+        <div class="action-card" onclick="window.location.href='reportsAnalytics/memberFinancialSummary.php'">
             <i class="fas fa-users icon"></i>
             <h3>Member Reports</h3>
         </div>

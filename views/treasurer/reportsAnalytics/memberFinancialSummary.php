@@ -1,10 +1,10 @@
 <?php
 session_start();
-require_once "../config/database.php";
+require_once "../../../config/database.php";
 
 // Check if user is logged in and is a treasurer or admin
 if (!isset($_SESSION['user_id']) || ($_SESSION['role'] !== 'treasurer' && $_SESSION['role'] !== 'admin')) {
-    header("Location: ../loginProcess.php");
+    header("Location: ../../../loginProcess.php");
     exit();
 }
 
@@ -269,13 +269,13 @@ if (!empty($searchTerm)) {
 </head>
 <body>
     <div class="container">
-        <?php include '../views/templates/navbar-treasurer.php'; ?>
+        <?php include '../../templates/navbar-treasurer.php'; ?>
 
         <div class="content">
             <div class="page-header">
                 <h1>Member Financial Summary</h1>
                 <div>
-                    <a href="index.php" class="btn btn-primary">
+                    <a href="../home-treasurer.php" class="btn btn-primary">
                         <i class="fas fa-arrow-left"></i> Back to Dashboard
                     </a>
                 </div>
@@ -322,7 +322,7 @@ if (!empty($searchTerm)) {
                                         <?php endif; ?>
                                     </td>
                                     <td>
-                                        <a href="memberFSPdf.php?id=<?php echo $row['MemberID']; ?>" class="btn btn-primary">
+                                        <a href="../../../reports/memberFSPdf.php?id=<?php echo $row['MemberID']; ?>" class="btn btn-primary">
                                             <i class="fas fa-file-invoice-dollar"></i> View Summary
                                         </a>
                                     </td>
@@ -348,7 +348,7 @@ if (!empty($searchTerm)) {
             </div>
         </div>
         
-        <?php include '../views/templates/footer.php'; ?>
+        <?php include '../../templates/footer.php'; ?>
     </div>
 </body>
 </html>

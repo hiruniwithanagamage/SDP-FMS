@@ -304,13 +304,14 @@
                     </div>
                     
                     <div class="action-buttons">
-                        <button class="action-button print-button" onclick="printSummary()">
-                            <i class="fas fa-print"></i> Print Summary
-                        </button>
+                        <a href="../../reports/memberFSPdf.php?id=<?php echo $formattedMemberData['id']; ?>" class="action-button print-button">
+                            <i class="fas fa-print"></i>/
+                            <i class="fas fa-download"></i> Get Summary
+                        </a>
                         
-                        <button class="action-button download-button" onclick="downloadPDF()">
+                        <!-- <a href="../../reports/memberFSPdf.php?id=<?php echo $formattedMemberData['id']; ?>&year=<?php echo $selectedYear; ?>&download=true" class="action-button download-button">
                             <i class="fas fa-download"></i> Download PDF
-                        </button>
+                        </a> -->
                         
                         <a href="index.php" class="back-link">
                             <i class="fas fa-arrow-left"></i> Back to Dashboard
