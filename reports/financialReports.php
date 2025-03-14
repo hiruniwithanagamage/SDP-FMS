@@ -1,4 +1,6 @@
 <?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
 session_start();
 require_once "../config/database.php";
 
@@ -8,13 +10,38 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'treasurer') {
     exit();
 }
 
-$treasurerID = $_SESSION['user_id'];
+$userID = $_SESSION['user_id'];
+// Get the treasurer ID from the User table
+$sql = "SELECT Treasurer_TreasurerID FROM User WHERE UserId = ?";
+$stmt = prepare($sql);
+$stmt->bind_param("s", $userID);
+$stmt->execute();
+$result = $stmt->get_result();
+if ($result->num_rows > 0) {
+    $row = $result->fetch_assoc();
+    $treasurerID = $row['Treasurer_TreasurerID'];
+} else {
+    // If no treasurer ID is found, use the user ID as a fallback
+    $treasurerID = $userID;
+    // You might want to log an error here as this shouldn't happen
+}
 $currentYear = date('Y');
 $message = '';
 $alertType = '';
 
 // Get selected year from URL parameter or default to current term
 $selectedYear = isset($_GET['year']) ? (int)$_GET['year'] : null;
+
+// Function to get all years from Static table
+function getAllYears() {
+    $sql = "SELECT year FROM Static ORDER BY year DESC";
+    $result = search($sql);
+    $years = [];
+    while ($row = $result->fetch_assoc()) {
+        $years[] = $row['year'];
+    }
+    return $years;
+}
 
 // Get current term from Static table
 function getCurrentTerm() {
@@ -24,6 +51,7 @@ function getCurrentTerm() {
     return $row['year'] ?? date('Y');
 }
 
+$years = getAllYears();
 $currentTerm = getCurrentTerm();
 
 // If no year is selected, default to the current term
@@ -128,12 +156,20 @@ function reportExists($term, $treasurerID) {
 }
 
 // Function to get all reports for this treasurer
-function getReportHistory($treasurerID) {
-    $sql = "SELECT * FROM FinancialReportVersions 
-            WHERE Treasurer_TreasurerID = ? 
-            ORDER BY Term DESC, VersionID DESC";
-    $stmt = prepare($sql);
-    $stmt->bind_param("s", $treasurerID);
+function getReportHistory($treasurerID, $selectedYear = null) {
+    if ($selectedYear) {
+        $sql = "SELECT * FROM FinancialReportVersions 
+                WHERE Treasurer_TreasurerID = ? AND Term = ?
+                ORDER BY Term DESC, VersionID DESC";
+        $stmt = prepare($sql);
+        $stmt->bind_param("si", $treasurerID, $selectedYear);
+    } else {
+        $sql = "SELECT * FROM FinancialReportVersions 
+                WHERE Treasurer_TreasurerID = ? 
+                ORDER BY Term DESC, VersionID DESC";
+        $stmt = prepare($sql);
+        $stmt->bind_param("s", $treasurerID);
+    }
     $stmt->execute();
     return $stmt->get_result();
 }
@@ -154,23 +190,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
         $newVersionID = intval($existingReport['VersionID']) + 1;
     } else {
         // Generate a new report ID
-        $reportID = 'RPT' . date('Y') . rand(1000, 9999);
+        $sql = "SELECT MAX(SUBSTRING(ReportID, 4)) as max_id FROM FinancialReportVersions WHERE ReportID LIKE 'RPT%'";
+        $result = search($sql);
+        $row = $result->fetch_assoc();
+        $max_id = $row['max_id'] ? intval($row['max_id']) : 0;
+        $next_id = $max_id + 1;
+        $reportID = 'RPT' . str_pad($next_id, 3, '0', STR_PAD_LEFT);
         $newVersionID = 1;
     }
     
     // Generate a new version
-    $date = date('Y-m-d');
+    $currentDate = new DateTime();
+    $date = $currentDate->format('Y-m-d');
     $status = 'pending';
     
     $sql = "INSERT INTO FinancialReportVersions 
-            (ReportID, VersionID, Term, Date, Previous_Year_Balance, 
-            Total_Income, Total_Expenses, Net_Income, Status, Treasurer_TreasurerID) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    
-    $stmt = prepare($sql);
-    $stmt->bind_param("sissdddss", $reportID, $newVersionID, $term, $date, 
-                    $previousYearBalance, $totalIncome, $totalExpenses, 
-                    $netIncome, $status, $treasurerID);
+        (ReportID, VersionID, Term, Date, Previous_Year_Balance, 
+        Total_Income, Total_Expenses, Net_Income, Status, Treasurer_TreasurerID, Comments) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+date_default_timezone_set('Asia/Colombo');
+
+$comments = "Generated on " . date('Y-m-d H:i:s');
+
+$stmt = prepare($sql);
+$stmt->bind_param("sissddddsss", $reportID, $newVersionID, $term, $date, 
+                $previousYearBalance, $totalIncome, $totalExpenses, 
+                $netIncome, $status, $treasurerID, $comments);
     
     if ($stmt->execute()) {
         $message = "Year-end financial report for $term has been generated and submitted for approval.";
@@ -197,8 +243,8 @@ $existingReport = reportExists($selectedYear, $treasurerID);
 // Check if this is the current treasurer's term (to control access to report generation)
 $isCurrentTerm = ($selectedYear == $currentTerm);
 
-// Get report history
-$reportHistory = getReportHistory($treasurerID);
+// Get report history - filtered by selected year
+$reportHistory = getReportHistory($treasurerID, $selectedYear);
 ?>
 
 <!DOCTYPE html>
@@ -208,6 +254,8 @@ $reportHistory = getReportHistory($treasurerID);
     <title>Financial Reports - Treasurer Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="../assets/css/alert.css">
+    <script src="../assets/js/alertHandler.js"></script>
     <style>
         * {
             margin: 0;
@@ -243,6 +291,28 @@ $reportHistory = getReportHistory($treasurerID);
             align-items: center;
             margin-bottom: 2rem;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .filters {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-left: auto;
+            gap: 1rem;
+        }
+
+        .filter-select {
+            padding: 0.5rem 1rem;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            border-radius: 50px;
+            cursor: pointer;
+        }
+
+        .filter-select option {
+            background: #1e3c72;
+            color: white;
         }
 
         .card {
@@ -335,21 +405,6 @@ $reportHistory = getReportHistory($treasurerID);
 
         .breakdown-item:last-child {
             border-bottom: none;
-        }
-
-        .alert {
-            padding: 1rem;
-            margin-bottom: 1.5rem;
-            border-radius: 8px;
-            color: white;
-        }
-
-        .alert-success {
-            background-color: #28a745;
-        }
-
-        .alert-danger {
-            background-color: #dc3545;
         }
 
         .btn {
@@ -460,22 +515,56 @@ $reportHistory = getReportHistory($treasurerID);
             background-color: #6c757d;
             color: white;
         }
+        
+        /* Loading indicator styles */
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            display: none;
+        }
+
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border-left-color: #1e3c72;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <?php include '../views/templates/navbar-treasurer.php'; ?>
+        
+        <!-- Loading Indicator -->
+        <div class="loading" id="loadingIndicator">
+            <div class="spinner"></div>
+        </div>
 
         <div class="content">
             <div class="page-header">
                 <h1>Financial Reports</h1>
-                <div style="display: flex; gap: 1rem; align-items: center;">
-                    <select class="filter-select form-control" id="yearSelect" onchange="window.location.href='financial_reports.php?year='+this.value" style="width: auto; padding: 0.6rem 1rem; border-radius: 5px; background-color: rgba(255, 255, 255, 0.2); color: white; border: 1px solid rgba(255, 255, 255, 0.3);">
-                        <?php for($y = $currentTerm; $y >= $currentTerm - 2; $y--): ?>
-                            <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
-                                Year <?php echo $y; ?>
+                <div class="filters">
+                    <select class="filter-select" id="yearSelect">
+                        <?php foreach($years as $year): ?>
+                            <option value="<?php echo $year; ?>" <?php echo $year == $selectedYear ? 'selected' : ''; ?>>
+                                Year <?php echo $year; ?>
                             </option>
-                        <?php endfor; ?>
+                        <?php endforeach; ?>
                     </select>
                     <!-- <a href="index.php" class="btn btn-secondary">
                         <i class="fas fa-arrow-left"></i> Back to Dashboard
@@ -483,9 +572,15 @@ $reportHistory = getReportHistory($treasurerID);
                 </div>
             </div>
 
-            <?php if (!empty($message)): ?>
-                <div class="alert alert-<?php echo $alertType; ?>">
-                    <?php echo $message; ?>
+            <?php if($message): ?>
+                <div class="alert alert-success">
+                    <?php echo htmlspecialchars($message); ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if(isset($error)): ?>
+                <div class="alert alert-danger">
+                    <?php echo htmlspecialchars($error); ?>
                 </div>
             <?php endif; ?>
 
@@ -569,12 +664,12 @@ $reportHistory = getReportHistory($treasurerID);
                                 Report Approved
                             </button>
                         <?php else: ?>
-                            <form method="post">
-                                <input type="hidden" name="term" value="<?php echo $selectedYear; ?>">
-                                <button type="submit" name="generate_report" class="btn btn-primary">
-                                    Generate & Submit Report
-                                </button>
-                            </form>
+                            <form method="post" action="">
+    <input type="hidden" name="term" value="<?php echo $selectedYear; ?>">
+    <button type="submit" name="generate_report" class="btn btn-primary">
+        Generate & Submit Report
+    </button>
+</form>
                         <?php endif; ?>
                     <?php else: ?>
                         <?php if ($existingReport): ?>
@@ -611,7 +706,7 @@ $reportHistory = getReportHistory($treasurerID);
                             <th>Status</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="reportHistoryTableBody">
                         <?php if ($reportHistory->num_rows > 0): ?>
                             <?php while ($report = $reportHistory->fetch_assoc()): ?>
                                 <tr>
@@ -641,5 +736,43 @@ $reportHistory = getReportHistory($treasurerID);
         
         <?php include '../views/templates/footer.php'; ?>
     </div>
+
+    <script>
+    function updateFilters() {
+        const year = document.getElementById('yearSelect').value;
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        
+        // Show loading indicator
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'flex';
+        }
+        
+        // Redirect to the page with the selected year
+        window.location.href = `financialReports.php?year=${year}`;
+    }
+    
+    // Add event listener to the year select dropdown
+    document.addEventListener('DOMContentLoaded', function() {
+        const yearSelect = document.getElementById('yearSelect');
+        if (yearSelect) {
+            yearSelect.addEventListener('change', updateFilters);
+        }
+        
+        // Handle form submissions
+        // document.querySelectorAll('form').forEach(form => {
+        //     form.addEventListener('submit', function(event) {
+        //         event.preventDefault();
+                
+        //         const loadingIndicator = document.getElementById('loadingIndicator');
+        //         if (loadingIndicator) {
+        //             loadingIndicator.style.display = 'flex';
+        //         }
+                
+        //         // Submit the form
+        //         this.submit();
+        //     });
+        // });
+    });
+    </script>
 </body>
 </html>
