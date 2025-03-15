@@ -35,6 +35,7 @@
         $stats = [
             'pending' => 0,
             'reviewed' => 0,
+            'ongoing' => 0,
             'approved' => 0
         ];
 
@@ -53,13 +54,13 @@
             $stmt->close();
 
             // Reviewed Reports
-            $stmt = $conn->prepare("SELECT COUNT(*) as total FROM FinancialReportVersions WHERE Status = 'reviewed' AND Term = ?");
+            $stmt = $conn->prepare("SELECT COUNT(*) as total FROM FinancialReportVersions WHERE Status = 'ongoing' AND Term = ?");
             $stmt->bind_param("i", $currentTerm);
             $stmt->execute();
             $result = $stmt->get_result();
             if ($result && $result->num_rows > 0) {
                 $row = $result->fetch_assoc();
-                $stats['reviewed'] = $row['total'];
+                $stats['ongoing'] = $row['total'];
             }
             $stmt->close();
 
@@ -366,14 +367,14 @@
 
            <!-- Reports Grid -->
             <div class="reports-grid">
-                <div class="report-card pending" onclick="window.location.href='pending_reports.php?term=<?php echo urlencode($currentTerm); ?>'">
+                <div class="report-card pending" onclick="window.location.href='pendingReports.php?term=<?php echo urlencode($currentTerm); ?>'">
                     <i class="fas fa-clock report-icon" style="color: #1e3c72;"></i>
                     <div class="report-number"><?php echo htmlspecialchars($reportStats['pending']); ?></div>
                     <div class="report-label">Pending Reports</div>
                 </div>
-                <div class="report-card reviewed" onclick="window.location.href='reviewed_reports.php?term=<?php echo urlencode($currentTerm); ?>'">
+                <div class="report-card reviewed" onclick="window.location.href='reviewedReports.php?term=<?php echo urlencode($currentTerm); ?>'">
                     <i class="fas fa-eye report-icon" style="color: #1e3c72;"></i>
-                    <div class="report-number"><?php echo htmlspecialchars($reportStats['reviewed']); ?></div>
+                    <div class="report-number"><?php echo htmlspecialchars($reportStats['ongoing']); ?></div>
                     <div class="report-label">Reviewed Reports</div>
                 </div>
                 <div class="report-card approved" onclick="window.location.href='approved_reports.php?term=<?php echo urlencode($currentTerm); ?>'">

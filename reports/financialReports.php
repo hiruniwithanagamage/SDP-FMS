@@ -652,11 +652,14 @@ $reportHistory = getReportHistory($treasurerID, $selectedYear);
                             <button class="btn btn-secondary" disabled>
                                 Report Pending Approval (Submitted on <?php echo date('M d, Y', strtotime($existingReport['Date'])); ?>)
                             </button>
-                        <?php elseif ($existingReport && $existingReport['Status'] === 'rejected'): ?>
+                        <?php elseif ($existingReport && $existingReport['Status'] === 'ongoing'): ?>
                             <form method="post">
                                 <input type="hidden" name="term" value="<?php echo $selectedYear; ?>">
                                 <button type="submit" name="generate_report" class="btn btn-primary">
                                     Submit Revised Report
+                                </button>
+                                <button type="button" name="view_comment" class="btn btn-primary" onclick="viewComments()">
+                                    View Comment
                                 </button>
                             </form>
                         <?php elseif ($existingReport && $existingReport['Status'] === 'approved'): ?>
