@@ -14,10 +14,16 @@ if($successMessage) {
 $query = "SELECT * FROM Static ORDER BY year DESC";
 $result = search($query);
 
-// Handle Update
+// Get the active term for editing
+$activeTermQuery = "SELECT * FROM Static WHERE status = 'active' LIMIT 1";
+$activeTermResult = search($activeTermQuery);
+$activeTerm = $activeTermResult->num_rows > 0 ? $activeTermResult->fetch_assoc() : null;
+
+// Handle Update with prepared statements
 if(isset($_POST['update'])) {
     $id = $_POST['term_id'];
-    $year = $_POST['year'];
+    
+    // Collect form data - year is NOT included as it's already set by admin
     $monthly_fee = $_POST['monthly_fee'];
     $registration_fee = $_POST['registration_fee'];
     $death_welfare = $_POST['death_welfare'];
@@ -27,40 +33,53 @@ if(isset($_POST['update'])) {
     $interest = $_POST['interest'];
     $max_loan_limit = $_POST['max_loan_limit'];
 
+    // Prepare the SQL statement
     $updateQuery = "UPDATE Static SET 
-                   year = '$year',
-                   monthly_fee = '$monthly_fee',
-                   registration_fee = '$registration_fee',
-                   death_welfare = '$death_welfare',
-                   late_fine = '$late_fine',
-                   absent_fine = '$absent_fine',
-                   rules_violation_fine = '$rules_violation_fine',
-                   interest = '$interest',
-                   max_loan_limit = '$max_loan_limit'
-                   WHERE id = '$id'";
+                   monthly_fee = ?,
+                   registration_fee = ?,
+                   death_welfare = ?,
+                   late_fine = ?,
+                   absent_fine = ?,
+                   rules_violation_fine = ?,
+                   interest = ?,
+                   max_loan_limit = ?
+                   WHERE id = ? AND status = 'active'";
     
     try {
-        Database::iud($updateQuery);
-        $_SESSION['success_message'] = "Term updated successfully!";
+        // Using the prepare function from database.php
+        $stmt = prepare($updateQuery);
+        
+        if($stmt) {
+            // Bind parameters - "dddddddi" means 8 doubles (decimal numbers) and 1 integer
+            $stmt->bind_param("ddddddddi", 
+                $monthly_fee, 
+                $registration_fee, 
+                $death_welfare, 
+                $late_fine, 
+                $absent_fine, 
+                $rules_violation_fine, 
+                $interest, 
+                $max_loan_limit, 
+                $id
+            );
+            
+            // Execute the statement
+            $stmt->execute();
+            
+            // Check if the update was successful
+            if($stmt->affected_rows > 0) {
+                $_SESSION['success_message'] = "Term details updated successfully!";
+            } else {
+                $_SESSION['error_message'] = "No changes were made or the term does not exist.";
+            }
+            
+            // Close the statement
+            $stmt->close();
+        } else {
+            $_SESSION['error_message'] = "Failed to prepare statement. Please check your query.";
+        }
     } catch(Exception $e) {
-        $_SESSION['error_message'] = "Error updating term: " . $e->getMessage();
-    }
-    
-    header("Location: " . $_SERVER['PHP_SELF']);
-    exit();
-}
-
-// Handle Delete
-if(isset($_POST['delete'])) {
-    $id = $_POST['term_id'];
-    
-    $deleteQuery = "DELETE FROM Static WHERE id = '$id'";
-    
-    try {
-        Database::iud($deleteQuery);
-        $_SESSION['success_message'] = "Term deleted successfully!";
-    } catch(Exception $e) {
-        $_SESSION['error_message'] = "Cannot delete this term. It may have associated records.";
+        $_SESSION['error_message'] = "Error updating term details: " . $e->getMessage();
     }
     
     header("Location: " . $_SERVER['PHP_SELF']);
@@ -77,32 +96,113 @@ if(isset($_POST['delete'])) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="../../assets/css/adminDetails.css">
+    <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="../../assets/js/alertHandler.js"></script>
     <style>
-    .alert {
-        padding: 1rem;
-        margin-bottom: 1rem;
+    .status-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
         border-radius: 4px;
-        opacity: 1;
-        transition: opacity 0.5s ease-in-out;
+        font-size: 0.85rem;
+        font-weight: bold;
     }
-
-    .alert.fade-out {
-        opacity: 0;
-        transform: translateY(-20px);
-    }
-
-    .alert-success {
+    
+    .status-active {
         background-color: #d4edda;
         color: #155724;
-        border: 1px solid #c3e6cb;
     }
-
-    .alert-danger {
+    
+    .status-inactive {
         background-color: #f8d7da;
         color: #721c24;
-        border: 1px solid #f5c6cb;
     }
-</style>
+    
+    /* Edit Modal Styles */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0,0,0,0.4);
+    }
+
+    .modal-content {
+        position: relative;
+        background-color: #fefefe;
+        margin: 5% auto;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        width: 80%;
+        max-width: 600px;
+        animation: modalFadeIn 0.3s;
+    }
+
+    @keyframes modalFadeIn {
+        from {opacity: 0; transform: translateY(-50px);}
+        to {opacity: 1; transform: translateY(0);}
+    }
+
+    .close {
+        color: #aaa;
+        position: absolute;
+        top: 10px;
+        right: 15px;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+    }
+
+    .close:hover,
+    .close:focus {
+        color: black;
+        text-decoration: none;
+    }
+    
+    .form-group {
+        margin-bottom: 15px;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+    }
+    
+    .form-group input {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    
+    .form-row {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 10px;
+    }
+    
+    .form-row .form-group {
+        flex: 1;
+    }
+    
+    .readonly-field {
+        background-color: #f5f5f5;
+        cursor: not-allowed;
+    }
+    
+    .form-footer {
+        margin-top: 20px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+    }
+    </style>
 </head>
 <body>
     <div class="main-container">
@@ -110,9 +210,11 @@ if(isset($_POST['delete'])) {
         <div class="container">
             <div class="header-section">
                 <h1>Term Details</h1>
-                <a href="addNewTerm.php" class="add-btn">
-                    <i class="fas fa-plus"></i> Add New Term
-                </a>
+                <?php if($activeTerm): ?>
+                <button class="add-btn" onclick="openEditModal()">
+                    <i class="fas fa-edit"></i> Edit Active Term
+                </button>
+                <?php endif; ?>
             </div>
             <?php if($successMessage): ?>
                 <div id="success-alert" class="alert alert-success">
@@ -142,11 +244,15 @@ if(isset($_POST['delete'])) {
                             <th>Rules Fine</th>
                             <th>Interest</th>
                             <th>Loan Limit</th>
-                            <th>Actions</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php while($row = $result->fetch_assoc()): ?>
+                        <?php 
+                        // Reset pointer to beginning
+                        mysqli_data_seek($result, 0);
+                        while($row = $result->fetch_assoc()): 
+                        ?>
                         <tr>
                             <td><?php echo htmlspecialchars($row['year']); ?></td>
                             <td>Rs. <?php echo htmlspecialchars(number_format($row['monthly_fee'], 2)); ?></td>
@@ -158,14 +264,12 @@ if(isset($_POST['delete'])) {
                             <td><?php echo htmlspecialchars($row['interest']); ?>%</td>
                             <td>Rs. <?php echo htmlspecialchars(number_format($row['max_loan_limit'], 2)); ?></td>
                             <td>
-                                <div class="action-buttons">
-                                    <button class="action-btn edit-btn" onclick="openEditModal(<?php echo htmlspecialchars(json_encode($row)); ?>)">
-                                        <i class="fas fa-edit"></i> Edit
-                                    </button>
-                                    <button class="action-btn delete-btn" onclick="openDeleteModal(<?php echo $row['id']; ?>)">
-                                        <i class="fas fa-trash"></i> Delete
-                                    </button>
-                                </div>
+                                <?php 
+                                    $status = isset($row['status']) ? $row['status'] : 'active'; // Default to active if not set
+                                    $statusClass = $status === 'active' ? 'status-active' : 'status-inactive';
+                                    $statusText = ucfirst($status);
+                                ?>
+                                <span class="status-badge <?php echo $statusClass; ?>"><?php echo $statusText; ?></span>
                             </td>
                         </tr>
                         <?php endwhile; ?>
@@ -175,144 +279,112 @@ if(isset($_POST['delete'])) {
         </div>
 
         <!-- Edit Modal -->
+        <?php if($activeTerm): ?>
         <div id="editModal" class="modal">
             <div class="modal-content">
                 <span class="close" onclick="closeEditModal()">&times;</span>
-                <h2>Edit Term</h2>
+                <h2>Edit Active Term Details</h2>
                 <form method="POST">
-                    <input type="hidden" id="edit_term_id" name="term_id">
+                    <input type="hidden" name="term_id" value="<?php echo $activeTerm['id']; ?>">
+                    
+                    <!-- Year field (read-only) -->
                     <div class="form-group">
-                        <label for="edit_year">Year</label>
-                        <input type="number" id="edit_year" name="year" required min="2024" max="2100">
+                        <label for="year">Year</label>
+                        <input type="number" id="year" value="<?php echo htmlspecialchars($activeTerm['year']); ?>" class="readonly-field" readonly>
+                        <small>Year cannot be modified as it was set by the admin</small>
                     </div>
-                    <div class="form-group">
-                        <label for="edit_monthly_fee">Monthly Fee (Rs.)</label>
-                        <input type="number" id="edit_monthly_fee" name="monthly_fee" required step="0.01">
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="monthly_fee">Monthly Fee (Rs.)</label>
+                            <input type="number" id="monthly_fee" name="monthly_fee" required step="0.01" min="0" value="<?php echo htmlspecialchars($activeTerm['monthly_fee']); ?>">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="registration_fee">Registration Fee (Rs.)</label>
+                            <input type="number" id="registration_fee" name="registration_fee" required step="0.01" min="0" value="<?php echo htmlspecialchars($activeTerm['registration_fee']); ?>">
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="edit_registration_fee">Registration Fee (Rs.)</label>
-                        <input type="number" id="edit_registration_fee" name="registration_fee" required step="0.01">
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="death_welfare">Death Welfare Amount (Rs.)</label>
+                            <input type="number" id="death_welfare" name="death_welfare" required step="0.01" min="0" value="<?php echo htmlspecialchars($activeTerm['death_welfare']); ?>">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="late_fine">Late Fine (Rs.)</label>
+                            <input type="number" id="late_fine" name="late_fine" required step="0.01" min="0" value="<?php echo htmlspecialchars($activeTerm['late_fine']); ?>">
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="edit_death_welfare">Death Welfare Amount (Rs.)</label>
-                        <input type="number" id="edit_death_welfare" name="death_welfare" required step="0.01">
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="absent_fine">Absent Fine (Rs.)</label>
+                            <input type="number" id="absent_fine" name="absent_fine" required step="0.01" min="0" value="<?php echo htmlspecialchars($activeTerm['absent_fine']); ?>">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="rules_violation_fine">Rules Violation Fine (Rs.)</label>
+                            <input type="number" id="rules_violation_fine" name="rules_violation_fine" required step="0.01" min="0" value="<?php echo htmlspecialchars($activeTerm['rules_violation_fine']); ?>">
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="edit_late_fine">Late Fine (Rs.)</label>
-                        <input type="number" id="edit_late_fine" name="late_fine" required step="0.01">
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="interest">Interest Rate (%)</label>
+                            <input type="number" id="interest" name="interest" required step="0.01" min="0" max="100" value="<?php echo htmlspecialchars($activeTerm['interest']); ?>">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="max_loan_limit">Maximum Loan Limit (Rs.)</label>
+                            <input type="number" id="max_loan_limit" name="max_loan_limit" required step="0.01" min="0" value="<?php echo htmlspecialchars($activeTerm['max_loan_limit']); ?>">
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="edit_absent_fine">Absent Fine (Rs.)</label>
-                        <input type="number" id="edit_absent_fine" name="absent_fine" required step="0.01">
-                    </div>
-                    <div class="form-group">
-                        <label for="edit_rules_violation_fine">Rules Violation Fine (Rs.)</label>
-                        <input type="number" id="edit_rules_violation_fine" name="rules_violation_fine" required step="0.01">
-                    </div>
-                    <div class="form-group">
-                        <label for="edit_interest">Interest Rate (%)</label>
-                        <input type="number" id="edit_interest" name="interest" required step="0.01" max="100">
-                    </div>
-                    <div class="form-group">
-                        <label for="edit_max_loan_limit">Maximum Loan Limit (Rs.)</label>
-                        <input type="number" id="edit_max_loan_limit" name="max_loan_limit" required step="0.01">
-                    </div>
-                    <div class="modal-footer">
+                    
+                    <div class="form-footer">
                         <button type="button" class="cancel-btn" onclick="closeEditModal()">Cancel</button>
-                        <button type="submit" name="update" class="save-btn">Save Changes</button>
+                        <button type="submit" name="update" class="save-btn">Update Term</button>
                     </div>
                 </form>
             </div>
         </div>
-
-        <!-- Delete Confirmation Modal -->
-        <div id="deleteModal" class="delete-modal">
-            <div class="delete-modal-content">
-                <h2>Confirm Delete</h2>
-                <p>Are you sure you want to delete this term? This action cannot be undone.</p>
-                <form method="POST" id="deleteForm">
-                    <input type="hidden" id="delete_term_id" name="term_id">
-                    <div class="delete-modal-buttons">
-                        <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>
-                        <button type="submit" name="delete" class="confirm-delete-btn">Delete</button>
-                    </div>
-                </form>
-            </div>
-        </div>
+        <?php endif; ?>
     </div>
 
     <script>
-// Add this at the beginning of your script section
-document.addEventListener('DOMContentLoaded', function() {
-    // Function to handle alert fadeout and removal
-    function fadeOutAlert(alertElement) {
-        if (alertElement) {
-            // Start fade out after 2 seconds
-            setTimeout(() => {
-                alertElement.classList.add('fade-out');
-            }, 2000);
-
-            // Remove the element after fade animation
-            setTimeout(() => {
-                alertElement.remove();
-            }, 2500);
-        }
-    }
-
-    // Handle any success alerts
-    const successAlert = document.getElementById('success-alert');
-    if (successAlert) {
-        fadeOutAlert(successAlert);
-    }
-
-    // Handle any error alerts
-    const errorAlert = document.getElementById('error-alert');
-    if (errorAlert) {
-        fadeOutAlert(errorAlert);
-    }
-});
-
     // Modal handling functions
-
-    function openEditModal(term) {
+    function openEditModal() {
         document.getElementById('editModal').style.display = 'block';
-        document.getElementById('edit_term_id').value = term.id;
-        document.getElementById('edit_year').value = term.year;
-        document.getElementById('edit_monthly_fee').value = term.monthly_fee;
-        document.getElementById('edit_registration_fee').value = term.registration_fee;
-        document.getElementById('edit_death_welfare').value = term.death_welfare;
-        document.getElementById('edit_late_fine').value = term.late_fine;
-        document.getElementById('edit_absent_fine').value = term.absent_fine;
-        document.getElementById('edit_rules_violation_fine').value = term.rules_violation_fine;
-        document.getElementById('edit_interest').value = term.interest;
-        document.getElementById('edit_max_loan_limit').value = term.max_loan_limit;
+        document.body.style.overflow = 'hidden'; // Prevent scrolling while modal is open
     }
 
     function closeEditModal() {
         document.getElementById('editModal').style.display = 'none';
+        document.body.style.overflow = ''; // Re-enable scrolling
     }
 
-    function openDeleteModal(id) {
-        document.getElementById('deleteModal').style.display = 'block';
-        document.getElementById('delete_term_id').value = id;
-    }
-
-    function closeDeleteModal() {
-        document.getElementById('deleteModal').style.display = 'none';
-    }
-
-    // Close modals when clicking outside
+    // Close modal when clicking outside of it
     window.onclick = function(event) {
-        const editModal = document.getElementById('editModal');
-        const deleteModal = document.getElementById('deleteModal');
-
-        if (event.target == editModal) {
+        const modal = document.getElementById('editModal');
+        if (event.target == modal) {
             closeEditModal();
         }
-        if (event.target == deleteModal) {
-            closeDeleteModal();
-        }
     }
-</script>
+
+    // Form validation
+    const form = document.querySelector('#editModal form');
+    if (form) {
+        form.addEventListener('submit', function(event) {
+            // Validate interest rate
+            const interest = document.getElementById('interest').value;
+            if (parseFloat(interest) > 100) {
+                alert('Interest rate cannot exceed 100%');
+                event.preventDefault();
+                return false;
+            }
+        });
+    }
+    </script>
 </body>
 </html>
