@@ -1,6 +1,6 @@
 <?php
 session_start();
-require_once "../../../config/database.php";
+require_once "../../config/database.php";
 
 // Generate new Expense ID
 $query = "SELECT ExpenseID FROM Expenses ORDER BY ExpenseID DESC LIMIT 1";
@@ -33,13 +33,13 @@ if ($treasurerResult && $treasurerResult->num_rows > 0) {
 }
 
 // Get current term
-$termQuery = "SELECT year FROM Static WHERE status = active";
+$termQuery = "SELECT year FROM Static WHERE status = 'active'";
 $termResult = search($termQuery);
 $currentTerm = 1;
 
 if ($termResult && $termResult->num_rows > 0) {
     $termRow = $termResult->fetch_assoc();
-    $currentTerm = $termRow['Term'];
+    $currentTerm = $termRow['year'];
 }
 
 // Check if form is submitted
@@ -54,7 +54,7 @@ if(isset($_POST['add'])) {
     // File upload handling
     $imagePath = null;
     if (isset($_FILES['receipt']) && $_FILES['receipt']['error'] == 0) {
-        $uploadDir = '../../uploads/expenses/';
+        $uploadDir = '../uploads/expenses/';
         
         // Create directory if it doesn't exist
         if (!file_exists($uploadDir)) {
@@ -234,7 +234,7 @@ if(isset($_POST['add'])) {
 </head>
 <body>
     <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">
-    <?php include '../../templates/navbar-treasurer.php'; ?>
+    <?php include '../templates/navbar-treasurer.php'; ?>
     <div class="container">
         <h1>Add Expense</h1>
         

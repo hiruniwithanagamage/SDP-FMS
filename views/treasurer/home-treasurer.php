@@ -129,7 +129,7 @@ $currentTerm = getCurrentTerm();
            display: flex;
            justify-content: space-between;
            align-items: center;
-           margin: 15px 0 2rem;
+           margin: 35px 0 2rem;
            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
        }
 
@@ -143,11 +143,11 @@ $currentTerm = getCurrentTerm();
 
        /* Updated Statistics Grid Styles */
        .statistics-grid {
-        display: flex;
-    flex-wrap: nowrap;
-    align-items: stretch;
-    gap: 15px;
-    margin-bottom: 30px;
+           display: flex;
+           flex-wrap: nowrap;
+           align-items: stretch;
+           gap: 15px;
+           margin-bottom: 30px;
        }
 
        .balance-card {
@@ -162,6 +162,73 @@ $currentTerm = getCurrentTerm();
             justify-content: center;
             align-items: center;
         }
+
+       .management-dropdown {
+           display: flex;
+           flex-direction: column;
+           gap: 1rem;
+           flex: 1;
+       }
+
+       .dropdown-container {
+           background: white;
+           padding: 1.2rem;
+           border-radius: 12px;
+           transition: all 0.3s ease;
+           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+           cursor: pointer;
+       }
+
+       .dropdown-header {
+           display: flex;
+           justify-content: space-between;
+           align-items: center;
+       }
+
+       .dropdown-icon {
+           font-size: 1.5em;
+           color: #1e3c72;
+       }
+
+       .dropdown-title {
+           font-size: 1.1rem;
+           font-weight: 600;
+           color: #1e3c72;
+       }
+
+       .dropdown-content {
+           max-height: 0;
+           overflow: hidden;
+           transition: max-height 0.3s ease;
+       }
+
+       .dropdown-content.show {
+           max-height: 500px;
+           margin-top: 1rem;
+       }
+
+       .dropdown-item {
+           padding: 0.8rem;
+           border-bottom: 1px solid #eee;
+           display: flex;
+           align-items: center;
+           gap: 0.5rem;
+           transition: background-color 0.3s ease;
+       }
+
+       .dropdown-item:last-child {
+           border-bottom: none;
+       }
+
+       .dropdown-item:hover {
+           background-color: #f8f9fa;
+       }
+
+       .dropdown-item i {
+           color: #1e3c72;
+           width: 20px;
+           text-align: center;
+       }
 
        .status-cards {
            display: flex;
@@ -205,33 +272,32 @@ $currentTerm = getCurrentTerm();
            font-size: 0.85rem;
        }
 
-       /* Action Cards Styles */
-       .action-cards {
+       .action-buttons {
            display: grid;
-           grid-template-columns: repeat(3, 1fr);
+           grid-template-columns: repeat(4, 1fr);
            gap: 1.5rem;
            margin-bottom: 2rem;
        }
 
-       .action-card {
-           background: white;
-           padding: 2rem;
-           border-radius: 12px;
-           text-align: center;
+       .action-btn {
+           background: #1e3c72;
+           color: white;
+           padding: 1.2rem;
+           border: none;
+           border-radius: 8px;
+           font-size: 1.1rem;
            cursor: pointer;
            transition: all 0.3s ease;
-           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
            display: flex;
-           flex-direction: column;
-           align-items: center;
            justify-content: center;
-           min-height: 200px;
+           align-items: center;
+           gap: 0.5rem;
        }
 
-       .action-card:hover {
-           transform: translateY(-5px);
-           box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-           background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+       .action-btn:hover {
+           background: #2a5298;
+           transform: translateY(-2px);
+           box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
        }
 
        .info-grid {
@@ -260,15 +326,13 @@ $currentTerm = getCurrentTerm();
            background-color: #f8f9fa;
        }
 
-       .icon {
-           font-size: 2.5em;
-           color: #1e3c72;
-           margin-bottom: 1rem;
-           transition: transform 0.3s ease;
+       .info-item:last-child {
+           border-bottom: none;
        }
 
-       .action-card:hover .icon {
-           transform: scale(1.1);
+       .icon {
+           font-size: 1.2em;
+           margin-right: 0.5rem;
        }
 
        h1 {
@@ -280,12 +344,6 @@ $currentTerm = getCurrentTerm();
            color: #1e3c72;
            margin-bottom: 1.5rem;
            font-size: 1.4rem;
-       }
-
-       .action-card h3 {
-           color: #1e3c72;
-           margin-top: 1rem;
-           font-size: 1.2rem;
        }
 
        .stat-number {
@@ -303,76 +361,13 @@ $currentTerm = getCurrentTerm();
            letter-spacing: 1px;
        }
 
-       .category-section {
-            margin-bottom: 3rem;
-        }
-
-        .category-title {
-            color: #1e3c72;
-            font-size: 1.6rem;
-            margin-bottom: 1rem;
-            padding-bottom: 0.5rem;
-            border-bottom: 2px solid #e0e0e0;
-        }
-
-        .category-cards {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 1rem;
-        }
-
-        /* Update media queries */
-        @media (max-width: 768px) {
-            .category-cards {
-                grid-template-columns: 1fr;
-            }
-        }
-
-       @media (max-width: 1200px) {
-           .action-cards {
-               grid-template-columns: repeat(2, 1fr);
-           }
+       .rotate-icon {
+           display: inline-block;
+           transition: transform 0.3s ease;
        }
 
-       @media (max-width: 992px) {
-           .statistics-grid {
-                flex-wrap: wrap;
-           }
-           
-           .status-cards {
-                flex: 1 1 45%;
-           }
-           
-           .status-card {
-               flex: 1;
-           }
-
-           .add-fine-btn {
-                order: 4;
-                width: auto;
-                flex: 1 1 45%;
-            }
-       }
-
-       @media (max-width: 768px) {
-           .action-cards {
-               grid-template-columns: 1fr;
-           }
-           
-           .info-grid {
-               grid-template-columns: 1fr;
-           }
-           
-           .welcome-card {
-               flex-direction: column;
-               text-align: center;
-               gap: 1rem;
-           }
-           
-           .status-cards {
-               flex-direction: column;
-           }
+       .rotate-icon.active {
+           transform: rotate(180deg);
        }
 
        .term-button {
@@ -398,119 +393,6 @@ $currentTerm = getCurrentTerm();
 
         .term-button i {
             font-size: 1.1em;
-        }
-
-        .management-buttons {
-    max-width: 1200px;
-    margin: 2rem auto;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
-}
-
-.management-btn {
-    background: #1e3c72;
-    color: white;
-    padding: 1rem;
-    border: none;
-    border-radius: 8px;
-    font-size: 1.1rem;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    height: 100%;
-    min-height: 60px;
-}
-
-.management-btn:hover {
-    background: #2a5298;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-}
-
-.management-btn.active {
-    background: #2a5298;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-}
-
-.rotate-icon {
-    display: inline-block;
-    transition: transform 0.3s ease;
-}
-
-.rotate-icon.active {
-    transform: rotate(180deg);
-}
-
-.category-section {
-    display: none;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    margin-top: 2rem;
-}
-
-.category-section.show {
-    display: block;
-    opacity: 1;
-}
-
-.add-fine-btn {
-    text-align: center;
-    padding: 2.5rem;
-    background: #1e3c72;
-    color: white;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.add-fine-btn:hover {
-    background: #2a5298;
-    transform: translateY(-3px);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-}
-
-@media (max-width: 768px) {
-    .management-buttons {
-        grid-template-columns: 1fr;
-    }
-    
-    .management-btn {
-        width: 100%;
-    }
-}
-
-        /* Update welcome-card styles */
-        .welcome-card {
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            color: white;
-            padding: 2rem;
-            border-radius: 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 30px 0;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        }
-
-        @media (max-width: 768px) {
-            .welcome-card {
-                flex-direction: column;
-                text-align: center;
-                gap: 1.5rem;
-            }
-            
-            .term-button {
-                width: 100%;
-                justify-content: center;
-            }
         }
 
         .success-message {
@@ -541,6 +423,42 @@ $currentTerm = getCurrentTerm();
         .success-message .close-icon:hover {
             color: #0b2e13;
         }
+
+        /* Responsive styles */
+        @media (max-width: 992px) {
+           .statistics-grid {
+                flex-wrap: wrap;
+           }
+           
+           .action-buttons {
+               grid-template-columns: repeat(2, 1fr);
+           }
+       }
+
+       @media (max-width: 768px) {
+           .action-buttons {
+               grid-template-columns: 1fr;
+           }
+           
+           .info-grid {
+               grid-template-columns: 1fr;
+           }
+           
+           .welcome-card {
+               flex-direction: column;
+               text-align: center;
+               gap: 1rem;
+           }
+           
+           .status-cards {
+               flex-direction: column;
+           }
+           
+           .term-button {
+                width: 100%;
+                justify-content: center;
+            }
+       }
    </style>
 </head>
 <body>
@@ -561,26 +479,93 @@ $currentTerm = getCurrentTerm();
                 </div>
             <?php endif; ?>
 
-       <div class="welcome-card">
-            <h1>Welcome, Treasurer</h1>
-            <a href="termDetails.php" class="term-button">
-                Term <?php echo htmlspecialchars($currentTerm); ?>
-                <i class="fas fa-chevron-right"></i>
-            </a>
-        </div>
+            <div class="welcome-card">
+                <h1>Welcome, Treasurer</h1>
+                <a href="termDetails.php" class="term-button">
+                    Term <?php echo htmlspecialchars($currentTerm); ?>
+                    <i class="fas fa-chevron-right"></i>
+                </a>
+            </div>
 
-           <!-- Statistics Cards -->
-           <div class="statistics-grid">
-            <div class="balance-card">
+            <!-- Action Buttons (Moved from management-buttons) -->
+            <div class="action-buttons">
+                <button class="action-btn" onclick="window.location.href='addFine.php'">
+                    <i class="fas fa-plus icon"></i>
+                    Add Fine
+                </button>
+                
+                <button class="action-btn" onclick="window.location.href='addExpenses.php'">
+                    <i class="fas fa-plus icon"></i>
+                    Add Expenses
+                </button>
+            </div>
+
+            <!-- Statistics Cards -->
+            <div class="statistics-grid">
+                <div class="balance-card">
                     <i class="fas fa-money-bill-wave icon"></i>
                     <div class="stat-number">Rs.<?php echo number_format($totalBalance, 2); ?></div>
                     <div class="stat-label">Total Balance</div>
                 </div>
-
-                <button onclick="window.location.href='addFine.php'" class="add-fine-btn">
-                    <i class="fas fa-plus"></i>
-                    Add Fine
-                </button>
+                
+                <!-- Management Dropdowns (Moved from add-buttons) -->
+                <div class="management-dropdown">
+                    <div class="dropdown-container" onclick="toggleDropdown('financial-dropdown')">
+                        <div class="dropdown-header">
+                            <div class="dropdown-title">
+                                <i class="fas fa-chart-pie dropdown-icon"></i>
+                                Financial Management
+                            </div>
+                            <i class="fas fa-chevron-down rotate-icon" id="financial-icon"></i>
+                        </div>
+                        <div class="dropdown-content" id="financial-dropdown">
+                            <div class="dropdown-item" onclick="window.location.href='financialManagement/membershipFee.php'">
+                                <i class="fas fa-id-card"></i>
+                                Membership Fee Management
+                            </div>
+                            <div class="dropdown-item" onclick="window.location.href='financialManagement/loan.php'">
+                                <i class="fas fa-landmark"></i>
+                                Loan Management
+                            </div>
+                            <div class="dropdown-item" onclick="window.location.href='financialManagement/deathWelfare.php'">
+                                <i class="fas fa-heart"></i>
+                                Death Welfare Management
+                            </div>
+                            <div class="dropdown-item" onclick="window.location.href='financialManagement/fine.php'">
+                                <i class="fas fa-gavel"></i>
+                                Fine Management
+                            </div>
+                            <div class="dropdown-item" onclick="window.location.href='financialManagement/trackExpenses.php'">
+                                <i class="fas fa-tags"></i>
+                                Track Expenses
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="dropdown-container" onclick="toggleDropdown('reports-dropdown')">
+                        <div class="dropdown-header">
+                            <div class="dropdown-title">
+                                <i class="fas fa-chart-line dropdown-icon"></i>
+                                Reports & Analytics
+                            </div>
+                            <i class="fas fa-chevron-down rotate-icon" id="reports-icon"></i>
+                        </div>
+                        <div class="dropdown-content" id="reports-dropdown">
+                            <div class="dropdown-item" onclick="window.location.href='../../reports/financialReports.php'">
+                                <i class="fas fa-chart-line"></i>
+                                Year End Report
+                            </div>
+                            <div class="dropdown-item" onclick="window.location.href='reportsAnalytics/memberFinancialSummary.php'">
+                                <i class="fas fa-users"></i>
+                                Member Reports
+                            </div>
+                            <div class="dropdown-item" onclick="window.location.href='audit_reports.php'">
+                                <i class="fas fa-clipboard-check"></i>
+                                Financial Reports
+                            </div>
+                        </div>
+                    </div>
+                </div>
                
                 <div class="status-cards">
                     <div class="status-card" onclick="window.location.href='pendingLoans.php'">
@@ -603,77 +588,10 @@ $currentTerm = getCurrentTerm();
                         </div>
                     </div>
                 </div>
-           </div>
+            </div>
 
-           <div class="management-buttons">
-    <button class="management-btn" onclick="toggleSection('financial')">
-        Financial Management
-        <i class="fas fa-chevron-down rotate-icon" id="financial-icon"></i>
-    </button>
-    
-    <button class="management-btn" onclick="toggleSection('expense')">
-        Expense Management
-        <i class="fas fa-chevron-down rotate-icon" id="expense-icon"></i>
-    </button>
-    
-    <button class="management-btn" onclick="toggleSection('reports')">
-        Reports & Analytics
-        <i class="fas fa-chevron-down rotate-icon" id="reports-icon"></i>
-    </button>
-</div>
-
-<div id="financial-section" class="category-section">
-    <div class="category-cards">
-        <div class="action-card" onclick="window.location.href='financialManagement/membershipFee.php'">
-            <i class="fas fa-id-card icon"></i>
-            <h3>Membership Fee Management</h3>
-        </div>
-        <div class="action-card" onclick="window.location.href='financialManagement/loan.php'">
-            <i class="fas fa-landmark icon"></i>
-            <h3>Loan Management</h3>
-        </div>
-        <div class="action-card" onclick="window.location.href='financialManagement/deathWelfare.php'">
-            <i class="fas fa-heart icon"></i>
-            <h3>Death Welfare Management</h3>
-        </div>
-        <div class="action-card" onclick="window.location.href='financialManagement/fine.php'">
-            <i class="fas fa-gavel icon"></i>
-            <h3>Fine Management</h3>
-        </div>
-    </div>
-</div>
-
-<div id="expense-section" class="category-section">
-    <div class="category-cards">
-        <div class="action-card" onclick="window.location.href='financialManagement/addExpenses.php'">
-            <i class="fas fa-file-invoice-dollar icon"></i>
-            <h3>Add Expenses</h3>
-        </div>
-        <div class="action-card" onclick="window.location.href='financialManagement/trackExpenses.php'">
-            <i class="fas fa-tags icon"></i>
-            <h3>Track Expenses</h3>
-        </div>
-    </div>
-</div>
-
-<div id="reports-section" class="category-section">
-    <div class="category-cards">
-        <div class="action-card" onclick="window.location.href='../../reports/financialReports.php'">
-            <i class="fas fa-chart-line icon"></i>
-            <h3>Financial Reports</h3>
-        </div>
-        <div class="action-card" onclick="window.location.href='reportsAnalytics/memberFinancialSummary.php'">
-            <i class="fas fa-users icon"></i>
-            <h3>Member Reports</h3>
-        </div>
-        <div class="action-card" onclick="window.location.href='audit_reports.php'">
-            <i class="fas fa-clipboard-check icon"></i>
-            <h3>Audit Reports</h3>
-        </div>
-    </div>
-</div>
-           <!-- Info Grid -->
-           <div class="info-grid">
+            <!-- Info Grid -->
+            <div class="info-grid">
                 <div class="info-card">
                     <h2>Recent Activities</h2>
                     <?php while($transaction = $recentTransactions->fetch_assoc()): ?>
@@ -709,40 +627,43 @@ $currentTerm = getCurrentTerm();
                         </span>
                     </div>
                 </div>
-           </div>
-       </div>
-       <br><br>
+            </div>
+        </div>
+        <br><br>
        </div>
        <?php include '../templates/footer.php'; ?>
    </div>
 
    <script>
-function toggleSection(sectionName) {
-    const section = document.getElementById(`${sectionName}-section`);
-    const icon = document.getElementById(`${sectionName}-icon`);
-    const allSections = document.querySelectorAll('.category-section');
-    const allIcons = document.querySelectorAll('.rotate-icon');
-    
-    // Close all other sections
-    allSections.forEach(s => {
-        if (s.id !== `${sectionName}-section`) {
-            s.classList.remove('show');
+        function toggleDropdown(dropdownId) {
+            const dropdown = document.getElementById(dropdownId);
+            const icon = dropdown.previousElementSibling.querySelector('.rotate-icon');
+            
+            // Close all other dropdowns
+            const allDropdowns = document.querySelectorAll('.dropdown-content');
+            const allIcons = document.querySelectorAll('.dropdown-header .rotate-icon');
+            
+            allDropdowns.forEach(function(item) {
+                if (item.id !== dropdownId) {
+                    item.classList.remove('show');
+                }
+            });
+            
+            allIcons.forEach(function(item) {
+                if (item !== icon) {
+                    item.classList.remove('active');
+                }
+            });
+            
+            // Toggle current dropdown
+            dropdown.classList.toggle('show');
+            icon.classList.toggle('active');
+            
+            // Prevent the click from bubbling up to parent elements
+            event.stopPropagation();
         }
-    });
-    
-    // Reset all icons
-    allIcons.forEach(i => {
-        if (i.id !== `${sectionName}-icon`) {
-            i.classList.remove('active');
-        }
-    });
-    
-    // Toggle current section
-    section.classList.toggle('show');
-    icon.classList.toggle('active');
-}
 
-function closeSuccessMessage() {
+        function closeSuccessMessage() {
             const successMessage = document.getElementById('success-message');
             if (successMessage) {
                 successMessage.style.display = 'none';
@@ -758,6 +679,6 @@ function closeSuccessMessage() {
                 }, 5000);
             }
         });
-</script>
+   </script>
 </body>
 </html>
