@@ -6,7 +6,7 @@
     function getCurrentTerm() {
         try {
             $conn = getConnection();
-            $stmt = $conn->prepare("SELECT year FROM Static ORDER BY year DESC LIMIT 1");
+            $stmt = $conn->prepare("SELECT year FROM Static WHERE status = 'active'");
             
             if (!$stmt) {
                 error_log("Prepare failed: " . $conn->error);

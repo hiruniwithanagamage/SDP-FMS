@@ -22,7 +22,7 @@ function getMembershipFeeDetails($year, $limit = 15) {
         ORDER BY mf.Date DESC
         LIMIT ?";
     
-    $conn = Database::getConnection();
+    $conn = getConnection();
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("iii", $year, $year, $limit);
     $stmt->execute();
@@ -43,7 +43,7 @@ while (($row = $feeDetails->fetch_assoc()) && $rowCount < 15) {
 // Get fee amounts from Static table with prepared statement
 function getFeeAmounts($year) {
     $sql = "SELECT monthly_fee, registration_fee FROM Static WHERE year = ? LIMIT 1";
-    $conn = Database::getConnection();
+    $conn = getConnection();
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("i", $year);
     $stmt->execute();
@@ -59,7 +59,7 @@ if(isset($_POST['update'])) {
     $details = $_POST['details'];
     
     try {
-        $conn = Database::getConnection();
+        $conn = getConnection();
         
         // Start transaction to ensure consistency
         $conn->begin_transaction();
@@ -185,7 +185,7 @@ if(isset($_POST['delete'])) {
     $feeId = $_POST['fee_id'];
     
     try {
-        $conn = Database::getConnection();
+        $conn = getConnection();
         
         // Start transaction for consistency
         $conn->begin_transaction();

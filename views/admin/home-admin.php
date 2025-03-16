@@ -41,6 +41,15 @@
             error_log("Error retrieving admin name: " . $e->getMessage());
         }
     }
+
+    function getCurrentTerm() {
+        $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
+        $result = search($sql);
+        $row = $result->fetch_assoc();
+        return $row['year'] ?? date('Y');
+    }
+
+    $currentTerm = getCurrentTerm();
 ?>
 
 <!DOCTYPE html>
@@ -97,6 +106,8 @@ h3 {
     padding: 0.8rem 1.5rem;
     border-radius: 50px;
     font-weight: bold;
+    color: white;
+    text-decoration: none;
 }
 
 /* Statistics Section */
@@ -272,10 +283,11 @@ h3 {
    <?php include '../templates/navbar-admin.php'; ?> 
        <div class="content">
            <div class="welcome-card">
-               <h1>Welcome, <?php echo htmlspecialchars($memberName); ?></h1>
-               <div class="status-badge">
-                   System Admin
-               </div>
+                <h1>Welcome, <?php echo htmlspecialchars($memberName); ?></h1>
+                <a href="addTerm.php" class="status-badge">
+                    Term <?php echo htmlspecialchars($currentTerm); ?>
+                    <i class="fas fa-chevron-right"></i>
+                </a>
            </div>
 
            <!-- Quick Statistics -->

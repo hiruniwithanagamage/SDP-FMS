@@ -74,7 +74,7 @@ function getPaymentStatusCounts() {
 
 // Get current term
 function getCurrentTerm() {
-    $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
+    $sql = "SELECT year FROM Static WHERE status = 'active'";
     $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['year'] ?? date('Y');

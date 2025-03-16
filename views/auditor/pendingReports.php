@@ -563,16 +563,16 @@ $pendingReports = getPendingReports($selectedTerm);
                 <div class="card">
                     <div class="card-header">
                         <h2 class="card-title">Financial Report <?php echo htmlspecialchars($reportDetail['ReportID']); ?> (Version <?php echo htmlspecialchars($reportDetail['VersionID']); ?>)</h2>
-                        <a href="pending_reports.php?term=<?php echo $selectedTerm; ?>" class="btn btn-secondary">
+                        <a href="pendingReports.php?term=<?php echo $selectedTerm; ?>" class="btn btn-secondary">
                             <i class="fas fa-list"></i> Back to Reports List
                         </a>
                     </div>
 
                     <div class="detail-tabs">
-                        <a href="pending_reports.php?term=<?php echo $selectedTerm; ?>&report_id=<?php echo $reportDetail['ReportID']; ?>&version_id=<?php echo $reportDetail['VersionID']; ?>" class="detail-tab <?php echo $selectedType === null ? 'active' : ''; ?>">
+                        <a href="pendingReports.php?term=<?php echo $selectedTerm; ?>&report_id=<?php echo $reportDetail['ReportID']; ?>&version_id=<?php echo $reportDetail['VersionID']; ?>" class="detail-tab <?php echo $selectedType === null ? 'active' : ''; ?>">
                             <i class="fas fa-file-alt"></i> Summary
                         </a>
-                        <a href="pending_reports.php?term=<?php echo $selectedTerm; ?>&report_id=<?php echo $reportDetail['ReportID']; ?>&version_id=<?php echo $reportDetail['VersionID']; ?>&type=loans" class="detail-tab <?php echo $selectedType === 'loans' ? 'active' : ''; ?>">
+                        <a href="pendingReports.php?term=<?php echo $selectedTerm; ?>&report_id=<?php echo $reportDetail['ReportID']; ?>&version_id=<?php echo $reportDetail['VersionID']; ?>&type=loans" class="detail-tab <?php echo $selectedType === 'loans' ? 'active' : ''; ?>">
                             <i class="fas fa-money-bill-wave"></i> Loans
                         </a>
                     </div>
@@ -771,7 +771,7 @@ $pendingReports = getPendingReports($selectedTerm);
         const termSelect = document.getElementById('termSelect');
         if (termSelect) {
             termSelect.addEventListener('change', function() {
-                window.location.href = `pending_reports.php?term=${this.value}`;
+                window.location.href = `pendingReports.php?term=${this.value}`;
             });
         }
     });

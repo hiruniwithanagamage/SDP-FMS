@@ -33,7 +33,7 @@ if ($treasurerResult && $treasurerResult->num_rows > 0) {
 }
 
 // Get current term
-$termQuery = "SELECT Term FROM Treasurer WHERE isActive = 1 LIMIT 1";
+$termQuery = "SELECT year FROM Static WHERE status = active";
 $termResult = search($termQuery);
 $currentTerm = 1;
 
