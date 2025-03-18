@@ -746,7 +746,7 @@ $pendingReports = getPendingReports($selectedTerm);
                                         <td>Rs. <?php echo number_format($report['Total_Expenses'], 2); ?></td>
                                         <td>Rs. <?php echo number_format($report['Net_Income'], 2); ?></td>
                                         <td>
-                                            <a href="financialDetailsSimple.php?term=<?php echo $selectedTerm; ?>&report_id=<?php echo $report['ReportID']; ?>&version_id=<?php echo $report['VersionID']; ?>" class="btn btn-primary">
+                                            <a href="reviewDetails.php?term=<?php echo $selectedTerm; ?>&report_id=<?php echo $report['ReportID']; ?>&version_id=<?php echo $report['VersionID']; ?>" class="btn btn-primary">
                                                 <i class="fas fa-eye"></i> View
                                             </a>
                                         </td>

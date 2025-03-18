@@ -2,11 +2,11 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 session_start();
-require_once "../config/database.php";
+require_once "../../../config/database.php";
 
 // Check if user is logged in and is a treasurer
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'treasurer') {
-    header("Location: ../loginProcess.php");
+    header("Location: ../../../loginProcess.php");
     exit();
 }
 
@@ -254,8 +254,8 @@ $reportHistory = getReportHistory($treasurerID, $selectedYear);
     <title>Financial Reports - Treasurer Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="../assets/css/alert.css">
-    <script src="../assets/js/alertHandler.js"></script>
+    <link rel="stylesheet" href="../../../assets/css/alert.css">
+    <script src="../../../assets/js/alertHandler.js"></script>
     <style>
         * {
             margin: 0;
@@ -281,7 +281,7 @@ $reportHistory = getReportHistory($treasurerID, $selectedYear);
             margin: 0 auto;
         }
 
-        .page-header {
+        .welcome-card {
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
             color: white;
             padding: 2rem;
@@ -290,6 +290,7 @@ $reportHistory = getReportHistory($treasurerID, $selectedYear);
             justify-content: space-between;
             align-items: center;
             margin-bottom: 2rem;
+            margin-top: 35px;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
 
@@ -548,7 +549,7 @@ $reportHistory = getReportHistory($treasurerID, $selectedYear);
 </head>
 <body>
     <div class="container">
-        <?php include '../views/templates/navbar-treasurer.php'; ?>
+        <?php include '../../templates/navbar-treasurer.php'; ?>
         
         <!-- Loading Indicator -->
         <div class="loading" id="loadingIndicator">
@@ -556,7 +557,7 @@ $reportHistory = getReportHistory($treasurerID, $selectedYear);
         </div>
 
         <div class="content">
-            <div class="page-header">
+            <div class="welcome-card">
                 <h1>Financial Reports</h1>
                 <div class="filters">
                     <select class="filter-select" id="yearSelect">
@@ -658,7 +659,7 @@ $reportHistory = getReportHistory($treasurerID, $selectedYear);
                                 <button type="submit" name="generate_report" class="btn btn-primary">
                                     Submit Revised Report
                                 </button>
-                                <button type="button" name="view_comment" class="btn btn-primary" onclick="viewComments()">
+                                <button type="button" name="view_comment" class="btn btn-primary" onclick="window.location.href='viewComments.php?term=<?php echo $selectedYear; ?>'">
                                     View Comment
                                 </button>
                             </form>
@@ -737,7 +738,7 @@ $reportHistory = getReportHistory($treasurerID, $selectedYear);
             </div>
         </div>
         
-        <?php include '../views/templates/footer.php'; ?>
+        <?php include '../../templates/footer.php'; ?>
     </div>
 
     <script>

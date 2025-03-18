@@ -551,7 +551,7 @@ $currentTerm = getCurrentTerm();
                             <i class="fas fa-chevron-down rotate-icon" id="reports-icon"></i>
                         </div>
                         <div class="dropdown-content" id="reports-dropdown">
-                            <div class="dropdown-item" onclick="window.location.href='../../reports/financialReports.php'">
+                            <div class="dropdown-item" onclick="window.location.href='reportsAnalytics/financialReports.php'">
                                 <i class="fas fa-chart-line"></i>
                                 Year End Report
                             </div>

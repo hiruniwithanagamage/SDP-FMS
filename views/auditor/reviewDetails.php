@@ -75,7 +75,7 @@ if (isset($_POST['addComment'])) {
     }
     
     // Redirect to avoid resubmission
-    header("Location: financialDetailsSimple.php?type=$itemType&message=$message");
+    header("Location: reviewDetails.php?type=$itemType&message=$message");
     exit();
 }
 
@@ -104,6 +104,17 @@ if (isset($_POST['updateReportStatus'])) {
         $stmt->bind_param("ssss", $status, $auditorID, $reportId, $versionId);
         
         if ($stmt->execute()) {
+            // If the report is approved, update previous ongoing versions to reviewed
+            if ($status === 'approved') {
+                $updatePreviousVersionsSql = "UPDATE FinancialReportVersions 
+                                            SET Status = 'reviewed' 
+                                            WHERE ReportID = ? 
+                                            AND VersionID < ? 
+                                            AND Status = 'ongoing'";
+                $updatePreviousVersionsStmt = prepare($updatePreviousVersionsSql);
+                $updatePreviousVersionsStmt->bind_param("ss", $reportId, $versionId);
+                $updatePreviousVersionsStmt->execute();
+            }
             $message = "Report " . ($status === 'approved' ? 'approved' : 'sent back for changes') . " successfully";
         } else {
             $message = "Error updating report status: " . $stmt->error;
@@ -113,7 +124,7 @@ if (isset($_POST['updateReportStatus'])) {
     }
     
     // Redirect to avoid resubmission
-    header("Location: financialDetailsSimple.php?type=$selectedType&message=$message");
+    header("Location: reviewDetails.php?type=$selectedType&message=$message");
     exit();
 }
 
@@ -837,22 +848,22 @@ switch($selectedType) {
 
             <!-- Navigation Tabs -->
             <div class="tabs">
-                <a href="financialDetailsSimple.php?type=loans" class="tab <?php echo $selectedType === 'loans' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=loans" class="tab <?php echo $selectedType === 'loans' ? 'active' : ''; ?>">
                     <i class="fas fa-money-bill-wave"></i> Loans
                 </a>
-                <a href="financialDetailsSimple.php?type=membership" class="tab <?php echo $selectedType === 'membership' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=membership" class="tab <?php echo $selectedType === 'membership' ? 'active' : ''; ?>">
                     <i class="fas fa-users"></i> Membership Fees
                 </a>
-                <a href="financialDetailsSimple.php?type=fines" class="tab <?php echo $selectedType === 'fines' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=fines" class="tab <?php echo $selectedType === 'fines' ? 'active' : ''; ?>">
                     <i class="fas fa-gavel"></i> Fines
                 </a>
-                <a href="financialDetailsSimple.php?type=welfare" class="tab <?php echo $selectedType === 'welfare' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=welfare" class="tab <?php echo $selectedType === 'welfare' ? 'active' : ''; ?>">
                     <i class="fas fa-hand-holding-heart"></i> Death Welfare
                 </a>
-                <a href="financialDetailsSimple.php?type=payments" class="tab <?php echo $selectedType === 'payments' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=payments" class="tab <?php echo $selectedType === 'payments' ? 'active' : ''; ?>">
                     <i class="fas fa-credit-card"></i> Payments
                 </a>
-                <a href="financialDetailsSimple.php?type=expenses" class="tab <?php echo $selectedType === 'expenses' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=expenses" class="tab <?php echo $selectedType === 'expenses' ? 'active' : ''; ?>">
                     <i class="fas fa-file-invoice-dollar"></i> Expenses
                 </a>
             </div>
@@ -894,7 +905,7 @@ switch($selectedType) {
                     </button>
                     
                     <?php if (!empty($searchQuery)): ?>
-                        <a href="financialDetailsSimple.php?type=<?php echo $selectedType; ?>" class="btn btn-secondary">
+                        <a href="reviewDetails.php?type=<?php echo $selectedType; ?>" class="btn btn-secondary">
                             <i class="fas fa-times"></i> Clear
                         </a>
                     <?php endif; ?>
