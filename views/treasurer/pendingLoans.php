@@ -4,9 +4,12 @@ require_once "../../config/database.php";
 
 function createExpenseRecord($loanId, $amount) {
     try {
-        // Get treasurer ID from User table
-        $treasurerQuery = "SELECT Treasurer_TreasurerID FROM User WHERE UserId = '{$_SESSION['user_id']}'";
-        $treasurerResult = search($treasurerQuery);
+        // Use the existing functions from your database config
+        // Get treasurer ID from User table using prepared statement
+        $treasurerQuery = prepare("SELECT Treasurer_TreasurerID FROM User WHERE UserId = ?");
+        $treasurerQuery->bind_param("s", $_SESSION['user_id']);
+        $treasurerQuery->execute();
+        $treasurerResult = $treasurerQuery->get_result();
         $treasurerData = $treasurerResult->fetch_assoc();
         
         if (!$treasurerData || !$treasurerData['Treasurer_TreasurerID']) {
@@ -17,9 +20,9 @@ function createExpenseRecord($loanId, $amount) {
         $sql = "SELECT ExpenseID FROM Expenses 
                 WHERE ExpenseID LIKE 'EXP%' 
                 ORDER BY ExpenseID DESC LIMIT 1";
-        $result = search($sql);
+        $result = search($sql); // Using your existing search function
         
-        if ($result->num_rows > 0) {
+        if ($result && $result->num_rows > 0) {
             $lastId = $result->fetch_assoc()['ExpenseID'];
             $lastNum = intval(substr($lastId, 3));
             $newNum = $lastNum + 1;
@@ -32,13 +35,23 @@ function createExpenseRecord($loanId, $amount) {
         $date = date('Y-m-d');
         $term = date('Y');
         $treasurerId = $treasurerData['Treasurer_TreasurerID'];
+        $category = 'Loan';
+        $method = 'System';
+        $description = "Loan Payment (LoanID: $loanId)";
         
-        // Insert expense record
-        $sql = "INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, Description, Image, Treasurer_TreasurerID) 
-                VALUES ('$expenseId', 'Loan', 'System', $amount, '$date', $term, 'Loan Payment (LoanID: $loanId)', NULL, '$treasurerId')";
-        Database::iud($sql);
+        // Insert expense record using prepared statement
+        $stmt = prepare("INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, Description, Image, Treasurer_TreasurerID) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)");
         
-        return true;
+        // Make sure all parameters are correctly bound
+        $stmt->bind_param("sssdssss", $expenseId, $category, $method, $amount, $date, $term, $description, $treasurerId);
+        $stmt->execute();
+        
+        if($stmt->affected_rows > 0) {
+            return $expenseId; // Return the generated expense ID
+        } else {
+            throw new Exception("Failed to insert expense record");
+        }
 
     } catch (Exception $e) {
         $_SESSION['error_message'] = "Error creating expense record: " . $e->getMessage();
@@ -47,51 +60,82 @@ function createExpenseRecord($loanId, $amount) {
 }
 
 // Fetch pending loans with member details
-$query = "SELECT l.*, m.Name as MemberName, m.MemberID 
-          FROM Loan l 
-          JOIN Member m ON l.Member_MemberID = m.MemberID 
-          WHERE l.Status = 'pending' 
-          ORDER BY l.Issued_Date DESC";
-$result = search($query);
+function getPendingLoans() {
+    $query = "SELECT l.*, m.Name as MemberName, m.MemberID 
+              FROM Loan l 
+              JOIN Member m ON l.Member_MemberID = m.MemberID 
+              WHERE l.Status = 'pending' 
+              ORDER BY l.Issued_Date DESC";
+    return search($query);
+}
 
 // Handle loan approval/rejection
-if(isset($_POST['update_status'])) {
-    $loanId = $_POST['loan_id'];
-    $status = $_POST['status'];
-    
-    try {
-        if($status === 'approved') {
-            // Get loan amount
-            $loanQuery = "SELECT Amount FROM Loan WHERE LoanID = '$loanId'";
-            $loanResult = search($loanQuery);
-            $loanData = $loanResult->fetch_assoc();
-            
-            if($loanData) {
-                // Begin processing
-                if(createExpenseRecord($loanId, $loanData['Amount'])) {
-                    // Update loan status
-                    $updateQuery = "UPDATE Loan SET Status = '$status' WHERE LoanID = '$loanId'";
-                    Database::iud($updateQuery);
-                    $_SESSION['success_message'] = "Loan approved and expense recorded successfully!";
-                } else {
+function processLoanUpdate() {
+    if(isset($_POST['update_status'])) {
+        $loanId = $_POST['loan_id'];
+        $status = $_POST['status'];
+        
+        try {
+            if($status === 'approved') {
+                // Get loan amount using prepared statement
+                $stmt = prepare("SELECT Amount FROM Loan WHERE LoanID = ?");
+                $stmt->bind_param("s", $loanId);
+                $stmt->execute();
+                $loanResult = $stmt->get_result();
+                
+                if(!$loanResult) {
+                    throw new Exception("Failed to retrieve loan data");
+                }
+                
+                $loanData = $loanResult->fetch_assoc();
+                
+                if(!$loanData) {
+                    throw new Exception("Loan record not found");
+                }
+                
+                // Begin processing - create expense record
+                $expenseId = createExpenseRecord($loanId, $loanData['Amount']);
+                
+                if(!$expenseId) {
                     throw new Exception("Failed to create expense record");
                 }
+                
+                // After successfully inserting expense record, update loan with expense ID
+                $updateLoanStmt = prepare("UPDATE Loan SET Expenses_ExpenseID = ?, Status = ? WHERE LoanID = ?");
+                $updateLoanStmt->bind_param("sss", $expenseId, $status, $loanId);
+                $updateLoanStmt->execute();
+                
+                if($updateLoanStmt->affected_rows > 0) {
+                    $_SESSION['success_message'] = "Loan approved and expense recorded successfully!";
+                } else {
+                    throw new Exception("Failed to update loan with expense ID");
+                }
             } else {
-                throw new Exception("Loan record not found");
+                // Just update status for rejection using prepared statement
+                $updateStmt = prepare("UPDATE Loan SET Status = ? WHERE LoanID = ?");
+                $updateStmt->bind_param("ss", $status, $loanId);
+                $updateStmt->execute();
+                
+                if($updateStmt->affected_rows > 0) {
+                    $_SESSION['success_message'] = "Loan application has been rejected.";
+                } else {
+                    throw new Exception("Failed to update loan status");
+                }
             }
-        } else {
-            // Just update status for rejection
-            $updateQuery = "UPDATE Loan SET Status = '$status' WHERE LoanID = '$loanId'";
-            Database::iud($updateQuery);
-            $_SESSION['success_message'] = "Loan application has been rejected.";
+        } catch(Exception $e) {
+            $_SESSION['error_message'] = "Error updating loan status: " . $e->getMessage();
         }
-    } catch(Exception $e) {
-        $_SESSION['error_message'] = "Error updating loan status: " . $e->getMessage();
+        
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit();
     }
-    
-    header("Location: " . $_SERVER['PHP_SELF']);
-    exit();
 }
+
+// Process any submitted form
+processLoanUpdate();
+
+// Get pending loans for display
+$result = getPendingLoans();
 ?>
 
 <!DOCTYPE html>
@@ -102,7 +146,7 @@ if(isset($_POST['update_status'])) {
     <title>Pending Loans</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="../../assets/css/adminActorDetails.css">
+    <link rel="stylesheet" href="../../assets/css/adminDetails.css">
     <style>
         .alert {
             padding: 15px;
