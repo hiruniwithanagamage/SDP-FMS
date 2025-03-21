@@ -591,6 +591,149 @@ if ($searchResult && !empty($searchResult) && $searchType && $searchID) {
             justify-content: flex-end;
             gap: 1rem;
         }
+
+        /* Add these CSS styles to the existing stylesheet */
+
+.dashboard-layout {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 2rem;
+}
+
+.report-details-card, .comments-card {
+    background: white;
+    border-radius: 10px;
+    padding: 2rem;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+}
+
+.report-details-card {
+    flex: 1;
+    min-width: 300px;
+}
+
+.comments-card {
+    flex: 1.5;
+    min-width: 400px;
+}
+
+.guidance-message {
+    background-color: #e7f3ff;
+    border-left: 4px solid #1e88e5;
+    padding: 0.8rem 1rem;
+    margin-top: 1rem;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.guidance-message i {
+    color: #1e88e5;
+    font-size: 1.2rem;
+}
+
+.action-link {
+    color: #1e3c72;
+    font-weight: 600;
+    text-decoration: none;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.action-link:hover {
+    color: #2a5298;
+    text-decoration: underline;
+}
+
+.action-link:after {
+    content: " →";
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.action-link:hover:after {
+    opacity: 1;
+    transform: translateX(3px);
+}
+
+.report-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 15px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.status-badge.pending {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.status-badge.approved {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.status-badge.rejected {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.comment-item {
+    background: #f8f9fa;
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    border-left: 4px solid #1e3c72;
+}
+
+.comment-header {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 0.8rem;
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+.comment-date, .comment-time {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.no-comments {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem;
+    color: #6c757d;
+}
+
+.no-comments i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* Add responsive handling for smaller screens */
+@media (max-width: 992px) {
+    .dashboard-layout {
+        flex-direction: column;
+    }
+    
+    .report-details-card, .comments-card {
+        width: 100%;
+    }
+}
     </style>
 </head>
 <body>
@@ -613,47 +756,62 @@ if ($searchResult && !empty($searchResult) && $searchType && $searchID) {
                 </div>
             <?php endif; ?>
 
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">Report Details</h2>
-                </div>
-                
-                <?php if($reportDetails): ?>
-                <div style="margin-bottom: 2rem;">
-                    <p><strong>Report ID:</strong> <?php echo $reportDetails['ReportID']; ?></p>
-                    <p><strong>Version:</strong> <?php echo $reportDetails['VersionID']; ?></p>
-                    <p><strong>Term:</strong> <?php echo $reportDetails['Term']; ?></p>
-                    <p><strong>Date:</strong> <?php echo date('M d, Y', strtotime($reportDetails['Date'])); ?></p>
-                    <p><strong>Status:</strong> <?php echo ucfirst($reportDetails['Status']); ?></p>
-                    <p><strong>Comments:</strong> <?php echo $reportDetails['Comments'] ?? 'None'; ?></p>
-                </div>
-                <?php else: ?>
-                <p>No report details available.</p>
-                <?php endif; ?>
-            </div>
+<div class="dashboard-layout">
+    <div class="report-details-card">
+        <div class="card-header">
+            <h2 class="card-title">Report Details</h2>
+        </div>
+        
+        <?php if($reportDetails): ?>
+        <div class="report-info">
+            <p><strong>Report ID:</strong> <?php echo $reportDetails['ReportID']; ?></p>
+            <p><strong>Version:</strong> <?php echo $reportDetails['VersionID']; ?></p>
+            <p><strong>Term:</strong> <?php echo $reportDetails['Term']; ?></p>
+            <p><strong>Date:</strong> <?php echo date('M d, Y', strtotime($reportDetails['Date'])); ?></p>
+            <p><strong>Status:</strong> <span class="status-badge <?php echo strtolower($reportDetails['Status']); ?>"><?php echo ucfirst($reportDetails['Status']); ?></span></p>
+            <p><strong>Comments:</strong> <?php echo $reportDetails['Comments'] ?? 'None'; ?></p>
+        </div>
+        <?php else: ?>
+        <p>No report details available.</p>
+        <?php endif; ?>
+    </div>
 
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">Auditor Comments</h2>
-                </div>
-                
-                <div class="comment-list">
-                    <?php if($comments && $comments->num_rows > 0): ?>
-                        <?php while($comment = $comments->fetch_assoc()): ?>
-                            <div class="comment-item">
-                                <div class="comment-date">
-                                    <?php echo date('F j, Y, g:i a', strtotime($comment['CommentDate'])); ?>
-                                </div>
-                                <p class="comment-text"><?php echo nl2br(htmlspecialchars($comment['Comment'])); ?></p>
-                            </div>
-                        <?php endwhile; ?>
-                    <?php else: ?>
-                        <p>No comments available for this report.</p>
-                    <?php endif; ?>
-                </div>
-            </div>
+    <div class="comments-card">
+        <div class="card-header">
+            <h2 class="card-title">Auditor Comments</h2>
+        </div>
 
-            <div class="card">
+        <div class="guidance-message">
+            <i class="fas fa-info-circle"></i> 
+            To make changes based on comments, <a href="#search-section" class="action-link">use the search tool below</a> to find and edit relevant records.
+        </div>
+        
+        <div class="comment-list">
+            <?php if($comments && $comments->num_rows > 0): ?>
+                <?php while($comment = $comments->fetch_assoc()): ?>
+                    <div class="comment-item">
+                        <div class="comment-header">
+                            <span class="comment-date">
+                                <i class="far fa-calendar-alt"></i> <?php echo date('F j, Y', strtotime($comment['CommentDate'])); ?>
+                            </span>
+                            <span class="comment-time">
+                                <i class="far fa-clock"></i> <?php echo date('g:i a', strtotime($comment['CommentDate'])); ?>
+                            </span>
+                        </div>
+                        <p class="comment-text"><?php echo nl2br(htmlspecialchars($comment['Comment'])); ?></p>
+                    </div>
+                <?php endwhile; ?>
+            <?php else: ?>
+                <div class="no-comments">
+                    <i class="far fa-comment-dots"></i>
+                    <p>No comments available for this report.</p>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
+            <div id="search-section" class="card">
                 <div class="card-header">
                     <h2 class="card-title">Search Records</h2>
                 </div>
