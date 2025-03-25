@@ -289,7 +289,7 @@ $feeAmounts = $feeAmountsResult->fetch_assoc();
     <title>Edit Membership Fee Details</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="../../../assets/css/adminActorDetails.css">
+    <link rel="stylesheet" href="../../../assets/css/adminDetails.css">
     <style>
         /* Add these styles to your existing adminActorDetails.css or include them in a style tag */
 
