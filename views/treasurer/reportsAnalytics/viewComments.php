@@ -1508,16 +1508,16 @@ if ($searchResult && $searchType && $searchID) {
 
     <script>
         // Show success message and hide after 3 seconds
-        // document.addEventListener('DOMContentLoaded', function() {
-        //     const alertSuccessElements = document.querySelectorAll('.alert-success');
-        //     if (alertSuccessElements.length > 0) {
-        //         setTimeout(function() {
-        //             alertSuccessElements.forEach(function(alert) {
-        //                 alert.style.display = 'none';
-        //             });
-        //         }, 3000);
-        //     }
-        // });
+        document.addEventListener('DOMContentLoaded', function() {
+            const alertSuccessElements = document.querySelectorAll('.alert-success');
+            if (alertSuccessElements.length > 0) {
+                setTimeout(function() {
+                    alertSuccessElements.forEach(function(alert) {
+                        alert.style.display = 'none';
+                    });
+                }, 3000);
+            }
+        });
 
         // Clear search function
         function clearSearch() {
