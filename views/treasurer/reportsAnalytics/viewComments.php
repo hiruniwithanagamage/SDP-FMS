@@ -101,9 +101,6 @@ if ($searchType && $searchID) {
         $config = $tableConfig[$searchType];
         
         // For expenses, add treasurer ID condition
-        $whereTreasurerID = '';
-        $params = [];
-        
         if ($searchType === 'expense') {
             $sql = "SELECT * FROM {$config['table']} WHERE {$config['idColumn']} = ? AND Treasurer_TreasurerID = ?";
             $stmt = prepare($sql);
@@ -126,9 +123,9 @@ if ($searchType && $searchID) {
                 $canEdit = ($recordYear == $currentTerm);
             }
             
-            $searchResult = [$record];
+            $searchResult = $record;
         } else {
-            $searchResult = [];
+            $searchResult = null;
         }
     }
 }
@@ -182,10 +179,46 @@ function getRelatedExpenseId($welfareId) {
     return null;
 }
 
+// Function to log changes to the ChangeLog table
+function logChange($recordType, $recordId, $userId, $treasurerId, $oldValues, $newValues, $changeDetails, $reportId = null, $versionId = null) {
+    // Convert arrays to JSON strings
+    $oldValuesJson = json_encode($oldValues);
+    $newValuesJson = json_encode($newValues);
+    
+    $sql = "INSERT INTO ChangeLog (
+                RecordType, 
+                RecordID, 
+                UserID, 
+                TreasurerID, 
+                OldValues, 
+                NewValues, 
+                ChangeDetails, 
+                ReportID, 
+                VersionID
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    
+    $stmt = prepare($sql);
+    $stmt->bind_param(
+        "sssssssss",
+        $recordType,
+        $recordId,
+        $userId,
+        $treasurerId,
+        $oldValuesJson,
+        $newValuesJson,
+        $changeDetails,
+        $reportId,
+        $versionId
+    );
+    
+    return $stmt->execute();
+}
+
 // Handle record update
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_record'])) {
     $updateType = $_POST['update_type'];
     $updateID = $_POST['update_id'];
+    $changeDetails = $_POST['change_details'] ?? '';
     
     // Define updatable fields for each type
     $updatableFields = [
@@ -201,111 +234,285 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_record'])) {
         $fields = $updatableFields[$updateType];
         $updates = [];
         $params = [];
+        $oldValues = [];
+        $newValues = [];
         
-        foreach ($fields as $field) {
-            if (isset($_POST[$field])) {
-                $updates[] = "$field = ?";
-                $params[] = $_POST[$field];
-            }
+        // Get current record values before update (for change logging)
+        $tableConfig = [
+            'loan' => ['table' => 'Loan', 'idColumn' => 'LoanID'],
+            'payment' => ['table' => 'Payment', 'idColumn' => 'PaymentID'],
+            'membershipfee' => ['table' => 'MembershipFee', 'idColumn' => 'FeeID'],
+            'deathwelfare' => ['table' => 'DeathWelfare', 'idColumn' => 'WelfareID'],
+            'fine' => ['table' => 'Fine', 'idColumn' => 'FineID'],
+            'expense' => ['table' => 'Expenses', 'idColumn' => 'ExpenseID']
+        ];
+        
+        $config = $tableConfig[$updateType];
+        $oldRecordSql = "SELECT * FROM {$config['table']} WHERE {$config['idColumn']} = ?";
+        
+        // For expenses, add treasurer ID condition
+        if ($updateType === 'expense') {
+            $oldRecordSql .= " AND Treasurer_TreasurerID = ?";
+            $oldRecordStmt = prepare($oldRecordSql);
+            $oldRecordStmt->bind_param("ss", $updateID, $treasurerID);
+        } else {
+            $oldRecordStmt = prepare($oldRecordSql);
+            $oldRecordStmt->bind_param("s", $updateID);
         }
         
-        $success = true;
-        $errorMessage = "";
+        $oldRecordStmt->execute();
+        $oldRecordResult = $oldRecordStmt->get_result();
         
-        if (!empty($updates)) {
-            $tableConfig = [
-                'loan' => ['table' => 'Loan', 'idColumn' => 'LoanID'],
-                'payment' => ['table' => 'Payment', 'idColumn' => 'PaymentID'],
-                'membershipfee' => ['table' => 'MembershipFee', 'idColumn' => 'FeeID'],
-                'deathwelfare' => ['table' => 'DeathWelfare', 'idColumn' => 'WelfareID'],
-                'fine' => ['table' => 'Fine', 'idColumn' => 'FineID'],
-                'expense' => ['table' => 'Expenses', 'idColumn' => 'ExpenseID']
-            ];
+        if ($oldRecordResult->num_rows > 0) {
+            $oldRecord = $oldRecordResult->fetch_assoc();
             
-            $config = $tableConfig[$updateType];
-            $sql = "UPDATE {$config['table']} SET " . implode(", ", $updates) . " WHERE {$config['idColumn']} = ?";
-            
-            // For expenses, add treasurer ID condition
-            if ($updateType === 'expense') {
-                $sql .= " AND Treasurer_TreasurerID = ?";
-            }
-            
-            $stmt = prepare($sql);
-            
-            // Add the ID parameter to the end of the params array
-            $params[] = $updateID;
-            
-            // Add treasurer ID for expenses
-            if ($updateType === 'expense') {
-                $params[] = $treasurerID;
-            }
-            
-            // Create type string for bind_param
-            $typeString = str_repeat('s', count($params));
-            
-            // Call bind_param with dynamic parameters
-            $bindParams = array_merge([$typeString], $params);
-            $bindParamsRef = [];
-            
-            foreach ($bindParams as $key => $value) {
-                $bindParamsRef[$key] = &$bindParams[$key];
-            }
-            
-            call_user_func_array([$stmt, 'bind_param'], $bindParamsRef);
-            
-            if (!$stmt->execute()) {
-                $success = false;
-                $errorMessage = "Error updating main record: " . $stmt->error;
-            }
-            
-            // Only continue if the first update was successful
-            if ($success && isset($_POST['Amount'])) {
-                $newAmount = $_POST['Amount'];
-                
-                // Update related payment record if applicable
-                if (in_array($updateType, ['membershipfee', 'loan', 'fine'])) {
-                    $paymentId = getRelatedPaymentId($updateType, $updateID);
+            foreach ($fields as $field) {
+                if (isset($_POST[$field])) {
+                    $updates[] = "$field = ?";
+                    $newValue = $_POST[$field];
+                    $params[] = $newValue;
                     
-                    if ($paymentId) {
-                        $paymentSql = "UPDATE Payment SET Amount = ? WHERE PaymentID = ?";
-                        $paymentStmt = prepare($paymentSql);
-                        $paymentStmt->bind_param("ds", $newAmount, $paymentId);
+                    // Store old and new values for change log
+                    $oldValues[$field] = $oldRecord[$field];
+                    $newValues[$field] = $newValue;
+                }
+            }
+            
+            // For some record types, also update the date if provided
+            if (isset($_POST['Date']) && in_array($updateType, ['payment', 'membershipfee', 'deathwelfare', 'fine', 'expense'])) {
+                $updates[] = "Date = ?";
+                $newDate = $_POST['Date'];
+                $params[] = $newDate;
+                $oldValues['Date'] = $oldRecord['Date'];
+                $newValues['Date'] = $newDate;
+            }
+            
+            // For loan, update the issued date if provided
+            if (isset($_POST['Issued_Date']) && $updateType === 'loan') {
+                $updates[] = "Issued_Date = ?";
+                $newDate = $_POST['Issued_Date'];
+                $params[] = $newDate;
+                $oldValues['Issued_Date'] = $oldRecord['Issued_Date'];
+                $newValues['Issued_Date'] = $newDate;
+            }
+            
+            $success = true;
+            $errorMessage = "";
+            
+            if (!empty($updates)) {
+                $sql = "UPDATE {$config['table']} SET " . implode(", ", $updates) . " WHERE {$config['idColumn']} = ?";
+                
+                // For expenses, add treasurer ID condition
+                if ($updateType === 'expense') {
+                    $sql .= " AND Treasurer_TreasurerID = ?";
+                }
+                
+                $stmt = prepare($sql);
+                
+                // Add the ID parameter to the end of the params array
+                $params[] = $updateID;
+                
+                // Add treasurer ID for expenses
+                if ($updateType === 'expense') {
+                    $params[] = $treasurerID;
+                }
+                
+                // Create type string for bind_param
+                $typeString = str_repeat('s', count($params));
+                
+                // Call bind_param with dynamic parameters
+                $bindParams = array_merge([$typeString], $params);
+                $bindParamsRef = [];
+                
+                foreach ($bindParams as $key => $value) {
+                    $bindParamsRef[$key] = &$bindParams[$key];
+                }
+                
+                call_user_func_array([$stmt, 'bind_param'], $bindParamsRef);
+                
+                if (!$stmt->execute()) {
+                    $success = false;
+                    $errorMessage = "Error updating main record: " . $stmt->error;
+                }
+                
+                // Log the changes to main record
+                if ($success) {
+                    $logSuccess = logChange(
+                        $updateType,
+                        $updateID,
+                        $userID,
+                        $treasurerID,
+                        $oldValues,
+                        $newValues,
+                        $changeDetails,
+                        $reportID,
+                        $versionID
+                    );
+                    
+                    if (!$logSuccess) {
+                        // Not critical, just log to error log
+                        error_log("Failed to log changes to ChangeLog table for $updateType ID: $updateID");
+                    }
+                }
+                
+                // Only continue if the first update was successful
+                if ($success && isset($_POST['Amount'])) {
+                    $newAmount = $_POST['Amount'];
+                    
+                    // Update related payment record if applicable
+                    if (in_array($updateType, ['membershipfee', 'loan', 'fine'])) {
+                        $paymentId = getRelatedPaymentId($updateType, $updateID);
                         
-                        if (!$paymentStmt->execute()) {
-                            $success = false;
-                            $errorMessage = "Error updating payment record: " . $paymentStmt->error;
+                        if ($paymentId) {
+                            // Get old payment record for logging
+                            $oldPaymentSql = "SELECT * FROM Payment WHERE PaymentID = ?";
+                            $oldPaymentStmt = prepare($oldPaymentSql);
+                            $oldPaymentStmt->bind_param("s", $paymentId);
+                            $oldPaymentStmt->execute();
+                            $oldPaymentResult = $oldPaymentStmt->get_result();
+                            $oldPaymentRecord = $oldPaymentResult->fetch_assoc();
+                            
+                            $paymentSql = "UPDATE Payment SET Amount = ? WHERE PaymentID = ?";
+                            $paymentStmt = prepare($paymentSql);
+                            $paymentStmt->bind_param("ds", $newAmount, $paymentId);
+                            
+                            if (!$paymentStmt->execute()) {
+                                $success = false;
+                                $errorMessage = "Error updating payment record: " . $paymentStmt->error;
+                            } else {
+                                // Log the changes to related payment record
+                                $paymentOldValues = ['Amount' => $oldPaymentRecord['Amount']];
+                                $paymentNewValues = ['Amount' => $newAmount];
+                                
+                                logChange(
+                                    'payment',
+                                    $paymentId,
+                                    $userID,
+                                    $treasurerID,
+                                    $paymentOldValues,
+                                    $paymentNewValues,
+                                    "Related payment update for $updateType ID: $updateID - " . $changeDetails,
+                                    $reportID,
+                                    $versionID
+                                );
+                            }
+                            
+                            // Update the date in Payment table if provided and this is a membership fee or fine
+                            if ($success && isset($_POST['Date']) && in_array($updateType, ['membershipfee', 'fine'])) {
+                                $newDate = $_POST['Date'];
+                                $dateSql = "UPDATE Payment SET Date = ? WHERE PaymentID = ?";
+                                $dateStmt = prepare($dateSql);
+                                $dateStmt->bind_param("ss", $newDate, $paymentId);
+                                
+                                if (!$dateStmt->execute()) {
+                                    $success = false;
+                                    $errorMessage = "Error updating payment date: " . $dateStmt->error;
+                                } else {
+                                    // Log the date change
+                                    $datePmentOldValues = ['Date' => $oldPaymentRecord['Date']];
+                                    $datePaymentNewValues = ['Date' => $newDate];
+                                    
+                                    logChange(
+                                        'payment',
+                                        $paymentId,
+                                        $userID,
+                                        $treasurerID,
+                                        $datePmentOldValues,
+                                        $datePaymentNewValues,
+                                        "Date update for related payment of $updateType ID: $updateID - " . $changeDetails,
+                                        $reportID,
+                                        $versionID
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Update related expense record for death welfare
+                    if ($success && $updateType === 'deathwelfare') {
+                        $expenseId = getRelatedExpenseId($updateID);
+                        
+                        if ($expenseId) {
+                            // Get old expense record for logging
+                            $oldExpenseSql = "SELECT * FROM Expenses WHERE ExpenseID = ?";
+                            $oldExpenseStmt = prepare($oldExpenseSql);
+                            $oldExpenseStmt->bind_param("s", $expenseId);
+                            $oldExpenseStmt->execute();
+                            $oldExpenseResult = $oldExpenseStmt->get_result();
+                            $oldExpenseRecord = $oldExpenseResult->fetch_assoc();
+                            
+                            $expenseSql = "UPDATE Expenses SET Amount = ? WHERE ExpenseID = ?";
+                            $expenseStmt = prepare($expenseSql);
+                            $expenseStmt->bind_param("ds", $newAmount, $expenseId);
+                            
+                            if (!$expenseStmt->execute()) {
+                                $success = false;
+                                $errorMessage = "Error updating expense record: " . $expenseStmt->error;
+                            } else {
+                                // Log the changes to related expense record
+                                $expenseOldValues = ['Amount' => $oldExpenseRecord['Amount']];
+                                $expenseNewValues = ['Amount' => $newAmount];
+                                
+                                logChange(
+                                    'expense',
+                                    $expenseId,
+                                    $userID,
+                                    $treasurerID,
+                                    $expenseOldValues,
+                                    $expenseNewValues,
+                                    "Related expense update for $updateType ID: $updateID - " . $changeDetails,
+                                    $reportID,
+                                    $versionID
+                                );
+                            }
+                            
+                            // Update the date in Expenses table if provided
+                            if ($success && isset($_POST['Date'])) {
+                                $newDate = $_POST['Date'];
+                                $dateSql = "UPDATE Expenses SET Date = ? WHERE ExpenseID = ?";
+                                $dateStmt = prepare($dateSql);
+                                $dateStmt->bind_param("ss", $newDate, $expenseId);
+                                
+                                if (!$dateStmt->execute()) {
+                                    $success = false;
+                                    $errorMessage = "Error updating expense date: " . $dateStmt->error;
+                                } else {
+                                    // Log the date change
+                                    $dateExpenseOldValues = ['Date' => $oldExpenseRecord['Date']];
+                                    $dateExpenseNewValues = ['Date' => $newDate];
+                                    
+                                    logChange(
+                                        'expense',
+                                        $expenseId,
+                                        $userID,
+                                        $treasurerID,
+                                        $dateExpenseOldValues,
+                                        $dateExpenseNewValues,
+                                        "Date update for related expense of $updateType ID: $updateID - " . $changeDetails,
+                                        $reportID,
+                                        $versionID
+                                    );
+                                }
+                            }
                         }
                     }
                 }
                 
-                // Update related expense record for death welfare
-                if ($success && $updateType === 'deathwelfare') {
-                    $expenseId = getRelatedExpenseId($updateID);
+                if ($success) {
+                    $message = ucfirst($updateType) . " record and related records updated successfully.";
+                    $alertType = "success";
                     
-                    if ($expenseId) {
-                        $expenseSql = "UPDATE Expenses SET Amount = ? WHERE ExpenseID = ?";
-                        $expenseStmt = prepare($expenseSql);
-                        $expenseStmt->bind_param("ds", $newAmount, $expenseId);
-                        
-                        if (!$expenseStmt->execute()) {
-                            $success = false;
-                            $errorMessage = "Error updating expense record: " . $expenseStmt->error;
-                        }
-                    }
+                    // Redirect to remove the form submission from URL
+                    header("Location: viewComments.php?year=$reportYear&reportID=$reportID&versionID=$versionID&searchType=$searchType&searchID=$searchID&success=1");
+                    exit();
+                } else {
+                    $message = "Error: " . $errorMessage;
+                    $alertType = "danger";
                 }
             }
-            
-            if ($success) {
-                $message = ucfirst($updateType) . " record and related records updated successfully.";
-                $alertType = "success";
-                
-                // Redirect to remove the form submission from URL
-                header("Location: viewComments.php?year=$reportYear&reportID=$reportID&versionID=$versionID&searchType=$updateType&searchID=$updateID&success=1");
-                exit();
-            } else {
-                $message = "Error: " . $errorMessage;
-                $alertType = "danger";
-            }
+        } else {
+            $message = "Error: Record not found for updating.";
+            $alertType = "danger";
         }
     }
 }
@@ -336,8 +543,22 @@ if (isset($_GET['success']) && $_GET['success'] == 1) {
     $alertType = "success";
 }
 
+// Function to get human-readable title for each record type
+function getRecordTypeTitle($type) {
+    $titles = [
+        'loan' => 'Loan',
+        'payment' => 'Payment',
+        'membershipfee' => 'Membership Fee',
+        'deathwelfare' => 'Death Welfare',
+        'fine' => 'Fine',
+        'expense' => 'Expense'
+    ];
+    
+    return $titles[$type] ?? ucfirst($type);
+}
+
 // Function to display related records
-function displayRelatedRecords($recordType, $recordId) {
+function getRelatedRecords($recordType, $recordId) {
     $relatedRecords = [];
     
     // Get related payment details
@@ -379,8 +600,25 @@ function displayRelatedRecords($recordType, $recordId) {
 
 // Get related records for the current search
 $relatedRecords = [];
-if ($searchResult && !empty($searchResult) && $searchType && $searchID) {
-    $relatedRecords = displayRelatedRecords($searchType, $searchID);
+if ($searchResult && $searchType && $searchID) {
+    $relatedRecords = getRelatedRecords($searchType, $searchID);
+}
+
+// Function to get recent changes for a specific record
+function getRecentChanges($recordType, $recordId, $limit = 5) {
+    $sql = "SELECT * FROM ChangeLog 
+            WHERE RecordType = ? AND RecordID = ? 
+            ORDER BY ChangeDate DESC LIMIT ?";
+    $stmt = prepare($sql);
+    $stmt->bind_param("ssi", $recordType, $recordId, $limit);
+    $stmt->execute();
+    return $stmt->get_result();
+}
+
+// Get recent changes for the searched record
+$recentChanges = null;
+if ($searchResult && $searchType && $searchID) {
+    $recentChanges = getRecentChanges($searchType, $searchID);
 }
 ?>
 
@@ -528,23 +766,6 @@ if ($searchResult && !empty($searchResult) && $searchType && $searchID) {
             font-size: 1rem;
         }
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 1.5rem;
-        }
-
-        table th, table td {
-            padding: 1rem;
-            text-align: left;
-            border-bottom: 1px solid #e0e0e0;
-        }
-
-        table th {
-            background-color: #f8f9fa;
-            font-weight: 600;
-        }
-
         .alert {
             padding: 1rem;
             border-radius: 5px;
@@ -563,177 +784,368 @@ if ($searchResult && !empty($searchResult) && $searchType && $searchID) {
             border: 1px solid #f5c6cb;
         }
 
-        .edit-form {
-            margin-top: 2rem;
+        /* Dashboard layout */
+        .dashboard-layout {
+            display: flex;
+            gap: 2rem;
+            margin-bottom: 2rem;
         }
 
-        .form-row {
+        .report-details-card, .comments-card {
+            background: white;
+            border-radius: 10px;
+            padding: 2rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        }
+
+        .report-details-card {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .comments-card {
+            flex: 1.5;
+            min-width: 400px;
+        }
+
+        .guidance-message {
+            background-color: #e7f3ff;
+            border-left: 4px solid #1e88e5;
+            padding: 0.8rem 1rem;
+            margin-top: 1rem;
+            margin-bottom: 2rem;
+            border-radius: 4px;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .guidance-message i {
+            color: #1e88e5;
+            font-size: 1.2rem;
+        }
+
+        .action-link {
+            color: #1e3c72;
+            font-weight: 600;
+            text-decoration: none;
+            position: relative;
+            transition: all 0.2s ease;
+        }
+
+        .action-link:hover {
+            color: #2a5298;
+            text-decoration: underline;
+        }
+
+        .action-link:after {
+            content: " →";
+            opacity: 0;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        .action-link:hover:after {
+            opacity: 1;
+            transform: translateX(3px);
+        }
+
+        .report-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+
+        .status-badge.pending {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .status-badge.approved {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .status-badge.rejected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .comment-item {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            border-left: 4px solid #1e3c72;
+        }
+
+        .comment-header {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 0.8rem;
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+
+        .comment-date, .comment-time {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .no-comments {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+            color: #6c757d;
+        }
+
+        .no-comments i {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.6);
+            animation: fadeIn 0.3s;
+        }
+
+        .modal-content {
+            background-color: #fff;
+            margin: 5% auto;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+            width: 80%;
+            max-width: 700px;
+            animation: slideDown 0.3s;
+            position: relative;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideDown {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            position: absolute;
+            right: 20px;
+            top: 15px;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .modal h2 {
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+            color: #1e3c72;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #eee;
+        }
+
+        .modal-form-row {
             display: flex;
             flex-wrap: wrap;
-            gap: 1rem;
+            gap: 1.5rem;
             margin-bottom: 1rem;
         }
 
-        .form-group {
+        .modal-form-group {
             flex: 1;
             min-width: 200px;
+            margin-bottom: 1rem;
         }
 
-        .form-label {
+        .modal-form-label {
             display: block;
             margin-bottom: 0.5rem;
             font-weight: 600;
+            color: #333;
         }
 
-        .form-actions {
-            margin-top: 1.5rem;
+        .modal-form-control {
+            width: 100%;
+            padding: 0.8rem;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+        }
+
+        .modal-form-control:focus {
+            border-color: #1e3c72;
+            outline: 0;
+            box-shadow: 0 0 0 0.2rem rgba(30, 60, 114, 0.25);
+        }
+
+        textarea.modal-form-control {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .modal-footer {
             display: flex;
             justify-content: flex-end;
             gap: 1rem;
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid #eee;
         }
 
-        /* Add these CSS styles to the existing stylesheet */
+        .cancel-btn {
+            padding: 0.8rem 1.5rem;
+            background-color: #f8f9fa;
+            color: #6c757d;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
 
-.dashboard-layout {
-    display: flex;
-    gap: 2rem;
-    margin-bottom: 2rem;
-}
+        .cancel-btn:hover {
+            background-color: #e2e6ea;
+        }
 
-.report-details-card, .comments-card {
-    background: white;
-    border-radius: 10px;
-    padding: 2rem;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-}
+        .save-btn {
+            padding: 0.8rem 1.5rem;
+            background-color: #1e3c72;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
 
-.report-details-card {
-    flex: 1;
-    min-width: 300px;
-}
-
-.comments-card {
-    flex: 1.5;
-    min-width: 400px;
-}
-
-.guidance-message {
-    background-color: #e7f3ff;
-    border-left: 4px solid #1e88e5;
-    padding: 0.8rem 1rem;
-    margin-top: 1rem;
-    border-radius: 4px;
-    font-size: 0.95rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.guidance-message i {
-    color: #1e88e5;
-    font-size: 1.2rem;
-}
-
-.action-link {
-    color: #1e3c72;
-    font-weight: 600;
-    text-decoration: none;
-    position: relative;
-    transition: all 0.2s ease;
-}
-
-.action-link:hover {
-    color: #2a5298;
-    text-decoration: underline;
-}
-
-.action-link:after {
-    content: " →";
-    opacity: 0;
-    transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-.action-link:hover:after {
-    opacity: 1;
-    transform: translateX(3px);
-}
-
-.report-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.8rem;
-}
-
-.status-badge {
-    display: inline-block;
-    padding: 0.25rem 0.75rem;
-    border-radius: 15px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    text-transform: capitalize;
-}
-
-.status-badge.pending {
-    background-color: #fff3cd;
-    color: #856404;
-}
-
-.status-badge.approved {
-    background-color: #d4edda;
-    color: #155724;
-}
-
-.status-badge.rejected {
-    background-color: #f8d7da;
-    color: #721c24;
-}
-
-.comment-item {
-    background: #f8f9fa;
-    padding: 1.5rem;
-    border-radius: 8px;
-    margin-bottom: 1rem;
-    border-left: 4px solid #1e3c72;
-}
-
-.comment-header {
-    display: flex;
-    gap: 1rem;
-    margin-bottom: 0.8rem;
-    color: #6c757d;
-    font-size: 0.9rem;
-}
-
-.comment-date, .comment-time {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-}
-
-.no-comments {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 2rem;
-    color: #6c757d;
-}
-
-.no-comments i {
-    font-size: 3rem;
-    margin-bottom: 1rem;
-    opacity: 0.5;
-}
-
-/* Add responsive handling for smaller screens */
-@media (max-width: 992px) {
-    .dashboard-layout {
-        flex-direction: column;
-    }
-    
-    .report-details-card, .comments-card {
-        width: 100%;
-    }
-}
+        .save-btn:hover {
+            background-color: #2a5298;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        .search-result-message {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            text-align: center;
+            color: #6c757d;
+        }
+        
+        /* Change history section */
+        .change-history {
+            margin-top: 2rem;
+            border-top: 1px solid #e0e0e0;
+            padding-top: 1.5rem;
+        }
+        
+        .change-history h3 {
+            color: #1e3c72;
+            margin-bottom: 1rem;
+        }
+        
+        .change-item {
+            background-color: #f8f9fa;
+            border-left: 3px solid #6c757d;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0 5px 5px 0;
+        }
+        
+        .change-item:hover {
+            background-color: #f1f3f5;
+        }
+        
+        .change-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        
+        .change-details {
+            margin-bottom: 0.8rem;
+        }
+        
+        .change-values {
+            font-size: 0.9rem;
+            background-color: #fff;
+            border: 1px solid #e0e0e0;
+            padding: 0.8rem;
+            border-radius: 5px;
+        }
+        
+        .change-value-item {
+            display: flex;
+            margin-bottom: 0.3rem;
+        }
+        
+        .changed-field {
+            font-weight: 600;
+            width: 150px;
+        }
+        
+        .old-value {
+            color: #dc3545;
+            text-decoration: line-through;
+            margin-right: 1rem;
+        }
+        
+        .new-value {
+            color: #28a745;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 992px) {
+            .dashboard-layout {
+                flex-direction: column;
+            }
+            
+            .report-details-card, .comments-card {
+                width: 100%;
+            }
+            
+            .modal-content {
+                width: 95%;
+                margin: 10% auto;
+            }
+        }
     </style>
 </head>
 <body>
@@ -756,67 +1168,67 @@ if ($searchResult && !empty($searchResult) && $searchType && $searchID) {
                 </div>
             <?php endif; ?>
 
-<div class="dashboard-layout">
-    <div class="report-details-card">
-        <div class="card-header">
-            <h2 class="card-title">Report Details</h2>
-        </div>
-        
-        <?php if($reportDetails): ?>
-        <div class="report-info">
-            <p><strong>Report ID:</strong> <?php echo $reportDetails['ReportID']; ?></p>
-            <p><strong>Version:</strong> <?php echo $reportDetails['VersionID']; ?></p>
-            <p><strong>Term:</strong> <?php echo $reportDetails['Term']; ?></p>
-            <p><strong>Date:</strong> <?php echo date('M d, Y', strtotime($reportDetails['Date'])); ?></p>
-            <p><strong>Status:</strong> <span class="status-badge <?php echo strtolower($reportDetails['Status']); ?>"><?php echo ucfirst($reportDetails['Status']); ?></span></p>
-            <p><strong>Comments:</strong> <?php echo $reportDetails['Comments'] ?? 'None'; ?></p>
-        </div>
-        <?php else: ?>
-        <p>No report details available.</p>
-        <?php endif; ?>
-    </div>
-
-    <div class="comments-card">
-        <div class="card-header">
-            <h2 class="card-title">Auditor Comments</h2>
-        </div>
-
-        <div class="guidance-message">
-            <i class="fas fa-info-circle"></i> 
-            To make changes based on comments, <a href="#search-section" class="action-link">use the search tool below</a> to find and edit relevant records.
-        </div>
-        
-        <div class="comment-list">
-            <?php if($comments && $comments->num_rows > 0): ?>
-                <?php while($comment = $comments->fetch_assoc()): ?>
-                    <div class="comment-item">
-                        <div class="comment-header">
-                            <span class="comment-date">
-                                <i class="far fa-calendar-alt"></i> <?php echo date('F j, Y', strtotime($comment['CommentDate'])); ?>
-                            </span>
-                            <span class="comment-time">
-                                <i class="far fa-clock"></i> <?php echo date('g:i a', strtotime($comment['CommentDate'])); ?>
-                            </span>
-                        </div>
-                        <p class="comment-text"><?php echo nl2br(htmlspecialchars($comment['Comment'])); ?></p>
+            <div class="dashboard-layout">
+                <div class="report-details-card">
+                    <div class="card-header">
+                        <h2 class="card-title">Report Details</h2>
                     </div>
-                <?php endwhile; ?>
-            <?php else: ?>
-                <div class="no-comments">
-                    <i class="far fa-comment-dots"></i>
-                    <p>No comments available for this report.</p>
+                    
+                    <?php if($reportDetails): ?>
+                    <div class="report-info">
+                        <p><strong>Report ID:</strong> <?php echo $reportDetails['ReportID']; ?></p>
+                        <p><strong>Version:</strong> <?php echo $reportDetails['VersionID']; ?></p>
+                        <p><strong>Term:</strong> <?php echo $reportDetails['Term']; ?></p>
+                        <p><strong>Date:</strong> <?php echo date('M d, Y', strtotime($reportDetails['Date'])); ?></p>
+                        <p><strong>Status:</strong> <span class="status-badge <?php echo strtolower($reportDetails['Status']); ?>"><?php echo ucfirst($reportDetails['Status']); ?></span></p>
+                        <p><strong>Comments:</strong> <?php echo $reportDetails['Comments'] ?? 'None'; ?></p>
+                    </div>
+                    <?php else: ?>
+                    <p>No report details available.</p>
+                    <?php endif; ?>
                 </div>
-            <?php endif; ?>
-        </div>
-    </div>
-</div>
+
+                <div class="comments-card">
+                    <div class="card-header">
+                        <h2 class="card-title">Auditor Comments</h2>
+                    </div>
+
+                    <div class="guidance-message">
+                        <i class="fas fa-info-circle"></i> 
+                        To make changes based on comments, <a href="#search-section" class="action-link">use the search tool below</a> to find and edit relevant records.
+                    </div>
+                    
+                    <div class="comment-list">
+                        <?php if($comments && $comments->num_rows > 0): ?>
+                            <?php while($comment = $comments->fetch_assoc()): ?>
+                                <div class="comment-item">
+                                    <div class="comment-header">
+                                        <span class="comment-date">
+                                            <i class="far fa-calendar-alt"></i> <?php echo date('F j, Y', strtotime($comment['CommentDate'])); ?>
+                                        </span>
+                                        <span class="comment-time">
+                                            <i class="far fa-clock"></i> <?php echo date('g:i a', strtotime($comment['CommentDate'])); ?>
+                                        </span>
+                                    </div>
+                                    <p class="comment-text"><?php echo nl2br(htmlspecialchars($comment['Comment'])); ?></p>
+                                </div>
+                            <?php endwhile; ?>
+                        <?php else: ?>
+                            <div class="no-comments">
+                                <i class="far fa-comment-dots"></i>
+                                <p>No comments available for this report.</p>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
 
             <div id="search-section" class="card">
                 <div class="card-header">
                     <h2 class="card-title">Search Records</h2>
                 </div>
                 
-                <form action="viewComments.php" method="GET" class="search-form">
+                <form action="viewComments.php#search-section" method="GET" class="search-form">
                     <input type="hidden" name="year" value="<?php echo $reportYear; ?>">
                     <input type="hidden" name="reportID" value="<?php echo $reportID; ?>">
                     <input type="hidden" name="versionID" value="<?php echo $versionID; ?>">
@@ -842,144 +1254,254 @@ if ($searchResult && !empty($searchResult) && $searchType && $searchID) {
                     </button>
                 </form>
                 
-                <?php if($searchResult): ?>
-                    <div class="search-results">
-                        <h3>Search Results</h3>
-                        
-                        <?php if(empty($searchResult)): ?>
-                            <p>No records found.</p>
-                        <?php else: ?>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <?php foreach(array_keys($searchResult[0]) as $column): ?>
-                                            <th><?php echo htmlspecialchars($column); ?></th>
-                                        <?php endforeach; ?>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach($searchResult as $record): ?>
-                                        <tr>
-                                            <?php foreach($record as $value): ?>
-                                                <td><?php echo htmlspecialchars($value); ?></td>
-                                            <?php endforeach; ?>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                            
+                <?php if($searchType && $searchID): ?>
+                    <?php if($searchResult): ?>
+                        <div class="search-result-message">
+                            <h3><?php echo getRecordTypeTitle($searchType); ?> with ID: <?php echo htmlspecialchars($searchID); ?> found</h3>
                             <?php if($canEdit): ?>
-                                <div class="edit-form">
-                                    <h3>Edit Record</h3>
-                                    <form method="POST" action="">
-                                        <input type="hidden" name="update_type" value="<?php echo $searchType; ?>">
-                                        <input type="hidden" name="update_id" value="<?php echo $searchID; ?>">
-                                        
-                                        <div class="form-row">
-                                            <?php 
-                                            $record = $searchResult[0];
-                                            
-                                            // Define editable fields based on record type
-                                            $editableFields = [];
-                                            
-                                            switch($searchType) {
-                                                case 'loan':
-                                                    $editableFields = [
-                                                        'Amount' => ['type' => 'number', 'step' => '0.01'],
-                                                        'Reason' => ['type' => 'text'],
-                                                        'Status' => ['type' => 'select', 'options' => ['pending', 'approved', 'rejected']]
-                                                    ];
-                                                    break;
-                                                case 'payment':
-                                                    $editableFields = [
-                                                        'Amount' => ['type' => 'number', 'step' => '0.01'],
-                                                        'Payment_Type' => ['type' => 'text'],
-                                                        'Method' => ['type' => 'text']
-                                                    ];
-                                                    break;
-                                                case 'membershipfee':
-                                                    $editableFields = [
-                                                        'Amount' => ['type' => 'number', 'step' => '0.01'],
-                                                        'Type' => ['type' => 'text'],
-                                                        'IsPaid' => ['type' => 'select', 'options' => ['Yes', 'No']]
-                                                    ];
-                                                    break;
-                                                case 'deathwelfare':
-                                                    $editableFields = [
-                                                        'Amount' => ['type' => 'number', 'step' => '0.01'],
-                                                        'Relationship' => ['type' => 'text'],
-                                                        'Status' => ['type' => 'select', 'options' => ['pending', 'approved', 'rejected']]
-                                                    ];
-                                                    break;
-                                                case 'fine':
-                                                    $editableFields = [
-                                                        'Amount' => ['type' => 'number', 'step' => '0.01'],
-                                                        'Description' => ['type' => 'select', 'options' => ['late', 'absent', 'violation']],
-                                                        'IsPaid' => ['type' => 'select', 'options' => ['Yes', 'No']]
-                                                    ];
-                                                    break;
-                                                case 'expense':
-                                                    $editableFields = [
-                                                        'Amount' => ['type' => 'number', 'step' => '0.01'],
-                                                        'Category' => ['type' => 'text'],
-                                                        'Method' => ['type' => 'text'],
-                                                        'Description' => ['type' => 'text']
-                                                    ];
-                                                    break;
-                                            }
-                                            
-                                            foreach($editableFields as $field => $config):
-                                                if(isset($record[$field])):
-                                            ?>
-                                                <div class="form-group">
-                                                    <label class="form-label"><?php echo htmlspecialchars($field); ?></label>
-                                                    
-                                                    <?php if($config['type'] === 'select'): ?>
-                                                        <select name="<?php echo $field; ?>" class="form-control">
-                                                            <?php foreach($config['options'] as $option): ?>
-                                                                <option value="<?php echo $option; ?>" <?php echo ($record[$field] == $option) ? 'selected' : ''; ?>>
-                                                                    <?php echo ucfirst($option); ?>
-                                                                </option>
-                                                            <?php endforeach; ?>
-                                                        </select>
-                                                    <?php else: ?>
-                                                        <input 
-                                                            type="<?php echo $config['type']; ?>" 
-                                                            name="<?php echo $field; ?>" 
-                                                            value="<?php echo htmlspecialchars($record[$field]); ?>" 
-                                                            class="form-control"
-                                                            <?php if(isset($config['step'])): ?>
-                                                                step="<?php echo $config['step']; ?>"
-                                                            <?php endif; ?>
-                                                        >
-                                                    <?php endif; ?>
-                                                </div>
-                                            <?php 
-                                                endif;
-                                            endforeach; 
-                                            ?>
-                                        </div>
-                                        
-                                        <div class="form-actions">
-                                            <button type="submit" name="update_record" class="btn btn-primary">
-                                                <i class="fas fa-save"></i> Update Record
-                                            </button>
-                                        </div>
-                                    </form>
-                                </div>
+                                <p>This record is from the current term (<?php echo $currentTerm; ?>) and can be edited.</p>
+                                <button type="button" class="btn btn-primary" onclick="openEditModal()">
+                                    <i class="fas fa-edit"></i> Edit Record
+                                </button>
                             <?php else: ?>
-                                <div class="alert alert-info" style="margin-top: 1rem;">
-                                    Note: You can only edit records from the current term (<?php echo $currentTerm; ?>).
-                                </div>
+                                <p>This record is from a previous term and cannot be edited.</p>
                             <?php endif; ?>
+                        </div>
+                        
+                        <?php if ($recentChanges && $recentChanges->num_rows > 0): ?>
+                        <div class="change-history">
+                            <h3>Recent Changes</h3>
+                            <?php while ($change = $recentChanges->fetch_assoc()): ?>
+                                <?php 
+                                    $oldValues = json_decode($change['OldValues'], true);
+                                    $newValues = json_decode($change['NewValues'], true);
+                                ?>
+                                <div class="change-item">
+                                    <div class="change-header">
+                                        <span>
+                                            <i class="fas fa-history"></i> 
+                                            <?php echo date('F j, Y g:i a', strtotime($change['ChangeDate'])); ?>
+                                        </span>
+                                        <span>
+                                            <i class="fas fa-user"></i> Treasurer ID: <?php echo $change['TreasurerID']; ?>
+                                        </span>
+                                    </div>
+                                    <div class="change-details">
+                                        <?php echo htmlspecialchars($change['ChangeDetails']); ?>
+                                    </div>
+                                    <div class="change-values">
+                                        <?php foreach ($oldValues as $field => $oldValue): ?>
+                                            <?php if (isset($newValues[$field]) && $oldValue != $newValues[$field]): ?>
+                                                <div class="change-value-item">
+                                                    <span class="changed-field"><?php echo $field; ?>:</span>
+                                                    <span class="old-value"><?php echo htmlspecialchars($oldValue); ?></span>
+                                                    <span class="new-value"><?php echo htmlspecialchars($newValues[$field]); ?></span>
+                                                </div>
+                                            <?php endif; ?>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            <?php endwhile; ?>
+                        </div>
                         <?php endif; ?>
-                    </div>
+                    <?php else: ?>
+                        <div class="search-result-message">
+                            <i class="fas fa-exclamation-triangle" style="font-size: 2rem; color: #dc3545; margin-bottom: 1rem;"></i>
+                            <h3>No record found</h3>
+                            <p>No <?php echo getRecordTypeTitle($searchType); ?> with ID: <?php echo htmlspecialchars($searchID); ?> was found.</p>
+                        </div>
+                    <?php endif; ?>
                 <?php endif; ?>
             </div>
         </div>
         
         <?php include '../../templates/footer.php'; ?>
     </div>
+
+    <!-- Edit Modal -->
+    <?php if($searchResult && $searchType): ?>
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2>Edit <?php echo getRecordTypeTitle($searchType); ?> Details</h2>
+            <form id="editForm" method="POST">
+                <input type="hidden" name="update_type" value="<?php echo $searchType; ?>">
+                <input type="hidden" name="update_id" value="<?php echo $searchID; ?>">
+                
+                <?php 
+                // Define fields based on record type
+                $fields = [];
+                $dateField = '';
+                
+                switch($searchType) {
+                    case 'loan':
+                        $fields = [
+                            'Amount' => ['type' => 'number', 'step' => '0.01', 'label' => 'Amount (Rs.)', 'value' => $searchResult['Amount'] ?? ''],
+                            'Reason' => ['type' => 'text', 'label' => 'Reason', 'value' => $searchResult['Reason'] ?? ''],
+                            'Status' => ['type' => 'select', 'label' => 'Status', 'value' => $searchResult['Status'] ?? '', 'options' => [
+                                'pending' => 'Pending',
+                                'approved' => 'Approved',
+                                'rejected' => 'Rejected'
+                            ]]
+                        ];
+                        $dateField = 'Issued_Date';
+                        $dateValue = $searchResult['Issued_Date'] ?? '';
+                        $dateLabel = 'Issued Date';
+                        break;
+                        
+                    case 'payment':
+                        $fields = [
+                            'Amount' => ['type' => 'number', 'step' => '0.01', 'label' => 'Amount (Rs.)', 'value' => $searchResult['Amount'] ?? ''],
+                            'Payment_Type' => ['type' => 'text', 'label' => 'Payment Type', 'value' => $searchResult['Payment_Type'] ?? ''],
+                            'Method' => ['type' => 'text', 'label' => 'Method', 'value' => $searchResult['Method'] ?? '']
+                        ];
+                        $dateField = 'Date';
+                        $dateValue = $searchResult['Date'] ?? '';
+                        $dateLabel = 'Payment Date';
+                        break;
+                        
+                    case 'membershipfee':
+                        $fields = [
+                            'Amount' => ['type' => 'number', 'step' => '0.01', 'label' => 'Amount (Rs.)', 'value' => $searchResult['Amount'] ?? ''],
+                            'Type' => ['type' => 'text', 'label' => 'Fee Type', 'value' => $searchResult['Type'] ?? ''],
+                            'IsPaid' => ['type' => 'select', 'label' => 'Payment Status', 'value' => $searchResult['IsPaid'] ?? '', 'options' => [
+                                'Yes' => 'Paid',
+                                'No' => 'Unpaid'
+                            ]]
+                        ];
+                        $dateField = 'Date';
+                        $dateValue = $searchResult['Date'] ?? '';
+                        $dateLabel = 'Date';
+                        break;
+                        
+                    case 'deathwelfare':
+                        $fields = [
+                            'Amount' => ['type' => 'number', 'step' => '0.01', 'label' => 'Amount (Rs.)', 'value' => $searchResult['Amount'] ?? ''],
+                            'Relationship' => ['type' => 'text', 'label' => 'Relationship', 'value' => $searchResult['Relationship'] ?? ''],
+                            'Status' => ['type' => 'select', 'label' => 'Status', 'value' => $searchResult['Status'] ?? '', 'options' => [
+                                'pending' => 'Pending',
+                                'approved' => 'Approved',
+                                'rejected' => 'Rejected'
+                            ]]
+                        ];
+                        $dateField = 'Date';
+                        $dateValue = $searchResult['Date'] ?? '';
+                        $dateLabel = 'Date';
+                        break;
+                        
+                    case 'fine':
+                        $fields = [
+                            'Amount' => ['type' => 'number', 'step' => '0.01', 'label' => 'Amount (Rs.)', 'value' => $searchResult['Amount'] ?? ''],
+                            'Description' => ['type' => 'select', 'label' => 'Description', 'value' => $searchResult['Description'] ?? '', 'options' => [
+                                'late' => 'Late',
+                                'absent' => 'Absent',
+                                'violation' => 'Violation'
+                            ]],
+                            'IsPaid' => ['type' => 'select', 'label' => 'Payment Status', 'value' => $searchResult['IsPaid'] ?? '', 'options' => [
+                                'Yes' => 'Paid',
+                                'No' => 'Unpaid'
+                            ]]
+                        ];
+                        $dateField = 'Date';
+                        $dateValue = $searchResult['Date'] ?? '';
+                        $dateLabel = 'Date';
+                        break;
+                        
+                    case 'expense':
+                        $fields = [
+                            'Amount' => ['type' => 'number', 'step' => '0.01', 'label' => 'Amount (Rs.)', 'value' => $searchResult['Amount'] ?? ''],
+                            'Category' => ['type' => 'text', 'label' => 'Category', 'value' => $searchResult['Category'] ?? ''],
+                            'Method' => ['type' => 'text', 'label' => 'Method', 'value' => $searchResult['Method'] ?? ''],
+                            'Description' => ['type' => 'text', 'label' => 'Description', 'value' => $searchResult['Description'] ?? '']
+                        ];
+                        $dateField = 'Date';
+                        $dateValue = $searchResult['Date'] ?? '';
+                        $dateLabel = 'Date';
+                        break;
+                }
+                
+                // Output form fields in two columns
+                echo '<div class="modal-form-row">';
+                $count = 0;
+                foreach($fields as $fieldName => $fieldConfig) {
+                    if($count > 0 && $count % 2 == 0) {
+                        echo '</div><div class="modal-form-row">';
+                    }
+                    ?>
+                    <div class="modal-form-group">
+                        <label for="edit_<?php echo strtolower($fieldName); ?>" class="modal-form-label"><?php echo $fieldConfig['label']; ?></label>
+                        
+                        <?php if($fieldConfig['type'] === 'select'): ?>
+                            <select id="edit_<?php echo strtolower($fieldName); ?>" name="<?php echo $fieldName; ?>" class="modal-form-control" required <?php echo !$canEdit ? 'disabled' : ''; ?>>
+                                <?php foreach($fieldConfig['options'] as $value => $label): ?>
+                                    <option value="<?php echo $value; ?>" <?php echo ($fieldConfig['value'] == $value) ? 'selected' : ''; ?>>
+                                        <?php echo $label; ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        <?php else: ?>
+                            <input 
+                                type="<?php echo $fieldConfig['type']; ?>" 
+                                id="edit_<?php echo strtolower($fieldName); ?>" 
+                                name="<?php echo $fieldName; ?>" 
+                                value="<?php echo htmlspecialchars($fieldConfig['value']); ?>" 
+                                class="modal-form-control"
+                                <?php if(isset($fieldConfig['step'])): ?>
+                                    step="<?php echo $fieldConfig['step']; ?>"
+                                <?php endif; ?>
+                                required
+                                <?php echo !$canEdit ? 'disabled' : ''; ?>
+                            >
+                        <?php endif; ?>
+                    </div>
+                    <?php
+                    $count++;
+                }
+                echo '</div>';
+                
+                // Add date field if applicable
+                if($dateField && $dateValue) {
+                    ?>
+                    <div class="modal-form-row">
+                        <div class="modal-form-group">
+                            <label for="edit_date" class="modal-form-label"><?php echo $dateLabel; ?></label>
+                            <input 
+                                type="date" 
+                                id="edit_date" 
+                                name="<?php echo $dateField; ?>" 
+                                value="<?php echo date('Y-m-d', strtotime($dateValue)); ?>" 
+                                class="modal-form-control"
+                                required
+                                <?php echo !$canEdit ? 'disabled' : ''; ?>
+                            >
+                        </div>
+                    </div>
+                    <?php
+                }
+                ?>
+                
+                <div class="modal-form-group">
+                    <label for="edit_details" class="modal-form-label">Change Details/Notes (Required)</label>
+                    <textarea 
+                        id="edit_details" 
+                        name="change_details" 
+                        class="modal-form-control" 
+                        placeholder="Please provide a reason for this change..." 
+                        required
+                        <?php echo !$canEdit ? 'disabled' : ''; ?>
+                    ></textarea>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="cancel-btn" onclick="closeModal()">Cancel</button>
+                    <?php if($canEdit): ?>
+                        <button type="submit" name="update_record" class="save-btn">Save Changes</button>
+                    <?php endif; ?>
+                </div>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <script>
         // Show success message and hide after 3 seconds
@@ -993,6 +1515,47 @@ if ($searchResult && !empty($searchResult) && $searchType && $searchID) {
                 }, 3000);
             }
         });
+        
+        // Modal functionality
+        var modal = document.getElementById('editModal');
+        
+        function openEditModal() {
+            if (modal) {
+                modal.style.display = 'block';
+                document.body.style.overflow = 'hidden'; // Prevent scrolling when modal is open
+            }
+        }
+        
+        function closeModal() {
+            if (modal) {
+                modal.style.display = 'none';
+                document.body.style.overflow = 'auto'; // Re-enable scrolling
+            }
+        }
+        
+        // Close modal when clicking outside of it
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                closeModal();
+            }
+        }
+        
+        // Form validation enhancement
+        document.getElementById('editForm')?.addEventListener('submit', function(e) {
+            var detailsField = document.getElementById('edit_details');
+            if (detailsField && detailsField.value.trim().length < 10) {
+                e.preventDefault();
+                alert('Please provide a detailed reason for the change (at least 10 characters).');
+                detailsField.focus();
+            }
+        });
+        
+        <?php if($searchResult && $searchType && isset($_GET['open_modal']) && $_GET['open_modal'] == 1): ?>
+        // Auto-open modal if requested via URL
+        document.addEventListener('DOMContentLoaded', function() {
+            openEditModal();
+        });
+        <?php endif; ?>
     </script>
 </body>
 </html>
