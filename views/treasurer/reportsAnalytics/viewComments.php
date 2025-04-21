@@ -1521,21 +1521,11 @@ if ($searchResult && $searchType && $searchID) {
 
         // Clear search function
         function clearSearch() {
-            // Clear the form fields
-            document.querySelector('select[name="searchType"]').value = '';
-            document.querySelector('input[name="searchID"]').value = '';
+            // Get current URL without search parameters
+            const url = window.location.pathname + '?year=<?php echo $reportYear; ?>&reportID=<?php echo $reportID; ?>&versionID=<?php echo $versionID; ?>#search-section';
             
-            // Hide any existing search results
-            const searchResults = document.querySelector('.search-result-message');
-            if (searchResults) {
-                searchResults.style.display = 'none';
-            }
-            
-            // Hide any change history section
-            const changeHistory = document.querySelector('.change-history');
-            if (changeHistory) {
-                changeHistory.style.display = 'none';
-            }
+            // Redirect to the same page without search parameters
+            window.location.href = url;
         }
         
         // Modal functionality
