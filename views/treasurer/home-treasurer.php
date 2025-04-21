@@ -535,6 +535,10 @@ $currentTerm = getCurrentTerm();
                                 <i class="fas fa-gavel"></i>
                                 Fine Management
                             </div>
+                            <div class="dropdown-item" onclick="window.location.href='financialManagement/payment.php'">
+                                <i class="fas fa-money-bill-wave"></i>
+                                Payment Management
+                            </div>
                             <div class="dropdown-item" onclick="window.location.href='financialManagement/trackExpenses.php'">
                                 <i class="fas fa-tags"></i>
                                 Track Expenses
