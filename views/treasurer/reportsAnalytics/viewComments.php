@@ -1252,6 +1252,9 @@ if ($searchResult && $searchType && $searchID) {
                     <button type="submit" class="btn btn-primary">
                         <i class="fas fa-search"></i> Search
                     </button>
+                    <button type="button" class="btn btn-secondary" onclick="clearSearch()">
+                        <i class="fas fa-times"></i> Clear
+                    </button>
                 </form>
                 
                 <?php if($searchType && $searchID): ?>
@@ -1505,16 +1508,35 @@ if ($searchResult && $searchType && $searchID) {
 
     <script>
         // Show success message and hide after 3 seconds
-        document.addEventListener('DOMContentLoaded', function() {
-            const alertSuccessElements = document.querySelectorAll('.alert-success');
-            if (alertSuccessElements.length > 0) {
-                setTimeout(function() {
-                    alertSuccessElements.forEach(function(alert) {
-                        alert.style.display = 'none';
-                    });
-                }, 3000);
+        // document.addEventListener('DOMContentLoaded', function() {
+        //     const alertSuccessElements = document.querySelectorAll('.alert-success');
+        //     if (alertSuccessElements.length > 0) {
+        //         setTimeout(function() {
+        //             alertSuccessElements.forEach(function(alert) {
+        //                 alert.style.display = 'none';
+        //             });
+        //         }, 3000);
+        //     }
+        // });
+
+        // Clear search function
+        function clearSearch() {
+            // Clear the form fields
+            document.querySelector('select[name="searchType"]').value = '';
+            document.querySelector('input[name="searchID"]').value = '';
+            
+            // Hide any existing search results
+            const searchResults = document.querySelector('.search-result-message');
+            if (searchResults) {
+                searchResults.style.display = 'none';
             }
-        });
+            
+            // Hide any change history section
+            const changeHistory = document.querySelector('.change-history');
+            if (changeHistory) {
+                changeHistory.style.display = 'none';
+            }
+        }
         
         // Modal functionality
         var modal = document.getElementById('editModal');
