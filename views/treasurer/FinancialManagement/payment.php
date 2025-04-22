@@ -60,11 +60,12 @@ function getPaymentSummary($year, $month = null, $memberID = null) {
             COUNT(*) as total_payments,
             SUM(Amount) as total_amount,
             COUNT(DISTINCT Member_MemberID) as unique_members,
-            COUNT(CASE WHEN Payment_Type = 'Loan' THEN 1 END) as loan_payments,
-            COUNT(CASE WHEN Payment_Type = 'Membership Fee' THEN 1 END) as membership_fee_payments,
+            -- COUNT(CASE WHEN Payment_Type = 'Loan' THEN 1 END) as loan_payments,
+            -- COUNT(CASE WHEN Payment_Type = 'Membership Fee' THEN 1 END) as membership_fee_payments,
             COUNT(CASE WHEN Payment_Type = 'Fine' THEN 1 END) as fine_payments,
             SUM(CASE WHEN Payment_Type = 'Loan' THEN Amount ELSE 0 END) as loan_amount,
-            SUM(CASE WHEN Payment_Type = 'Membership Fee' THEN Amount ELSE 0 END) as membership_fee_amount,
+            SUM(CASE WHEN Payment_Type = 'registration' THEN Amount ELSE 0 END) as registration_fee_amount,
+            SUM(CASE WHEN Payment_Type = 'monthly' THEN Amount ELSE 0 END) as monthly_fee_amount,
             SUM(CASE WHEN Payment_Type = 'Fine' THEN Amount ELSE 0 END) as fine_amount
         FROM Payment
         WHERE $whereClause";
@@ -270,6 +271,27 @@ if(isset($_POST['delete_payment'])) {
     .cancel-btn:hover {
         background-color: #d0d0d0;
     }
+    .month-filter-container {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+    }
+
+    .month-filter-select {
+        padding: 8px 15px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background-color: white;
+        color: #333;
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+    .month-filter-select:focus {
+        outline: none;
+        border-color: #1e3c72;
+        box-shadow: 0 0 0 2px rgba(30, 60, 114, 0.2);
+    }
 </style>
 </head>
 <body>
@@ -326,18 +348,28 @@ if(isset($_POST['delete_payment'])) {
             </div>
             <div class="stat-card">
                 <i class="fas fa-chart-pie"></i>
+                <div style="color:#1e3c72; font-weight:bold;" class="stat-label">Breakdown</div>
                 <div class="stat-number-small">
                     Loan: Rs. <?php echo number_format($stats['loan_amount'] ?? 0, 2); ?><br>
-                    Fees: Rs. <?php echo number_format($stats['membership_fee_amount'] ?? 0, 2); ?><br>
+                    Registration Fees: Rs. <?php echo number_format($stats['registration_fee_amount'] ?? 0, 2); ?><br>
+                    Monthly Fees: Rs. <?php echo number_format($stats['monthly_fee_amount'] ?? 0, 2); ?><br>
                     Fines: Rs. <?php echo number_format($stats['fine_amount'] ?? 0, 2); ?>
                 </div>
-                <div class="stat-label">Breakdown</div>
             </div>
         </div>
 
         <div class="tabs">
             <button class="tab active" onclick="showTab('payments')">Payment List</button>
             <button class="tab" onclick="showTab('monthly')">Monthly Summary</button>
+            <div class="month-filter-container">
+                <select class="month-filter-select" id="monthSelect" onchange="updateFilters()">
+                    <?php foreach($months as $num => $name): ?>
+                        <option value="<?php echo $num; ?>" <?php echo $num == $selectedMonth ? 'selected' : ''; ?>>
+                            <?php echo $name; ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
             <div class="filters">
                 <div class="search-container">
                     <input type="text" id="searchInput" placeholder="Search by ID, Name, or Payment ID..." class="search-input">
@@ -375,9 +407,9 @@ if(isset($_POST['delete_payment'])) {
                             <td>Rs. <?php echo number_format($row['Amount'], 2); ?></td>
                             <td><?php echo date('Y-m-d', strtotime($row['Date'])); ?></td>
                             <td class="actions">
-                                <button onclick="viewPaymentDetails('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
-                                    <i class="fas fa-eye"></i>
-                                </button>
+                            <button onclick="viewPaymentReceipt('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
+                                <i class="fas fa-eye"></i>
+                            </button>
                                 <button onclick="editPayment('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
                                     <i class="fas fa-edit"></i>
                                 </button>
@@ -458,10 +490,12 @@ if(isset($_POST['delete_payment'])) {
         // Update filters using AJAX like in membership_fee.php
         function updateFilters() {
             const year = document.getElementById('yearSelect').value;
+            const month = document.getElementById('monthSelect').value;
             
-            window.location.href = `?year=${year}`;
+            // refresh the page at the same location
+            history.pushState(null, '', `?year=${year}&month=${month}`);
             
-            fetch(`payment.php?year=${year}`)
+            fetch(`payment.php?year=${year}&month=${month}`)
                 .then(response => response.text())
                 .then(html => {
                     const parser = new DOMParser();
@@ -571,6 +605,10 @@ if(isset($_POST['delete_payment'])) {
             searchInput.value = '';
             performSearch();
             searchInput.focus();
+        }
+
+        function viewPaymentReceipt(paymentID) {
+            window.location.href = `../payments/payment_receipt.php?payment_id=${paymentID}`;
         }
 
         // Modal handling

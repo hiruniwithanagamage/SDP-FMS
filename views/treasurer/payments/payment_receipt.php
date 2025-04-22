@@ -69,7 +69,7 @@ function getAdditionalPaymentDetails($paymentId, $paymentType) {
             
         case 'loan':
             $query = "
-                SELECT LoanID, Remain_Loan, Remain_Interest
+                SELECT lp.LoanID, l.Remain_Loan, l.Remain_Interest
                 FROM LoanPayment lp
                 JOIN Loan l ON lp.LoanID = l.LoanID
                 WHERE lp.PaymentID = ?
@@ -286,6 +286,23 @@ $additionalDetails = getAdditionalPaymentDetails($paymentId, $paymentDetails['Pa
         </button>
         <a href="#" class="print-btn" id="downloadPdfBtn">
             <i class="fas fa-file-download"></i> Download PDF
+        </a>
+    </div>
+    <div style="margin: 20px 0;">
+        <?php
+        // Get the referring URL
+        $referer = isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : '';
+        
+        // Set default back URL
+        $backUrl = '../treasurerPayment.php';
+        
+        // Check if the referrer contains the financial management path
+        if (strpos($referer, 'financialManagement/payment.php') !== false) {
+            $backUrl = '../financialManagement/payment.php';
+        }
+        ?>
+        <a href="<?php echo $backUrl; ?>" class="print-btn">
+            <i class="fas fa-arrow-left"></i> Back
         </a>
     </div>
 

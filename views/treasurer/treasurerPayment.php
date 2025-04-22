@@ -107,6 +107,8 @@ while ($row = $memberQueryResult->fetch_assoc()) {
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="../../assets/js/alertHandler.js"></script>
     <style>
         .member-search {
             margin-bottom: 2rem;
@@ -155,7 +157,7 @@ while ($row = $memberQueryResult->fetch_assoc()) {
 <body>
     <div class="main-container">
         <?php include '../templates/navbar-treasurer.php'; ?>
-        <div class="container">
+        <div class="container" style="margin-top: 40px;">
             <h1>Process Member Payment</h1>
             
             <?php if(isset($_SESSION['error_message'])): ?>
