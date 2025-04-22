@@ -148,8 +148,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Payment method handler
     document.querySelectorAll('input[name="payment_method"]').forEach(radio => {
         radio.addEventListener('change', function() {
-            cardDetails.style.display = this.value === 'card' ? 'block' : 'none';
-            bankTransfer.style.display = this.value === 'bank' ? 'block' : 'none';
+            if (this.value === 'online') {
+                cardDetails.style.display = 'block';
+                bankTransfer.style.display = 'none';
+            } else if (this.value === 'transfer') {
+                cardDetails.style.display = 'none';
+                bankTransfer.style.display = 'block';
+            }
         });
     });
 
@@ -280,9 +285,9 @@ document.addEventListener('DOMContentLoaded', function() {
             showError(document.querySelector('.payment-methods'), 'Please select a payment method');
             isValid = false;
         } else {
-            if (paymentMethod.value === 'card') {
+            if (paymentMethod.value === '') {
                 isValid = validateCardDetails() && isValid;
-            } else if (paymentMethod.value === 'bank') {
+            } else if (paymentMethod.value === '') {
                 isValid = validateBankTransfer() && isValid;
             }
         }

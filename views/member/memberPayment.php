@@ -285,11 +285,11 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
                     <label>Select Payment Method</label>
                     <div class="payment-methods">
                         <label>
-                            <input type="radio" name="payment_method" value="card">
+                            <input type="radio" name="payment_method" value="online">
                             Credit/Debit Card
                         </label>
                         <label>
-                            <input type="radio" name="payment_method" value="bank">
+                            <input type="radio" name="payment_method" value="transfer">
                             Bank Transfer
                         </label>
                     </div>
@@ -358,6 +358,6 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
         const remainingRegFee = <?php echo $remainingRegFee; ?>;
         const memberStatus = "<?php echo $memberStatus; ?>";
     </script>
-    <script src="../../assets/js/memberPayment.js"></script>
+    <script src="../../assets/js/memberPayments.js"></script>
 </body>
 </html>

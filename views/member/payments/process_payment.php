@@ -24,12 +24,12 @@ try {
     $date = date('Y-m-d');
 
     // Validate payment method details
-    if ($method === 'card') {
+    if ($method === 'online') {
         if (!isset($_POST['card_number'], $_POST['expire_date'], $_POST['cvv'])) {
             throw new Exception("Card details are required");
         }
         validateCardDetails($_POST['card_number'], $_POST['expire_date'], $_POST['cvv']);
-    } else if ($method === 'bank') {
+    } else if ($method === 'transfer') {
         if (!isset($_FILES['receipt'])) {
             throw new Exception("Bank transfer receipt is required");
         }
@@ -52,7 +52,7 @@ try {
 
     // Handle file upload for bank transfer
     $receiptUrl = null;
-    if ($method === 'bank' && isset($_FILES['receipt'])) {
+    if ($method === 'transfer' && isset($_FILES['receipt'])) {
         $uploadDir = '../../../uploads/receipts/';
         if (!file_exists($uploadDir)) {
             mkdir($uploadDir, 0777, true);
