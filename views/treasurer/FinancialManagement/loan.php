@@ -2,9 +2,9 @@
 session_start();
 require_once "../../../config/database.php";
 
-// Get current term
+// Get current term/year
 function getCurrentTerm() {
-    $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
+    $sql = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
     $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['year'] ?? date('Y');
@@ -15,46 +15,23 @@ function getMemberLoans($year) {
     $sql = "SELECT 
             m.MemberID,
             m.Name,
-            GROUP_CONCAT(
-                CASE 
-                    WHEN l.Status = 'approved' 
-                    THEN l.LoanID
-                    ELSE NULL 
-                END
-            ) as loan_ids,
-            GROUP_CONCAT(
-                CASE 
-                    WHEN l.Status = 'approved' 
-                    THEN l.Amount
-                    ELSE NULL 
-                END
-            ) as loan_amounts,
-            GROUP_CONCAT(
-                CASE 
-                    WHEN l.Status = 'approved' 
-                    THEN l.Issued_Date
-                    ELSE NULL 
-                END
-            ) as issue_dates,
-            GROUP_CONCAT(
-                CASE 
-                    WHEN l.Status = 'approved' 
-                    THEN l.Due_Date
-                    ELSE NULL 
-                END
-            ) as due_dates,
-            SUM(CASE WHEN l.Status = 'approved' THEN l.Paid_Loan ELSE 0 END) as total_paid,
-            SUM(CASE WHEN l.Status = 'approved' THEN l.Remain_Loan ELSE 0 END) as total_remaining,
-            SUM(CASE WHEN l.Status = 'approved' THEN l.Paid_Interest ELSE 0 END) as total_interest_paid,
-            SUM(CASE WHEN l.Status = 'approved' THEN l.Remain_Interest ELSE 0 END) as total_interest_remaining
+            l.LoanID,
+            l.Amount,
+            l.Issued_Date,
+            l.Due_Date,
+            l.Paid_Loan,
+            l.Remain_Loan,
+            l.Paid_Interest,
+            l.Remain_Interest,
+            l.Status
         FROM Member m
         LEFT JOIN Loan l ON m.MemberID = l.Member_MemberID 
             AND YEAR(l.Issued_Date) = $year
-        GROUP BY m.MemberID, m.Name
         ORDER BY m.Name";
     
     return search($sql);
 }
+
 
 // Get loan summary for the year
 function getLoanSummary($year) {
@@ -66,7 +43,8 @@ function getLoanSummary($year) {
             SUM(Paid_Interest) as total_interest_paid,
             SUM(Remain_Interest) as total_interest_remaining
         FROM Loan
-        WHERE YEAR(Issued_Date) = $year";
+        WHERE YEAR(Issued_Date) = $year
+        AND Status = 'approved'";
     
     return search($sql);
 }
@@ -94,8 +72,15 @@ function getLoanSettings() {
     return $result->fetch_assoc();
 }
 
+// Get all available terms/years
+function getAllTerms() {
+    $sql = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
+    return search($sql);
+}
+
 $currentTerm = getCurrentTerm();
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
+$allTerms = getAllTerms();
 
 $loanStats = getLoanSummary($selectedYear);
 $monthlyStats = getMonthlyLoanStats($selectedYear);
@@ -126,11 +111,11 @@ $months = [
         <div class="header-card">
             <h1>Loan Details</h1>
             <select class="filter-select" onchange="updateFilters()" id="yearSelect">
-                <?php for($y = $currentTerm; $y >= $currentTerm - 2; $y--): ?>
-                    <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
-                        Year <?php echo $y; ?>
+                <?php while($term = $allTerms->fetch_assoc()): ?>
+                    <option value="<?php echo $term['year']; ?>" <?php echo $term['year'] == $selectedYear ? 'selected' : ''; ?>>
+                        Year <?php echo $term['year']; ?>
                     </option>
-                <?php endfor; ?>
+                <?php endwhile; ?>
             </select>
         </div>
 
@@ -190,19 +175,21 @@ $months = [
                             <th>Interest Paid</th>
                             <th>Interest Due</th>
                             <th>Status</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php 
+                    <?php 
                         $memberLoans = getMemberLoans($selectedYear);
+                        $currentMemberID = null;
+
                         while($row = $memberLoans->fetch_assoc()): 
-                            $loanIds = $row['loan_ids'] ? explode(',', $row['loan_ids']) : [];
-                            $loanAmounts = $row['loan_amounts'] ? explode(',', $row['loan_amounts']) : [];
-                            $issueDates = $row['issue_dates'] ? explode(',', $row['issue_dates']) : [];
-                            $dueDates = $row['due_dates'] ? explode(',', $row['due_dates']) : [];
+                            // Track when we switch to a new member
+                            $isNewMember = ($currentMemberID !== $row['MemberID']);
+                            $currentMemberID = $row['MemberID'];
                             
-                            // Show an empty row if no loans
-                            if (empty($loanIds)):
+                            // Show an empty row if no loans (null LoanID)
+                            if ($row['LoanID'] === null):
                         ?>
                         <tr>
                             <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
@@ -217,27 +204,35 @@ $months = [
                             <td>Rs. 0.00</td>
                             <td><span class="status-badge status-none">None</span></td>
                         </tr>
-                        <?php else: 
-                            // Show a row for each loan
-                            foreach($loanIds as $index => $loanId):
-                        ?>
+                        <?php else: ?>
                         <tr>
                             <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
                             <td><?php echo htmlspecialchars($row['Name']); ?></td>
-                            <td><?php echo htmlspecialchars($loanId); ?></td>
-                            <td>Rs. <?php echo number_format($loanAmounts[$index] ?? 0, 2); ?></td>
-                            <td><?php echo isset($issueDates[$index]) ? date('Y-m-d', strtotime($issueDates[$index])) : '-'; ?></td>
-                            <td><?php echo isset($dueDates[$index]) ? date('Y-m-d', strtotime($dueDates[$index])) : '-'; ?></td>
-                            <td>Rs. <?php echo number_format($row['total_paid'] ?? 0, 2); ?></td>
-                            <td>Rs. <?php echo number_format($row['total_remaining'] ?? 0, 2); ?></td>
-                            <td>Rs. <?php echo number_format($row['total_interest_paid'] ?? 0, 2); ?></td>
-                            <td>Rs. <?php echo number_format($row['total_interest_remaining'] ?? 0, 2); ?></td>
-                            <td><span class="status-badge status-approved">Active</span></td>
+                            <td><?php echo htmlspecialchars($row['LoanID']); ?></td>
+                            <td>Rs. <?php echo number_format($row['Amount'] ?? 0, 2); ?></td>
+                            <td><?php echo isset($row['Issued_Date']) ? date('Y-m-d', strtotime($row['Issued_Date'])) : '-'; ?></td>
+                            <td><?php echo isset($row['Due_Date']) ? date('Y-m-d', strtotime($row['Due_Date'])) : '-'; ?></td>
+                            <td>Rs. <?php echo number_format($row['Paid_Loan'] ?? 0, 2); ?></td>
+                            <td>Rs. <?php echo number_format($row['Remain_Loan'] ?? 0, 2); ?></td>
+                            <td>Rs. <?php echo number_format($row['Paid_Interest'] ?? 0, 2); ?></td>
+                            <td>Rs. <?php echo number_format($row['Remain_Interest'] ?? 0, 2); ?></td>
+                            <td><span class="status-badge <?php echo $statusClass; ?>"><?php echo ucfirst(htmlspecialchars($row['Status'] ?? 'None')); ?></span></td>
+                            <td class="actions">
+                            <button onclick="viewPaymentReceipt('<?php echo $row['LoanID']; ?>')" class="action-btn small">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                                <button onclick="editPayment('<?php echo $row['LoanID']; ?>')" class="action-btn small">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button onclick="openDeleteModal('<?php echo $row['LoanID']; ?>')" class="action-btn small">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
                         </tr>
                         <?php 
-                            endforeach;
-                        endif;
-                        endwhile; ?>
+                            endif;
+                        endwhile; 
+                        ?>
                     </tbody>
                 </table>
             </div>

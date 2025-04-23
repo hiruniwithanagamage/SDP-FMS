@@ -441,7 +441,7 @@ if(isset($_POST['delete_payment'])) {
                             <td><?php echo date('Y-m-d', strtotime($row['Date'])); ?></td>
                             <td class="actions">
                             <button onclick="viewPaymentReceipt('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
-                                <i class="fas fa-eye"></i>
+                                <i class="fas fa-print"></i>
                             </button>
                                 <button onclick="editPayment('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
                                     <i class="fas fa-edit"></i>
