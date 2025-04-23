@@ -292,6 +292,39 @@ if(isset($_POST['delete_payment'])) {
         border-color: #1e3c72;
         box-shadow: 0 0 0 2px rgba(30, 60, 114, 0.2);
     }
+
+    /* Edit Payment Modal */
+#editPaymentModal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    overflow: auto;
+}
+
+#editPaymentModal .modal-content {
+    background-color: white;
+    margin: 5% auto;
+    padding: 20px;
+    width: 90%;
+    max-width: 900px;
+    height: 80%;
+    border-radius: 8px;
+    position: relative;
+}
+
+#editPaymentModal .close {
+    position: absolute;
+    right: 20px;
+    top: 10px;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
 </style>
 </head>
 <body>
@@ -486,6 +519,14 @@ if(isset($_POST['delete_payment'])) {
         </div>
     </div>
 
+    <!-- Edit Payment Modal -->
+<div id="editPaymentModal" class="modal">
+    <div class="modal-content" style="max-width: 90%; height: 90%;">
+        <span class="close" onclick="closeEditModal()">&times;</span>
+        <iframe id="editPaymentFrame" style="width: 100%; height: 90%; border: none;"></iframe>
+    </div>
+</div>
+
     <script>
         // Update filters using AJAX like in membership_fee.php
         function updateFilters() {
@@ -634,7 +675,8 @@ if(isset($_POST['delete_payment'])) {
         // Edit payment
         function editPayment(paymentID) {
             // Redirect to edit page
-            window.location.href = `editPayment.php?id=${paymentID}`;
+            document.getElementById('editPaymentFrame').src = `editPayment.php?id=${paymentID}&popup=true`;
+            document.getElementById('editPaymentModal').style.display = 'block';
         }
 
         function openDeleteModal(id) {
@@ -671,6 +713,84 @@ if(isset($_POST['delete_payment'])) {
             const year = document.getElementById('yearSelect').value;
             window.location.href = `exportPaymentReport.php?year=${year}&month=${month}`;
         }
+
+        // Edit Payment Modal Functions
+function editPayment(paymentID) {
+    // Set the iframe source to your editPayment.php page
+    document.getElementById('editPaymentFrame').src = `editPayment.php?id=${paymentID}&popup=true`;
+    
+    // Show the modal
+    document.getElementById('editPaymentModal').style.display = 'block';
+}
+
+function closeEditModal() {
+    document.getElementById('editPaymentModal').style.display = 'none';
+    
+    // After closing, refresh the payment list to see any changes
+    updateFilters();
+}
+
+// Add edit modal to window onclick handler
+window.onclick = function(event) {
+    const modal = document.getElementById('paymentModal');
+    const deleteModal = document.getElementById('deleteModal');
+    const editModal = document.getElementById('editPaymentModal');
+    
+    if (event.target == modal) {
+        modal.style.display = "none";
+    }
+    
+    if (event.target == deleteModal) {
+        closeDeleteModal();
+    }
+    
+    if (event.target == editModal) {
+        closeEditModal();
+    }
+};
+
+// Add this function to handle displaying alerts from the iframe
+function showAlert(type, message) {
+    const alertsContainer = document.querySelector('.alerts-container');
+    
+    // Create alert element
+    const alertDiv = document.createElement('div');
+    alertDiv.className = type === 'success' ? 'alert alert-success' : 'alert alert-danger';
+    alertDiv.textContent = message;
+    
+    // Clear previous alerts
+    alertsContainer.innerHTML = '';
+    
+    // Add new alert
+    alertsContainer.appendChild(alertDiv);
+    
+    // Scroll to top to see the alert
+    window.scrollTo(0, 0);
+    
+    // Manually trigger the alert handler for this new alert
+    const closeBtn = document.createElement('span');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.className = 'alert-close';
+    closeBtn.style.float = 'right';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.fontWeight = 'bold';
+    closeBtn.style.fontSize = '20px';
+    closeBtn.style.marginLeft = '15px';
+    
+    closeBtn.addEventListener('click', function() {
+        alertDiv.style.display = 'none';
+    });
+    
+    alertDiv.insertBefore(closeBtn, alertDiv.firstChild);
+    
+    // Auto-hide alerts after 5 seconds
+    setTimeout(function() {
+        alertDiv.style.opacity = '0';
+        setTimeout(function() {
+            alertDiv.style.display = 'none';
+        }, 500);
+    }, 5000);
+}
     </script>
 </body>
 </html>
