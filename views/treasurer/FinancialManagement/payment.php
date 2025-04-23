@@ -440,7 +440,7 @@ if(isset($_POST['delete_payment'])) {
                             <td>Rs. <?php echo number_format($row['Amount'], 2); ?></td>
                             <td><?php echo date('Y-m-d', strtotime($row['Date'])); ?></td>
                             <td class="actions">
-                            <button onclick="viewPaymentReceipt('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
+                            <button onclick="printPaymentReceipt('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
                                 <i class="fas fa-print"></i>
                             </button>
                                 <button onclick="editPayment('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
@@ -648,7 +648,7 @@ if(isset($_POST['delete_payment'])) {
             searchInput.focus();
         }
 
-        function viewPaymentReceipt(paymentID) {
+        function printPaymentReceipt(paymentID) {
             window.location.href = `../payments/payment_receipt.php?payment_id=${paymentID}`;
         }
 

@@ -218,10 +218,10 @@ $months = [
                             <td>Rs. <?php echo number_format($row['Remain_Interest'] ?? 0, 2); ?></td>
                             <td><span class="status-badge <?php echo $statusClass; ?>"><?php echo ucfirst(htmlspecialchars($row['Status'] ?? 'None')); ?></span></td>
                             <td class="actions">
-                            <button onclick="viewPaymentReceipt('<?php echo $row['LoanID']; ?>')" class="action-btn small">
+                            <button onclick="viewLoan('<?php echo $row['LoanID']; ?>')" class="action-btn small">
                                 <i class="fas fa-eye"></i>
                             </button>
-                                <button onclick="editPayment('<?php echo $row['LoanID']; ?>')" class="action-btn small">
+                                <button onclick="editLoan('<?php echo $row['LoanID']; ?>')" class="action-btn small">
                                     <i class="fas fa-edit"></i>
                                 </button>
                                 <button onclick="openDeleteModal('<?php echo $row['LoanID']; ?>')" class="action-btn small">
