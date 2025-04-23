@@ -25,7 +25,7 @@ function getMemberLoans($year) {
             l.Remain_Interest,
             l.Status
         FROM Member m
-        LEFT JOIN Loan l ON m.MemberID = l.Member_MemberID 
+        INNER JOIN Loan l ON m.MemberID = l.Member_MemberID 
             AND YEAR(l.Issued_Date) = $year
         ORDER BY m.Name";
     
@@ -78,6 +78,85 @@ function getAllTerms() {
     return search($sql);
 }
 
+// Handle Delete Loan
+if(isset($_POST['delete_payment'])) {
+    $loanId = $_POST['loan_id'];
+    $currentYear = isset($_GET['year']) ? $_GET['year'] : (isset($_POST['year']) ? $_POST['year'] : getCurrentTerm());
+    
+    try {
+        $conn = getConnection();
+        
+        // Start transaction
+        $conn->begin_transaction();
+        
+        // First check if this loan has any payments
+        $checkQuery = "SELECT * FROM LoanPayment WHERE LoanID = ?";
+        $stmt = $conn->prepare($checkQuery);
+        $stmt->bind_param("s", $loanId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        // If there are payments linked to this loan, delete them first
+        if($result->num_rows > 0) {
+            // Get all payment IDs linked to this loan
+            $paymentIds = [];
+            while($row = $result->fetch_assoc()) {
+                $paymentIds[] = $row['PaymentID'];
+            }
+            
+            // Delete the loan payment links
+            $deleteLoanPaymentsQuery = "DELETE FROM LoanPayment WHERE LoanID = ?";
+            $stmt = $conn->prepare($deleteLoanPaymentsQuery);
+            $stmt->bind_param("s", $loanId);
+            $stmt->execute();
+            
+            // Delete the associated payment records
+            if(!empty($paymentIds)) {
+                foreach($paymentIds as $paymentId) {
+                    $deletePaymentQuery = "DELETE FROM Payment WHERE PaymentID = ?";
+                    $stmt = $conn->prepare($deletePaymentQuery);
+                    $stmt->bind_param("s", $paymentId);
+                    $stmt->execute();
+                }
+            }
+        }
+        
+        // Check if this loan has any guarantors
+        $checkGuarantorsQuery = "SELECT * FROM Guarantor WHERE Loan_LoanID = ?";
+        $stmt = $conn->prepare($checkGuarantorsQuery);
+        $stmt->bind_param("s", $loanId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        // If there are guarantors for this loan, delete them
+        if($result->num_rows > 0) {
+            $deleteGuarantorsQuery = "DELETE FROM Guarantor WHERE Loan_LoanID = ?";
+            $stmt = $conn->prepare($deleteGuarantorsQuery);
+            $stmt->bind_param("s", $loanId);
+            $stmt->execute();
+        }
+        
+        // Finally, delete the loan record
+        $deleteLoanQuery = "DELETE FROM Loan WHERE LoanID = ?";
+        $stmt = $conn->prepare($deleteLoanQuery);
+        $stmt->bind_param("s", $loanId);
+        $stmt->execute();
+        
+        // Commit transaction
+        $conn->commit();
+        
+        $_SESSION['success_message'] = "Loan #$loanId was successfully deleted.";
+    } catch(Exception $e) {
+        // Rollback on error
+        $conn->rollback();
+        $_SESSION['error_message'] = "Error deleting loan: " . $e->getMessage();
+    }
+    
+    // Redirect back to loan page
+    header("Location: loan.php?year=" . $currentYear);
+    exit();
+}
+
 $currentTerm = getCurrentTerm();
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
 $allTerms = getAllTerms();
@@ -103,6 +182,56 @@ $months = [
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="../../../assets/css/adminDetails.css">
     <link rel="stylesheet" href="../../../assets/css/financialManagement.css">
+    <link rel="stylesheet" href="../../../assets/css/alert.css">
+    <script src="../../../assets/js/alertHandler.js"></script>
+    <style>
+        .status-approved {
+            background-color: #c2f1cd;
+            color: rgb(25, 151, 10);
+        }
+        .status-rejected {
+            background-color: #e2bcc0;
+            color: rgb(234, 59, 59);
+        }
+        /* Modal Styles */
+#loanModal, #editLoanModal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    overflow: auto;
+}
+
+#loanModal .modal-content, #editLoanModal .modal-content {
+    background-color: white;
+    margin: 5% auto;
+    padding: 20px;
+    width: 90%;
+    max-width: 900px;
+    height: 90%;
+    border-radius: 8px;
+    position: relative;
+}
+
+#loanModal .close,#editLoanModal .close {
+    position: absolute;
+    right: 20px;
+    top: 10px;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.modal-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+    </style>
 </head>
 <body>
     <div class="main-container">
@@ -117,6 +246,27 @@ $months = [
                     </option>
                 <?php endwhile; ?>
             </select>
+        </div>
+
+        <!-- Add this right after the header-card div -->
+        <div class="alerts-container">
+            <?php if(isset($_SESSION['success_message'])): ?>
+                <div class="alert alert-success">
+                    <?php 
+                        echo $_SESSION['success_message'];
+                        unset($_SESSION['success_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if(isset($_SESSION['error_message'])): ?>
+                <div class="alert alert-danger">
+                    <?php 
+                        echo $_SESSION['error_message'];
+                        unset($_SESSION['error_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
         </div>
 
         <div id="stats-section" class="stats-cards">
@@ -168,72 +318,50 @@ $months = [
                             <th>Name</th>
                             <th>Loan ID</th>
                             <th>Amount</th>
-                            <th>Issue Date</th>
-                            <th>Due Date</th>
-                            <th>Paid Amount</th>
-                            <th>Remaining</th>
-                            <th>Interest Paid</th>
-                            <th>Interest Due</th>
                             <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                     <?php 
-                        $memberLoans = getMemberLoans($selectedYear);
-                        $currentMemberID = null;
+$memberLoans = getMemberLoans($selectedYear);
 
-                        while($row = $memberLoans->fetch_assoc()): 
-                            // Track when we switch to a new member
-                            $isNewMember = ($currentMemberID !== $row['MemberID']);
-                            $currentMemberID = $row['MemberID'];
-                            
-                            // Show an empty row if no loans (null LoanID)
-                            if ($row['LoanID'] === null):
-                        ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
-                            <td><?php echo htmlspecialchars($row['Name']); ?></td>
-                            <td>-</td>
-                            <td>Rs. 0.00</td>
-                            <td>-</td>
-                            <td>-</td>
-                            <td>Rs. 0.00</td>
-                            <td>Rs. 0.00</td>
-                            <td>Rs. 0.00</td>
-                            <td>Rs. 0.00</td>
-                            <td><span class="status-badge status-none">None</span></td>
-                        </tr>
-                        <?php else: ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
-                            <td><?php echo htmlspecialchars($row['Name']); ?></td>
-                            <td><?php echo htmlspecialchars($row['LoanID']); ?></td>
-                            <td>Rs. <?php echo number_format($row['Amount'] ?? 0, 2); ?></td>
-                            <td><?php echo isset($row['Issued_Date']) ? date('Y-m-d', strtotime($row['Issued_Date'])) : '-'; ?></td>
-                            <td><?php echo isset($row['Due_Date']) ? date('Y-m-d', strtotime($row['Due_Date'])) : '-'; ?></td>
-                            <td>Rs. <?php echo number_format($row['Paid_Loan'] ?? 0, 2); ?></td>
-                            <td>Rs. <?php echo number_format($row['Remain_Loan'] ?? 0, 2); ?></td>
-                            <td>Rs. <?php echo number_format($row['Paid_Interest'] ?? 0, 2); ?></td>
-                            <td>Rs. <?php echo number_format($row['Remain_Interest'] ?? 0, 2); ?></td>
-                            <td><span class="status-badge <?php echo $statusClass; ?>"><?php echo ucfirst(htmlspecialchars($row['Status'] ?? 'None')); ?></span></td>
-                            <td class="actions">
-                            <button onclick="viewLoan('<?php echo $row['LoanID']; ?>')" class="action-btn small">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                                <button onclick="editLoan('<?php echo $row['LoanID']; ?>')" class="action-btn small">
-                                    <i class="fas fa-edit"></i>
-                                </button>
-                                <button onclick="openDeleteModal('<?php echo $row['LoanID']; ?>')" class="action-btn small">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </td>
-                        </tr>
-                        <?php 
-                            endif;
-                        endwhile; 
-                        ?>
-                    </tbody>
+while($row = $memberLoans->fetch_assoc()): 
+    // Set the status badge class based on loan status
+    $statusClass = '';
+    switch($row['Status']) {
+        case 'approved':
+            $statusClass = 'status-approved';
+            break;
+        case 'pending':
+            $statusClass = 'status-pending';
+            break;
+        case 'rejected':
+            $statusClass = 'status-rejected';
+            break;
+        default:
+            $statusClass = 'status-none';
+    }
+?>
+<tr>
+    <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
+    <td><?php echo htmlspecialchars($row['Name']); ?></td>
+    <td><?php echo htmlspecialchars($row['LoanID']); ?></td>
+    <td>Rs. <?php echo number_format($row['Amount'] ?? 0, 2); ?></td>
+    <td><span class="status-badge <?php echo $statusClass; ?>"><?php echo ucfirst(htmlspecialchars($row['Status'] ?? 'None')); ?></span></td>
+    <td class="actions">
+        <button onclick="viewLoan('<?php echo $row['LoanID']; ?>')" class="action-btn small">
+            <i class="fas fa-eye"></i>
+        </button>
+        <button onclick="editLoan('<?php echo $row['LoanID']; ?>')" class="action-btn small">
+            <i class="fas fa-edit"></i>
+        </button>
+        <button onclick="openDeleteModal('<?php echo $row['LoanID']; ?>')" class="action-btn small">
+            <i class="fas fa-trash"></i>
+        </button>
+    </td>
+</tr>
+<?php endwhile; ?>
                 </table>
             </div>
         </div>
@@ -268,7 +396,66 @@ $months = [
     <?php include '../../templates/footer.php'; ?>
     </div>
 
+    <div id="loanModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeLoanModal()">&times;</span>
+            <iframe id="loanFrame" class="modal-iframe"></iframe>
+        </div>
+    </div>
+
+<!-- Delete Modal -->
+<div id="deleteModal" class="delete-modal">
+        <div class="delete-modal-content">
+            <span class="close" onclick="closeDeleteModal()">&times;</span>
+            <h2>Confirm Delete</h2>
+            <p>Are you sure you want to delete this loan record? This action cannot be undone.</p>
+            <form method="POST">
+                <input type="hidden" id="delete_loan_id" name="loan_id">
+                <div class="delete-modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>
+                    <button type="submit" name="delete_payment" class="confirm-delete-btn">Delete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Loan Modal -->
+<div id="editLoanModal" class="modal">
+    <div class="modal-content" style="max-width: 90%; height: 90%;">
+        <span class="close" onclick="closeEditModal()">&times;</span>
+        <iframe id="editLoanFrame" style="width: 100%; height: 90%; border: none;"></iframe>
+    </div>
+</div>
+
     <script>
+        function viewLoan(LoanID) {
+            // Set the iframe source to your viewLoan.php page
+            document.getElementById('loanFrame').src = `viewLoan.php?id=${LoanID}&popup=true`;
+            
+            // Show the modal
+            document.getElementById('loanModal').style.display = 'block';
+        }
+
+        function closeLoanModal() {
+            document.getElementById('loanModal').style.display = 'none';
+        }
+
+        // Edit Loan Modal Functions
+        function editLoan(loanID) {
+            // Set the iframe source to your editLoan.php page
+            document.getElementById('editLoanFrame').src = `editLoan.php?id=${loanID}&popup=true`;
+            
+            // Show the modal
+            document.getElementById('editLoanModal').style.display = 'block';
+        }
+
+        function closeEditModal() {
+            document.getElementById('editLoanModal').style.display = 'none';
+            
+            // After closing, refresh the loan list to see any changes
+            updateFilters();
+        }
+
         function updateFilters() {
             const year = document.getElementById('yearSelect').value;
             
@@ -354,6 +541,34 @@ $months = [
             performSearch();
             searchInput.focus();
         }
+
+        function openDeleteModal(id) {
+            document.getElementById('deleteModal').style.display = 'block';
+            document.getElementById('delete_loan_id').value = id;
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').style.display = 'none';
+        }
+
+        // Update window.onclick to handle both modals
+        window.onclick = function(event) {
+            const loanModal = document.getElementById('loanModal');
+            const deleteModal = document.getElementById('deleteModal');
+            const editModal = document.getElementById('editLoanModal');
+            
+            if (event.target == loanModal) {
+                closeLoanModal();
+            }
+            
+            if (event.target == deleteModal) {
+                closeDeleteModal();
+            }
+
+            if (event.target == editModal) {
+                closeEditModal();
+            }
+        };
     </script>
 </body>
 </html>

@@ -128,6 +128,14 @@ body {
     background-color: #fff3e0;
     color: #ef6c00;
 }
+.status-approved {
+    background-color: #c2f1cd;
+    color: rgb(25, 151, 10);
+}
+.status-rejected {
+    background-color: #e2bcc0;
+    color: rgb(234, 59, 59);
+}
 
 /* Action Buttons */
 .action-buttons {
