@@ -240,8 +240,9 @@ $pendingReports = getPendingReports($selectedTerm);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-top: 30px;
             margin-bottom: 2rem;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
 
         .filters {
@@ -250,20 +251,6 @@ $pendingReports = getPendingReports($selectedTerm);
             align-items: center;
             margin-left: auto;
             gap: 1rem;
-        }
-
-        .filter-select {
-            padding: 0.5rem 1rem;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            background: rgba(255, 255, 255, 0.15);
-            color: white;
-            border-radius: 50px;
-            cursor: pointer;
-        }
-
-        .filter-select option {
-            background: #1e3c72;
-            color: white;
         }
 
         .card {
@@ -313,12 +300,16 @@ $pendingReports = getPendingReports($selectedTerm);
         }
 
         .btn-secondary {
-            background: #6c757d;
+            padding: 0.5rem 1rem;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.15);
             color: white;
+            border-radius: 50px;
+            cursor: pointer;
         }
 
         .btn-secondary:hover {
-            background: #5a6268;
+            background:rgba(224, 224, 224, 0.3);
             transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
@@ -533,14 +524,7 @@ $pendingReports = getPendingReports($selectedTerm);
             <div class="page-header">
                 <h1>Pending Financial Reports</h1>
                 <div class="filters">
-                    <select class="filter-select" id="termSelect">
-                        <?php foreach($years as $year): ?>
-                            <option value="<?php echo $year; ?>" <?php echo $year == $selectedTerm ? 'selected' : ''; ?>>
-                                Term <?php echo $year; ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <a href="index.php" class="btn btn-secondary">
+                    <a href="home-auditor.php" class="btn btn-secondary">
                         <i class="fas fa-arrow-left"></i> Back to Dashboard
                     </a>
                 </div>

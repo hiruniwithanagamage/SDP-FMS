@@ -293,6 +293,10 @@ body {
     color: #333;
 }
 
+.cancel-btn:hover {
+    background:rgba(90, 98, 104, 0.26);
+}
+
 .confirm-delete-btn {
     background-color: #dc2626;
     color: #fff;

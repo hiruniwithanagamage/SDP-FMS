@@ -401,8 +401,9 @@ switch($selectedType) {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-top: 30px;
             margin-bottom: 2rem;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
 
         .report-info {
@@ -472,13 +473,28 @@ switch($selectedType) {
             background: #2a5298;
         }
 
+        .btn-cancel {
+            background-color: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-cancel:hover {
+            background:rgba(90, 98, 104, 0.26);
+        }
+
         .btn-secondary {
-            background: #6c757d;
+            padding: 0.5rem 1rem;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.15);
             color: white;
+            border-radius: 50px;
+            cursor: pointer;
         }
 
         .btn-secondary:hover {
-            background: #5a6268;
+            background:rgba(224, 224, 224, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
 
         .btn-success {
@@ -819,7 +835,7 @@ switch($selectedType) {
                             <?php echo ucfirst($reportStatus); ?>
                         </span>
                     </div>
-                    <a href="home-auditor.php" class="btn btn-secondary">
+                    <a href="pendingReports.php?term=<?php echo $selectedTerm; ?>" class="btn btn-secondary">
                         <i class="fas fa-arrow-left"></i> Back
                     </a>
                 </div>
@@ -905,7 +921,7 @@ switch($selectedType) {
                     </button>
                     
                     <?php if (!empty($searchQuery)): ?>
-                        <a href="reviewDetails.php?type=<?php echo $selectedType; ?>" class="btn btn-secondary">
+                        <a href="reviewDetails.php?type=<?php echo $selectedType; ?>" class="btn btn-cancel">
                             <i class="fas fa-times"></i> Clear
                         </a>
                     <?php endif; ?>
@@ -1152,7 +1168,7 @@ switch($selectedType) {
                                             <td><?php echo htmlspecialchars($expense['Method']); ?></td>
                                             <td>Rs. <?php echo number_format($expense['Amount'], 2); ?></td>
                                             <td><?php echo date('M d, Y', strtotime($expense['Date'])); ?></td>
-                                            <td><?php echo htmlspecialchars($expense['Description']); ?></td>
+                                            <td><?php echo htmlspecialchars($expense['Description'] ?? ''); ?></td>
                                             <td class="action-column">
                                                 <button class="btn btn-info btn-sm comment-btn" data-id="<?php echo $expense['ExpenseID']; ?>" data-type="expenses">
                                                     <i class="fas fa-comment"></i> Comment
@@ -1198,7 +1214,7 @@ switch($selectedType) {
                 </div>
                 
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" id="closeModal">Cancel</button>
+                    <button type="button" class="btn btn-cancel" id="closeModal">Cancel</button>
                     <button type="submit" name="addComment" class="btn btn-primary">Save Comment</button>
                 </div>
             </form>
@@ -1229,7 +1245,7 @@ switch($selectedType) {
                 </div>
                 
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" id="closeReviewModal">Cancel</button>
+                    <button type="button" class="btn btn-cancel" id="closeReviewModal">Cancel</button>
                     <button type="submit" name="updateReportStatus" class="btn btn-primary">Save Decision</button>
                 </div>
             </form>

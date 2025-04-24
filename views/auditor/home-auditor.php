@@ -356,7 +356,7 @@
 </head>
 <body>
    <div class="home-container">
-       <?php include '../templates/navbar-admin.php'; ?>
+       <?php include '../templates/navbar-auditor.php'; ?>
        <div class="content">
            <div class="welcome-card">
                <h1>Welcome, Auditor</h1>
