@@ -343,7 +343,7 @@ if (isset($_GET['delete']) && isset($_GET['id'])) {
         <div class="container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                 <h1 style="margin-bottom: 0;">Track Expenses</h1>
-                <a href="addExpenses.php" class="btn btn-add">
+                <a href="../addExpenses.php" class="btn btn-add">
                     <i class="fas fa-plus"></i> Add New Expense
                 </a>
             </div>

@@ -2,6 +2,11 @@
 session_start();
 require_once "../../config/database.php";
 
+// Store referrer URL in session if not already set
+if (!isset($_SESSION['previous_page']) && isset($_SERVER['HTTP_REFERER'])) {
+    $_SESSION['previous_page'] = $_SERVER['HTTP_REFERER'];
+}
+
 // Generate new Expense ID
 $query = "SELECT ExpenseID FROM Expenses ORDER BY ExpenseID DESC LIMIT 1";
 $result = search($query);
@@ -40,6 +45,16 @@ $currentTerm = 1;
 if ($termResult && $termResult->num_rows > 0) {
     $termRow = $termResult->fetch_assoc();
     $currentTerm = $termRow['year'];
+}
+
+// Determine redirect URL based on previous page
+$redirectUrl = "home-treasurer.php"; // Default redirect
+if (isset($_SESSION['previous_page'])) {
+    if (strpos($_SESSION['previous_page'], 'trackExpenses.php') !== false) {
+        $redirectUrl = "financialManagement/trackExpenses.php";
+    } elseif (strpos($_SESSION['previous_page'], 'home-treasurer.php') !== false) {
+        $redirectUrl = "home-treasurer.php";
+    }
 }
 
 // Check if form is submitted
@@ -92,27 +107,21 @@ if(isset($_POST['add'])) {
             Database::iud($query);
             $_SESSION['success_message'] = "Expense added successfully";
             
-            // Redirect to expensesDetails.php
-            header("Location: home-treasurer.php");
+            // Redirect to previous page
+            header("Location: $redirectUrl");
             exit();
-
-            // Regenerate next Expense ID
-            $query = "SELECT ExpenseID FROM Expenses ORDER BY ExpenseID DESC LIMIT 1";
-            $result = search($query);
-            if ($result && $result->num_rows > 0) {
-                $row = $result->fetch_assoc();
-                if ($row && isset($row['ExpenseID'])) {
-                    $lastId = $row['ExpenseID'];
-                    $numericPart = preg_replace('/[^0-9]/', '', $lastId);
-                    $newNumericPart = intval($numericPart) + 1;
-                    // Format with leading zeros (001, 002, etc.)
-                    $newExpenseId = "exp" . str_pad($newNumericPart, 3, "0", STR_PAD_LEFT);
-                }
-            }
         } catch(Exception $e) {
             $error = "Error adding expense: " . $e->getMessage();
         }
     }
+}
+
+// Clear previous page from session if cancel is clicked
+if(isset($_GET['cancel'])) {
+    // Redirect to the stored previous page
+    header("Location: $redirectUrl");
+    unset($_SESSION['previous_page']);
+    exit();
 }
 ?>
 
@@ -207,6 +216,7 @@ if(isset($_POST['add'])) {
             background-color: white;
             color: #1a237e;
             border: 2px solid #1a237e;
+            text-decoration: none;
         }
 
         .btn-cancel:hover {
@@ -294,7 +304,7 @@ if(isset($_POST['add'])) {
 
             <div class="button-group">
                 <button type="submit" name="add" class="btn btn-add">Add Expense</button>
-                <button type="button" onclick="window.location.href='expensesDetails.php'" class="btn btn-cancel">Cancel</button>
+                <a href="?cancel=1" class="btn btn-cancel">Cancel</a>
             </div>
         </form>
     </div>
