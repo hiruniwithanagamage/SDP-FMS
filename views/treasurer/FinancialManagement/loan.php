@@ -157,6 +157,29 @@ if(isset($_POST['delete_payment'])) {
     exit();
 }
 
+// Function to check if financial report for a specific term is approved
+function isReportApproved($year) {
+    $conn = getConnection();
+    $stmt = $conn->prepare("
+        SELECT Status 
+        FROM FinancialReportVersions 
+        WHERE Term = ? 
+        ORDER BY Date DESC 
+        LIMIT 1
+    ");
+    
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return ($row['Status'] === 'approved');
+    }
+    
+    return false; // If no report exists, it's not approved
+}
+
 $currentTerm = getCurrentTerm();
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
 $allTerms = getAllTerms();
@@ -171,6 +194,9 @@ $months = [
     7 => 'July', 8 => 'August', 9 => 'September',
     10 => 'October', 11 => 'November', 12 => 'December'
 ];
+
+$selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
+$isReportApproved = isReportApproved($selectedYear);
 
 ?>
 
@@ -231,6 +257,12 @@ $months = [
     height: 100%;
     border: none;
 }
+
+.alert-info {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
     </style>
 </head>
 <body>
@@ -288,10 +320,6 @@ $months = [
                 <div class="stat-number">Rs. <?php echo number_format($stats['total_interest_paid'] ?? 0, 2); ?></div>
                 <div class="stat-label">Total Interest Collected</div>
             </div>
-            <button onclick="window.location.href='editLoanSettings.php'" class="edit-btn">
-                <i class="fas fa-edit"></i>
-                Edit Details
-            </button>
         </div>
 
         <div class="tabs">
@@ -350,16 +378,23 @@ while($row = $memberLoans->fetch_assoc()):
     <td>Rs. <?php echo number_format($row['Amount'] ?? 0, 2); ?></td>
     <td><span class="status-badge <?php echo $statusClass; ?>"><?php echo ucfirst(htmlspecialchars($row['Status'] ?? 'None')); ?></span></td>
     <td class="actions">
-        <button onclick="viewLoan('<?php echo $row['LoanID']; ?>')" class="action-btn small">
-            <i class="fas fa-eye"></i>
-        </button>
+    <button onclick="viewLoan('<?php echo $row['LoanID']; ?>')" class="action-btn small">
+        <i class="fas fa-eye"></i>
+    </button>
+    
+    <?php if (!$isReportApproved): ?>
         <button onclick="editLoan('<?php echo $row['LoanID']; ?>')" class="action-btn small">
             <i class="fas fa-edit"></i>
         </button>
         <button onclick="openDeleteModal('<?php echo $row['LoanID']; ?>')" class="action-btn small">
             <i class="fas fa-trash"></i>
         </button>
-    </td>
+    <?php else: ?>
+        <button onclick="showReportMessage()" class="action-btn small info-btn" title="Report approved">
+            <i class="fas fa-info-circle"></i>
+        </button>
+    <?php endif; ?>
+</td>
 </tr>
 <?php endwhile; ?>
                 </table>
@@ -457,26 +492,25 @@ while($row = $memberLoans->fetch_assoc()):
         }
 
         function updateFilters() {
-            const year = document.getElementById('yearSelect').value;
-            
-            window.location.href = `?year=${year}`;
-            
-            fetch(`loan.php?year=${year}`)
-                .then(response => response.text())
-                .then(html => {
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, 'text/html');
-                    
-                    // Update stats cards
-                    document.getElementById('stats-section').innerHTML = doc.getElementById('stats-section').innerHTML;
-                    
-                    // Update members view
-                    document.getElementById('members-view').innerHTML = doc.getElementById('members-view').innerHTML;
-                    
-                    // Update months view
-                    document.getElementById('months-view').innerHTML = doc.getElementById('months-view').innerHTML;
-                })
-                .catch(error => console.error('Error:', error));
+        const year = document.getElementById('yearSelect').value;
+    
+        // Don't redirect, just update via fetch
+        fetch(`loan.php?year=${year}`)
+            .then(response => response.text())
+            .then(html => {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                // Update stats cards
+                document.getElementById('stats-section').innerHTML = doc.getElementById('stats-section').innerHTML;
+                
+                // Update members view
+                document.getElementById('members-view').innerHTML = doc.getElementById('members-view').innerHTML;
+                
+                // Update months view
+                document.getElementById('months-view').innerHTML = doc.getElementById('months-view').innerHTML;
+            })
+            .catch(error => console.error('Error:', error));
         }
 
         function showTab(tab) {
@@ -569,6 +603,53 @@ while($row = $memberLoans->fetch_assoc()):
                 closeEditModal();
             }
         };
+
+        // Function to create and show alerts programmatically
+function showAlert(type, message) {
+    const alertsContainer = document.querySelector('.alerts-container');
+    
+    // Create alert element
+    const alertDiv = document.createElement('div');
+    alertDiv.className = type === 'success' ? 'alert alert-success' : 'alert alert-danger';
+    alertDiv.textContent = message;
+    
+    // Clear previous alerts
+    alertsContainer.innerHTML = '';
+    
+    // Add new alert
+    alertsContainer.appendChild(alertDiv);
+    
+    // Scroll to top to see the alert
+    window.scrollTo(0, 0);
+    
+    // Manually trigger the alert handler for this new alert
+    const closeBtn = document.createElement('span');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.className = 'alert-close';
+    closeBtn.style.float = 'right';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.fontWeight = 'bold';
+    closeBtn.style.fontSize = '20px';
+    closeBtn.style.marginLeft = '15px';
+    
+    closeBtn.addEventListener('click', function() {
+        alertDiv.style.display = 'none';
+    });
+    
+    alertDiv.insertBefore(closeBtn, alertDiv.firstChild);
+    
+    // Auto-hide alerts after 5 seconds
+    setTimeout(function() {
+        alertDiv.style.opacity = '0';
+        setTimeout(function() {
+            alertDiv.style.display = 'none';
+        }, 500);
+    }, 5000);
+}
+
+function showReportMessage() {
+    showAlert('info', 'This record cannot be modified as the financial report for this term has already been approved.');
+}
     </script>
 </body>
 </html>

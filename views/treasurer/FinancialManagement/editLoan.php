@@ -46,23 +46,30 @@ function getLoanDetails($loanID) {
     return $result->fetch_assoc();
 }
 
-// Function to get all members
+// Function to get all members using prepared statement
 function getAllMembers() {
-    $sql = "SELECT MemberID, Name FROM Member ORDER BY Name";
-    return search($sql);
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT MemberID, Name FROM Member ORDER BY Name");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result;
 }
 
-// Function to get loan settings
+// Function to get loan settings using prepared statement
 function getLoanSettings() {
-    $sql = "SELECT interest, max_loan_limit FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
-    $result = search($sql);
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT interest, max_loan_limit FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
     return $result->fetch_assoc();
 }
 
-// Function to get current term/year
+// Function to get current term/year using prepared statement
 function getCurrentTerm() {
-    $sql = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
-    $result = search($sql);
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
     $row = $result->fetch_assoc();
     return $row['year'] ?? date('Y');
 }
@@ -161,7 +168,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             WHERE LoanID = ?
         ");
         
-        $stmt->bind_param("sisssddddsss", 
+        $stmt->bind_param("sissssddddss", 
             $memberID, 
             $amount, 
             $term, 
@@ -284,10 +291,11 @@ if ($isPopup): ?>
             }
             .btn-container {
                 display: flex;
-                justify-content: space-between;
+                justify-content: flex-end;
                 margin-top: 20px;
             }
             .btn {
+                min-width: 120px;
                 padding: 10px 20px;
                 border: none;
                 border-radius: 4px;
@@ -298,14 +306,20 @@ if ($isPopup): ?>
             .btn-primary {
                 background-color: #1e3c72;
                 color: white;
+                height: 40px;
             }
             .btn-primary:hover {
                 background-color: #16305c;
             }
             .btn-secondary {
-                background-color: #6c757d;
-                color: white;
+                background-color: #e0e0e0;
+                color: #333;
+                margin-right: 30px;
+                text-align: center;
+                font-weight: bold;
+                display: block;
             }
+
             .btn-secondary:hover {
                 background-color: #5a6268;
             }
@@ -445,8 +459,8 @@ if ($isPopup): ?>
             }
 
             .btn-secondary {
-                background-color: #6c757d;
-                color: white;
+                background-color: #e0e0e0;
+                color: #333;
             }
 
             .btn-secondary:hover {
@@ -612,19 +626,19 @@ if ($isPopup): ?>
     </div>
     
     <?php if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_SESSION['error_message'])): ?>
-    <script>
-        // If form was submitted successfully in popup mode, pass message to parent
-        window.parent.showAlert('success', 'Loan #<?php echo $loanID; ?> successfully updated');
-        window.parent.closeEditModal();
-        window.parent.location.reload(); // Refresh the parent page to see updated loan details
-    </script>
-    <?php elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_SESSION['error_message'])): ?>
-    <script>
-        // If form had errors, pass error message to parent
-        window.parent.showAlert('error', '<?php echo addslashes($_SESSION['error_message']); ?>');
-    </script>
-    <?php unset($_SESSION['error_message']); ?>
-    <?php endif; ?>
+<script>
+    // If form was submitted successfully in popup mode, pass message to parent
+    window.parent.showAlert('success', 'Loan #<?php echo $loanID; ?> successfully updated');
+    window.parent.closeEditModal();
+    // Don't reload the entire page as it will lose the alert
+</script>
+<?php elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_SESSION['error_message'])): ?>
+<script>
+    // If form had errors, pass error message to parent
+    window.parent.showAlert('error', '<?php echo addslashes($_SESSION['error_message']); ?>');
+</script>
+<?php unset($_SESSION['error_message']); ?>
+<?php endif; ?>
     
 </body>
 </html>
