@@ -572,7 +572,7 @@ if ($isPopup): ?>
                             <small>Maximum loan limit: Rs. <?php echo number_format($loanSettings['max_loan_limit'], 2); ?></small>
                         </div>
                         <div class="form-group">
-                            <label for="term">Term (months)</label>
+                            <label for="term">Term</label>
                             <input type="number" id="term" name="term" class="form-control" value="<?php echo htmlspecialchars($loan['Term']); ?>" min="1" required>
                         </div>
                     </div>

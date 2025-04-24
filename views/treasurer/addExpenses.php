@@ -65,8 +65,23 @@ if(isset($_POST['add'])) {
     $date = $_POST['date'];
     $description = $_POST['description'];
     $expenseId = $newExpenseId;
+    $errors = [];
+
+    // Validate amount
+    if(empty($amount)) {
+        $errors[] = "Amount is required";
+    } elseif(!is_numeric($amount) || $amount <= 0) {
+        $errors[] = "Amount must be a positive number";
+    } elseif($amount > 1000000) { // Example maximum limit
+        $errors[] = "Amount exceeds the maximum limit";
+    }
+
+    // Validate description (if provided)
+    if(!empty($description) && strlen($description) > 500) { // Example maximum length
+        $errors[] = "Description cannot exceed 500 characters";
+    }
     
-    // File upload handling
+    // File upload validation
     $imagePath = null;
     if (isset($_FILES['receipt']) && $_FILES['receipt']['error'] == 0) {
         $uploadDir = '../uploads/expenses/';
@@ -79,32 +94,68 @@ if(isset($_POST['add'])) {
         $fileName = time() . '_' . basename($_FILES['receipt']['name']);
         $targetFilePath = $uploadDir . $fileName;
         
-        // Check if image file is a actual image or fake image
+        // Get file extension
+        $fileExtension = strtolower(pathinfo($_FILES['receipt']['name'], PATHINFO_EXTENSION));
+        
+        // Check if file is an actual image
         $check = getimagesize($_FILES['receipt']['tmp_name']);
-        if($check !== false) {
-            // Upload file
+        if($check === false) {
+            $errors[] = "Uploaded file is not a valid image";
+        }
+        
+        // Validate file extension
+        $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'pdf'];
+        if(!in_array($fileExtension, $allowedExtensions)) {
+            $errors[] = "Only JPG, JPEG, PNG, GIF, and PDF files are allowed";
+        }
+        
+        // Validate file size (5MB maximum)
+        if($_FILES['receipt']['size'] > 5 * 1024 * 1024) {
+            $errors[] = "File size cannot exceed 5MB";
+        }
+        
+        // If all file validations pass, upload the file
+        if(empty($errors)) {
             if(move_uploaded_file($_FILES['receipt']['tmp_name'], $targetFilePath)) {
                 $imagePath = 'uploads/expenses/' . $fileName;
             } else {
-                $error = "Sorry, there was an error uploading your file.";
+                $errors[] = "Error uploading file. Please try again.";
             }
-        } else {
-            $error = "File is not an image.";
         }
     }
     
     // Validate inputs
-    if(empty($category) || empty($method) || empty($amount) || empty($date) || empty($treasurerId)) {
-        $error = "All fields are required except description and image";
+    // if(empty($category) || empty($method) || empty($amount) || empty($date) || empty($treasurerId)) {
+    //     $error = "All fields are required except description and image";
+    if(!empty($errors)) {
+        $error = implode("<br>", $errors);
     } else {
-        // Insert into Expenses table
-        $query = "INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, Description, Image, Treasurer_TreasurerID) 
-                 VALUES ('" . $expenseId . "', '" . $category . "', '" . $method . "', " . $amount . ", '" . $date . "', 
-                 " . $currentTerm . ", " . ($description ? "'" . $description . "'" : "NULL") . ", " . 
-                 ($imagePath ? "'" . $imagePath . "'" : "NULL") . ", '" . $treasurerId . "')";
-        
         try {
-            Database::iud($query);
+            // Use prepared statement for insertion
+            $stmt = prepare("INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, Description, Image, Treasurer_TreasurerID) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            
+            // Bind parameters
+            $stmt->bind_param("sssdsisss", 
+                $expenseId, 
+                $category, 
+                $method, 
+                $amount, 
+                $date, 
+                $currentTerm, 
+                $descriptionValue, 
+                $imageValue, 
+                $treasurerId
+            );
+            
+            // Set null values correctly
+            $descriptionValue = empty($description) ? null : $description;
+            $imageValue = empty($imagePath) ? null : $imagePath;
+            
+            // Execute the statement
+            $stmt->execute();
+            $stmt->close();
+            
             $_SESSION['success_message'] = "Expense added successfully";
             
             // Redirect to previous page
@@ -303,8 +354,8 @@ if(isset($_GET['cancel'])) {
             </div>
 
             <div class="button-group">
-                <button type="submit" name="add" class="btn btn-add">Add Expense</button>
                 <a href="?cancel=1" class="btn btn-cancel">Cancel</a>
+                <button type="submit" name="add" class="btn btn-add">Add Expense</button>
             </div>
         </form>
     </div>
