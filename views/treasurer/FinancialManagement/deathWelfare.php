@@ -4,7 +4,7 @@ require_once "../../../config/database.php";
 
 // Get current term
 function getCurrentTerm() {
-    $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
+    $sql = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
     $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['year'] ?? date('Y');
@@ -59,6 +59,24 @@ function getMemberWelfare($year) {
     return search($sql);
 }
 
+// Get all welfare claims for the year
+function getWelfareClaims($year) {
+    $sql = "SELECT 
+            dw.WelfareID,
+            dw.Amount,
+            dw.Date,
+            dw.Relationship,
+            dw.Status,
+            dw.Member_MemberID,
+            m.Name
+        FROM DeathWelfare dw
+        INNER JOIN Member m ON dw.Member_MemberID = m.MemberID 
+        WHERE YEAR(dw.Date) = $year
+        ORDER BY dw.Date DESC";
+    
+    return search($sql);
+}
+
 // Get welfare summary for the year
 function getWelfareSummary($year) {
     $sql = "SELECT 
@@ -90,13 +108,94 @@ function getMonthlyWelfareStats($year) {
 
 // Get welfare amount from Static table
 function getWelfareAmount() {
-    $sql = "SELECT death_welfare FROM Static ORDER BY year DESC LIMIT 1";
+    $sql = "SELECT death_welfare FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
     $result = search($sql);
     return $result->fetch_assoc();
 }
 
+// Get all available terms/years
+function getAllTerms() {
+    $sql = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
+    return search($sql);
+}
+
+// Handle Delete Welfare Claim
+if(isset($_POST['delete_welfare'])) {
+    $welfareId = $_POST['welfare_id'];
+    $currentYear = isset($_GET['year']) ? $_GET['year'] : (isset($_POST['year']) ? $_POST['year'] : getCurrentTerm());
+    
+    try {
+        $conn = getConnection();
+        
+        // Start transaction
+        $conn->begin_transaction();
+        
+        // Check if this welfare has linked expenses
+        $checkQuery = "SELECT * FROM DeathWelfare WHERE WelfareID = ? AND Expense_ExpenseID IS NOT NULL";
+        $stmt = $conn->prepare($checkQuery);
+        $stmt->bind_param("s", $welfareId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        // If there are expenses linked to this welfare claim, handle them
+        if($result->num_rows > 0) {
+            $row = $result->fetch_assoc();
+            $expenseId = $row['Expense_ExpenseID'];
+            
+            // Delete the expense record
+            $deleteExpenseQuery = "DELETE FROM Expenses WHERE ExpenseID = ?";
+            $stmt = $conn->prepare($deleteExpenseQuery);
+            $stmt->bind_param("s", $expenseId);
+            $stmt->execute();
+        }
+        
+        // Delete the welfare record
+        $deleteWelfareQuery = "DELETE FROM DeathWelfare WHERE WelfareID = ?";
+        $stmt = $conn->prepare($deleteWelfareQuery);
+        $stmt->bind_param("s", $welfareId);
+        $stmt->execute();
+        
+        // Commit transaction
+        $conn->commit();
+        
+        $_SESSION['success_message'] = "Welfare claim #$welfareId was successfully deleted.";
+    } catch(Exception $e) {
+        // Rollback on error
+        $conn->rollback();
+        $_SESSION['error_message'] = "Error deleting welfare claim: " . $e->getMessage();
+    }
+    
+    // Redirect back to welfare page
+    header("Location: deathWelfare.php?year=" . $currentYear);
+    exit();
+}
+
+// Function to check if financial report for a specific term is approved
+function isReportApproved($year) {
+    $conn = getConnection();
+    $stmt = $conn->prepare("
+        SELECT Status 
+        FROM FinancialReportVersions 
+        WHERE Term = ? 
+        ORDER BY Date DESC 
+        LIMIT 1
+    ");
+    
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return ($row['Status'] === 'approved');
+    }
+    
+    return false; // If no report exists, it's not approved
+}
+
 $currentTerm = getCurrentTerm();
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
+$allTerms = getAllTerms();
 
 $welfareStats = getWelfareSummary($selectedYear);
 $monthlyStats = getMonthlyWelfareStats($selectedYear);
@@ -109,6 +208,9 @@ $months = [
     10 => 'October', 11 => 'November', 12 => 'December'
 ];
 
+$selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
+$isReportApproved = isReportApproved($selectedYear);
+
 ?>
 
 <!DOCTYPE html>
@@ -119,6 +221,124 @@ $months = [
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="../../../assets/css/adminDetails.css">
     <link rel="stylesheet" href="../../../assets/css/financialManagement.css">
+    <link rel="stylesheet" href="../../../assets/css/alert.css">
+    <script src="../../../assets/js/alertHandler.js"></script>
+    <style>
+        .status-badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .status-approved {
+            background-color: #c2f1cd;
+            color: rgb(25, 151, 10);
+        }
+        .status-pending {
+            background-color: #fff8e8;
+            color: #f6a609;
+        }
+        .status-rejected {
+            background-color: #e2bcc0;
+            color: rgb(234, 59, 59);
+        }
+        .status-none {
+            background-color: #f0f0f0;
+            color: #666;
+        }
+        /* Modal Styles */
+        #welfareModal, #editWelfareModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            overflow: auto;
+        }
+
+        #welfareModal .modal-content, #editWelfareModal .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 20px;
+            width: 90%;
+            max-width: 900px;
+            height: 90%;
+            border-radius: 8px;
+            position: relative;
+        }
+
+        #welfareModal .close, #editWelfareModal .close {
+            position: absolute;
+            right: 20px;
+            top: 10px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .modal-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        .alert-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        /* Delete Modal Styles */
+        .delete-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+        }
+
+        .delete-modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 400px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .delete-modal-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .cancel-btn {
+            padding: 10px 20px;
+            background-color: #e0e0e0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .confirm-delete-btn {
+            padding: 10px 20px;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
     <div class="main-container">
@@ -127,12 +347,33 @@ $months = [
         <div class="header-card">
             <h1>Death Welfare Details</h1>
             <select class="filter-select" onchange="updateFilters()" id="yearSelect">
-                <?php for($y = $currentTerm; $y >= $currentTerm - 2; $y--): ?>
-                    <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
-                        Year <?php echo $y; ?>
+                <?php while($term = $allTerms->fetch_assoc()): ?>
+                    <option value="<?php echo $term['year']; ?>" <?php echo $term['year'] == $selectedYear ? 'selected' : ''; ?>>
+                        Year <?php echo $term['year']; ?>
                     </option>
-                <?php endfor; ?>
+                <?php endwhile; ?>
             </select>
+        </div>
+
+        <!-- Add this right after the header-card div for alerts -->
+        <div class="alerts-container">
+            <?php if(isset($_SESSION['success_message'])): ?>
+                <div class="alert alert-success">
+                    <?php 
+                        echo $_SESSION['success_message'];
+                        unset($_SESSION['success_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if(isset($_SESSION['error_message'])): ?>
+                <div class="alert alert-danger">
+                    <?php 
+                        echo $_SESSION['error_message'];
+                        unset($_SESSION['error_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
         </div>
 
         <div id="stats-section" class="stats-cards">
@@ -154,10 +395,6 @@ $months = [
                 <div class="stat-number">Rs. <?php echo number_format($stats['total_amount'] ?? 0, 2); ?></div>
                 <div class="stat-label">Total Amount Paid</div>
             </div>
-            <button onclick="window.location.href='editWelfareSettings.php'" class="edit-btn">
-                <i class="fas fa-edit"></i>
-                Edit Settings
-            </button>
         </div>
 
         <div class="tabs">
@@ -186,52 +423,58 @@ $months = [
                             <th>Date</th>
                             <th>Relationship</th>
                             <th>Status</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php 
-                        $memberWelfare = getMemberWelfare($selectedYear);
-                        while($row = $memberWelfare->fetch_assoc()): 
-                            $welfareIds = $row['welfare_ids'] ? explode(',', $row['welfare_ids']) : [];
-                            $amounts = $row['amounts'] ? explode(',', $row['amounts']) : [];
-                            $dates = $row['dates'] ? explode(',', $row['dates']) : [];
-                            $relationships = $row['relationships'] ? explode(',', $row['relationships']) : [];
-                            $statuses = $row['statuses'] ? explode(',', $row['statuses']) : [];
+                    <?php 
+                    $welfareClaims = getWelfareClaims($selectedYear);
+                    
+                    while($row = $welfareClaims->fetch_assoc()): 
+                        // Set the status badge class based on welfare status
+                        $statusClass = '';
+                        switch($row['Status']) {
+                            case 'approved':
+                                $statusClass = 'status-approved';
+                                break;
+                            case 'pending':
+                                $statusClass = 'status-pending';
+                                break;
+                            case 'rejected':
+                                $statusClass = 'status-rejected';
+                                break;
+                            default:
+                                $statusClass = 'status-none';
+                        }
+                    ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($row['Member_MemberID']); ?></td>
+                        <td><?php echo htmlspecialchars($row['Name']); ?></td>
+                        <td><?php echo htmlspecialchars($row['WelfareID']); ?></td>
+                        <td>Rs. <?php echo number_format($row['Amount'] ?? 0, 2); ?></td>
+                        <td><?php echo date('Y-m-d', strtotime($row['Date'])); ?></td>
+                        <td><?php echo htmlspecialchars(ucfirst($row['Relationship'])); ?></td>
+                        <td><span class="status-badge <?php echo $statusClass; ?>"><?php echo ucfirst(htmlspecialchars($row['Status'] ?? 'None')); ?></span></td>
+                        <td class="actions">
+                            <button onclick="viewWelfare('<?php echo $row['WelfareID']; ?>')" class="action-btn small">
+                                <i class="fas fa-eye"></i>
+                            </button>
                             
-                            // Show an empty row if no welfare claims
-                            if (empty($welfareIds)):
-                        ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
-                            <td><?php echo htmlspecialchars($row['Name']); ?></td>
-                            <td>-</td>
-                            <td>Rs. 0.00</td>
-                            <td>-</td>
-                            <td>-</td>
-                            <td><span class="status-badge status-none">None</span></td>
-                        </tr>
-                        <?php else: 
-                            // Show a row for each welfare claim
-                            foreach($welfareIds as $index => $welfareId):
-                        ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
-                            <td><?php echo htmlspecialchars($row['Name']); ?></td>
-                            <td><?php echo htmlspecialchars($welfareId); ?></td>
-                            <td>Rs. <?php echo number_format($amounts[$index] ?? 0, 2); ?></td>
-                            <td><?php echo isset($dates[$index]) ? date('Y-m-d', strtotime($dates[$index])) : '-'; ?></td>
-                            <td><?php echo htmlspecialchars($relationships[$index] ?? '-'); ?></td>
-                            <td>
-                                <span class="status-badge status-<?php echo strtolower($statuses[$index] ?? 'none'); ?>">
-                                    <?php echo ucfirst($statuses[$index] ?? 'None'); ?>
-                                </span>
-                            </td>
-                        </tr>
-                        <?php 
-                            endforeach;
-                        endif;
-                        endwhile; ?>
-                    </tbody>
+                            <?php if (!$isReportApproved): ?>
+                                <button onclick="editWelfare('<?php echo $row['WelfareID']; ?>')" class="action-btn small">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button onclick="openDeleteModal('<?php echo $row['WelfareID']; ?>')" class="action-btn small">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            <?php else: ?>
+                                <button onclick="showReportMessage()" class="action-btn small info-btn" title="Report approved">
+                                    <i class="fas fa-info-circle"></i>
+                                </button>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php endwhile; ?>
                 </table>
             </div>
         </div>
@@ -264,12 +507,71 @@ $months = [
     <?php include '../../templates/footer.php'; ?>
     </div>
 
+    <!-- View Welfare Modal -->
+    <div id="welfareModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeWelfareModal()">&times;</span>
+            <iframe id="welfareFrame" class="modal-iframe"></iframe>
+        </div>
+    </div>
+
+    <!-- Delete Modal -->
+    <div id="deleteModal" class="delete-modal">
+        <div class="delete-modal-content">
+            <span class="close" onclick="closeDeleteModal()">&times;</span>
+            <h2>Confirm Delete</h2>
+            <p>Are you sure you want to delete this welfare claim record? This action cannot be undone.</p>
+            <form method="POST">
+                <input type="hidden" id="delete_welfare_id" name="welfare_id">
+                <div class="delete-modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>
+                    <button type="submit" name="delete_welfare" class="confirm-delete-btn">Delete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Welfare Modal -->
+    <div id="editWelfareModal" class="modal">
+        <div class="modal-content" style="max-width: 90%; height: 90%;">
+            <span class="close" onclick="closeEditModal()">&times;</span>
+            <iframe id="editWelfareFrame" style="width: 100%; height: 90%; border: none;"></iframe>
+        </div>
+    </div>
+
     <script>
+        function viewWelfare(welfareID) {
+            // Set the iframe source to your viewWelfare.php page (if one exists)
+            document.getElementById('welfareFrame').src = `viewWelfare.php?id=${welfareID}&popup=true`;
+            
+            // Show the modal
+            document.getElementById('welfareModal').style.display = 'block';
+        }
+
+        function closeWelfareModal() {
+            document.getElementById('welfareModal').style.display = 'none';
+        }
+
+        // Edit Welfare Modal Functions
+        function editWelfare(welfareID) {
+            // Set the iframe source to your editWelfare.php page
+            document.getElementById('editWelfareFrame').src = `editWelfare.php?id=${welfareID}&popup=true`;
+            
+            // Show the modal
+            document.getElementById('editWelfareModal').style.display = 'block';
+        }
+
+        function closeEditModal() {
+            document.getElementById('editWelfareModal').style.display = 'none';
+            
+            // After closing, refresh the welfare list to see any changes
+            updateFilters();
+        }
+
         function updateFilters() {
             const year = document.getElementById('yearSelect').value;
-            
-            window.location.href = `?year=${year}`;
-            
+        
+            // Don't redirect, just update via fetch
             fetch(`deathWelfare.php?year=${year}`)
                 .then(response => response.text())
                 .then(html => {
@@ -349,6 +651,82 @@ $months = [
             searchInput.value = '';
             performSearch();
             searchInput.focus();
+        }
+
+        function openDeleteModal(id) {
+            document.getElementById('deleteModal').style.display = 'block';
+            document.getElementById('delete_welfare_id').value = id;
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').style.display = 'none';
+        }
+
+        // Update window.onclick to handle all modals
+        window.onclick = function(event) {
+            const welfareModal = document.getElementById('welfareModal');
+            const deleteModal = document.getElementById('deleteModal');
+            const editModal = document.getElementById('editWelfareModal');
+            
+            if (event.target == welfareModal) {
+                closeWelfareModal();
+            }
+            
+            if (event.target == deleteModal) {
+                closeDeleteModal();
+            }
+
+            if (event.target == editModal) {
+                closeEditModal();
+            }
+        };
+
+        // Function to create and show alerts programmatically
+        function showAlert(type, message) {
+            const alertsContainer = document.querySelector('.alerts-container');
+            
+            // Create alert element
+            const alertDiv = document.createElement('div');
+            alertDiv.className = type === 'success' ? 'alert alert-success' : 
+                               type === 'info' ? 'alert alert-info' : 'alert alert-danger';
+            alertDiv.textContent = message;
+            
+            // Clear previous alerts
+            alertsContainer.innerHTML = '';
+            
+            // Add new alert
+            alertsContainer.appendChild(alertDiv);
+            
+            // Scroll to top to see the alert
+            window.scrollTo(0, 0);
+            
+            // Add close button to alert
+            const closeBtn = document.createElement('span');
+            closeBtn.innerHTML = '&times;';
+            closeBtn.className = 'alert-close';
+            closeBtn.style.float = 'right';
+            closeBtn.style.cursor = 'pointer';
+            closeBtn.style.fontWeight = 'bold';
+            closeBtn.style.fontSize = '20px';
+            closeBtn.style.marginLeft = '15px';
+            
+            closeBtn.addEventListener('click', function() {
+                alertDiv.style.display = 'none';
+            });
+            
+            alertDiv.insertBefore(closeBtn, alertDiv.firstChild);
+            
+            // Auto-hide alerts after 5 seconds
+            setTimeout(function() {
+                alertDiv.style.opacity = '0';
+                setTimeout(function() {
+                    alertDiv.style.display = 'none';
+                }, 500);
+            }, 5000);
+        }
+
+        function showReportMessage() {
+            showAlert('info', 'This record cannot be modified as the financial report for this term has already been approved.');
         }
     </script>
 </body>

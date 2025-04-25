@@ -610,7 +610,8 @@ function showAlert(type, message) {
     
     // Create alert element
     const alertDiv = document.createElement('div');
-    alertDiv.className = type === 'success' ? 'alert alert-success' : 'alert alert-danger';
+    alertDiv.className = type === 'success' ? 'alert alert-success'  : 
+                        type === 'info' ? 'alert alert-info' : 'alert alert-danger';
     alertDiv.textContent = message;
     
     // Clear previous alerts

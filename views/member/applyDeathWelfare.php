@@ -29,6 +29,27 @@ function hasPendingApplication($memberId, $term) {
     return $result->num_rows > 0;
 }
 
+// Get welfare amount from static table
+function getWelfareAmount() {
+    $query = "SELECT death_welfare FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $result = search($query);
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['death_welfare'];
+    }
+    return 10000.00; // Default fallback value if no settings found
+}
+
+// Define relationship options
+$relationships = [
+    'dog' => 'Dog',
+    'mother' => 'Mother',
+    'father' => 'Father',
+    'child' => 'Child',
+    'sibling' => 'Sibling',
+    'self' => 'Self'
+];
+
 // Handle form submission
 if(isset($_POST['apply'])) {
     $memberId = $_POST['member_id'];
@@ -53,8 +74,8 @@ if(isset($_POST['apply'])) {
         $errors[] = "You already have an approved death welfare application for this year";
     }
     
-    // Default amount based on company policy
-    $amount = 10000.00;
+    // Get amount from settings
+    $amount = getWelfareAmount();
     
     // Validate inputs
     if(empty($memberId)) $errors[] = "Member ID is required";
@@ -136,6 +157,9 @@ if(isset($_SESSION['member_id'])) {
         $memberId = $member['MemberID'];
     }
 }
+
+// Get welfare amount for display
+$welfareAmount = getWelfareAmount();
 ?>
 
 <!DOCTYPE html>
@@ -146,6 +170,25 @@ if(isset($_SESSION['member_id'])) {
     <title>Death Welfare Application</title>
     <link rel="stylesheet" href="../../assets/css/applyLWF.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .info-box {
+            background-color: #e7f3ff;
+            border: 1px solid #b8daff;
+            color: #004085;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .info-box h3 {
+            margin-top: 0;
+            font-size: 16px;
+        }
+        .welfare-amount {
+            font-weight: bold;
+            font-size: 18px;
+            color: #1e3c72;
+        }
+    </style>
 </head>
 <body>
     <div class="main-container">
@@ -161,6 +204,12 @@ if(isset($_SESSION['member_id'])) {
             <?php if($hasExistingApplication): ?>
                 <div class="alert alert-info">
                     You already have a death welfare application for this year (Status: <?php echo ucfirst($existingApplicationStatus); ?>)
+                </div>
+            <?php else: ?>
+                <div class="info-box">
+                    <h3>Death Welfare Benefit Information</h3>
+                    <p>The death welfare benefit amount is currently set at <span class="welfare-amount">Rs. <?php echo number_format($welfareAmount, 2); ?></span> according to organization policy.</p>
+                    <p>This benefit is available to members who have experienced a death in their immediate family.</p>
                 </div>
             <?php endif; ?>
 
@@ -191,7 +240,12 @@ if(isset($_SESSION['member_id'])) {
                 
                 <div class="form-group">
                     <label for="relationship">Relationship to the deceased person</label>
-                    <input type="text" id="relationship" name="relationship" required>
+                    <select id="relationship" name="relationship" required>
+                        <option value="">-- Select Relationship --</option>
+                        <?php foreach($relationships as $key => $value): ?>
+                            <option value="<?php echo $key; ?>"><?php echo $value; ?></option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
                 
                 <div class="terms-group">
@@ -217,7 +271,7 @@ if(isset($_SESSION['member_id'])) {
             let errors = [];
             
             if (!relationship) {
-                errors.push("Please enter the relationship to the deceased person");
+                errors.push("Please select the relationship to the deceased person");
             }
             
             if (!date) {
