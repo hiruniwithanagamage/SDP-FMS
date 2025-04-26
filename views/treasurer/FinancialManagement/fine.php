@@ -2,37 +2,32 @@
 session_start();
 require_once "../../../config/database.php";
 
-// Get current term
+// Get current term/year
 function getCurrentTerm() {
-    $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
+    $sql = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
     $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['year'] ?? date('Y');
 }
 
-// Get fine details for all members with optional type filter
-function getMemberFines($year, $type = null) {
+// Get fine details for all members
+function getMemberFines($year) {
     $sql = "SELECT 
             m.MemberID,
             m.Name,
-            GROUP_CONCAT(f.FineID) as fine_ids,
-            GROUP_CONCAT(f.Amount) as amounts,
-            GROUP_CONCAT(f.Date) as dates,
-            GROUP_CONCAT(f.Description) as descriptions,
-            GROUP_CONCAT(f.IsPaid) as payment_statuses
+            f.FineID,
+            f.Amount,
+            f.Date,
+            f.Description,
+            f.IsPaid as Status
         FROM Member m
-        LEFT JOIN Fine f ON m.MemberID = f.Member_MemberID 
-            AND YEAR(f.Date) = $year";
-    
-    if ($type) {
-        $sql .= " AND f.Description LIKE '%$type%'";
-    }
-    
-    $sql .= " GROUP BY m.MemberID, m.Name
+        INNER JOIN Fine f ON m.MemberID = f.Member_MemberID 
+            AND YEAR(f.Date) = $year
         ORDER BY m.Name";
     
     return search($sql);
 }
+
 
 // Get fine summary for the year
 function getFineSummary($year) {
@@ -66,20 +61,115 @@ function getMonthlyFineStats($year) {
     return search($sql);
 }
 
-// Get fine amounts from Static table
-function getFineAmounts() {
+// Get fine settings from Static table
+function getFineSettings() {
     $sql = "SELECT late_fine, absent_fine, rules_violation_fine FROM Static ORDER BY year DESC LIMIT 1";
     $result = search($sql);
     return $result->fetch_assoc();
 }
 
+// Get all available terms/years
+function getAllTerms() {
+    $sql = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
+    return search($sql);
+}
+
+// Handle Delete Fine
+if(isset($_POST['delete_fine'])) {
+    $fineId = $_POST['fine_id'];
+    $currentYear = isset($_GET['year']) ? $_GET['year'] : (isset($_POST['year']) ? $_POST['year'] : getCurrentTerm());
+    
+    try {
+        $conn = getConnection();
+        
+        // Start transaction
+        $conn->begin_transaction();
+        
+        // First check if this fine has any payments
+        $checkQuery = "SELECT * FROM Payment p 
+                      JOIN FinePayment fp ON p.PaymentID = fp.PaymentID
+                      WHERE fp.FineID = ?";
+        $stmt = $conn->prepare($checkQuery);
+        $stmt->bind_param("s", $fineId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        // If there are payments linked to this fine, delete them first
+        if($result->num_rows > 0) {
+            // Get all payment IDs linked to this fine
+            $paymentIds = [];
+            while($row = $result->fetch_assoc()) {
+                $paymentIds[] = $row['PaymentID'];
+            }
+            
+            // Delete the fine payment links
+            $deleteFinePaymentsQuery = "DELETE FROM FinePayment WHERE FineID = ?";
+            $stmt = $conn->prepare($deleteFinePaymentsQuery);
+            $stmt->bind_param("s", $fineId);
+            $stmt->execute();
+            
+            // Delete the associated payment records
+            if(!empty($paymentIds)) {
+                foreach($paymentIds as $paymentId) {
+                    $deletePaymentQuery = "DELETE FROM Payment WHERE PaymentID = ?";
+                    $stmt = $conn->prepare($deletePaymentQuery);
+                    $stmt->bind_param("s", $paymentId);
+                    $stmt->execute();
+                }
+            }
+        }
+        
+        // Finally, delete the fine record
+        $deleteFineQuery = "DELETE FROM Fine WHERE FineID = ?";
+        $stmt = $conn->prepare($deleteFineQuery);
+        $stmt->bind_param("s", $fineId);
+        $stmt->execute();
+        
+        // Commit transaction
+        $conn->commit();
+        
+        $_SESSION['success_message'] = "Fine #$fineId was successfully deleted.";
+    } catch(Exception $e) {
+        // Rollback on error
+        $conn->rollback();
+        $_SESSION['error_message'] = "Error deleting fine: " . $e->getMessage();
+    }
+    
+    // Redirect back to fine page
+    header("Location: fine.php?year=" . $currentYear);
+    exit();
+}
+
+// Function to check if financial report for a specific term is approved
+function isReportApproved($year) {
+    $conn = getConnection();
+    $stmt = $conn->prepare("
+        SELECT Status 
+        FROM FinancialReportVersions 
+        WHERE Term = ? 
+        ORDER BY Date DESC 
+        LIMIT 1
+    ");
+    
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return ($row['Status'] === 'approved');
+    }
+    
+    return false; // If no report exists, it's not approved
+}
+
 $currentTerm = getCurrentTerm();
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
-$selectedType = isset($_GET['type']) ? $_GET['type'] : null;
+$allTerms = getAllTerms();
 
 $fineStats = getFineSummary($selectedYear);
 $monthlyStats = getMonthlyFineStats($selectedYear);
-$fineAmounts = getFineAmounts();
+$fineSettings = getFineSettings();
 
 $months = [
     1 => 'January', 2 => 'February', 3 => 'March', 
@@ -87,6 +177,9 @@ $months = [
     7 => 'July', 8 => 'August', 9 => 'September',
     10 => 'October', 11 => 'November', 12 => 'December'
 ];
+
+$selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
+$isReportApproved = isReportApproved($selectedYear);
 
 ?>
 
@@ -98,46 +191,61 @@ $months = [
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="../../../assets/css/adminDetails.css">
     <link rel="stylesheet" href="../../../assets/css/financialManagement.css">
+    <link rel="stylesheet" href="../../../assets/css/alert.css">
+    <script src="../../../assets/js/alertHandler.js"></script>
     <style>
-        .fine-type-filters {
-            display: flex;
-            gap: 10px;
-            margin-right: 20px;
+        .status-yes {
+            background-color: #c2f1cd;
+            color: rgb(25, 151, 10);
         }
+        .status-no {
+            background-color: #e2bcc0;
+            color: rgb(234, 59, 59);
+        }
+        /* Modal Styles */
+#fineModal, #editFineModal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    overflow: auto;
+}
 
-        .filter-btn {
-            padding: 6px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background: white;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
+#fineModal .modal-content, #editFineModal .modal-content {
+    background-color: white;
+    margin: 5% auto;
+    padding: 20px;
+    width: 90%;
+    max-width: 900px;
+    height: 90%;
+    border-radius: 8px;
+    position: relative;
+}
 
-        .filter-btn:hover {
-            background: #f0f0f0;
-        }
+#fineModal .close, #editFineModal .close {
+    position: absolute;
+    right: 20px;
+    top: 10px;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
 
-        .filter-btn.active {
-            background: #4a90e2;
-            color: white;
-            border-color: #4a90e2;
-        }
+.modal-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
 
-        .fine-amounts {
-            display: flex;
-            gap: 20px;
-            margin-top: 10px;
-            font-size: 0.9em;
-            color: #666;
-        }
-
-        .fine-amounts {
-            display: flex;
-            gap: 30px;
-            align-items: center;
-            color: white;
-        }
+.alert-info {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
     </style>
 </head>
 <body>
@@ -147,12 +255,33 @@ $months = [
         <div class="header-card">
             <h1>Fine Details</h1>
             <select class="filter-select" onchange="updateFilters()" id="yearSelect">
-                <?php for($y = $currentTerm; $y >= $currentTerm - 2; $y--): ?>
-                    <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
-                        Year <?php echo $y; ?>
+                <?php while($term = $allTerms->fetch_assoc()): ?>
+                    <option value="<?php echo $term['year']; ?>" <?php echo $term['year'] == $selectedYear ? 'selected' : ''; ?>>
+                        Year <?php echo $term['year']; ?>
                     </option>
-                <?php endfor; ?>
+                <?php endwhile; ?>
             </select>
+        </div>
+
+        <!-- Add this right after the header-card div -->
+        <div class="alerts-container">
+            <?php if(isset($_SESSION['success_message'])): ?>
+                <div class="alert alert-success">
+                    <?php 
+                        echo $_SESSION['success_message'];
+                        unset($_SESSION['success_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if(isset($_SESSION['error_message'])): ?>
+                <div class="alert alert-danger">
+                    <?php 
+                        echo $_SESSION['error_message'];
+                        unset($_SESSION['error_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
         </div>
 
         <div id="stats-section" class="stats-cards">
@@ -172,39 +301,25 @@ $months = [
             <div class="stat-card">
                 <i class="fas fa-money-bill-wave"></i>
                 <div class="stat-number">Rs. <?php echo number_format($stats['total_amount'] ?? 0, 2); ?></div>
-                <div class="stat-label">Total Amount</div>
+                <div class="stat-label">Total Fine Amount</div>
             </div>
-            <button onclick="window.location.href='editFineSettings.php'" class="edit-btn">
-                <i class="fas fa-edit"></i>
-                Edit Settings
-            </button>
         </div>
 
         <div class="tabs">
             <button class="tab active" onclick="showTab('members')">Member-wise View</button>
             <button class="tab" onclick="showTab('months')">Month-wise View</button>
             <div class="filters">
-                <div class="fine-type-filters">
-                    <button onclick="filterByType('all')" class="filter-btn <?php echo !$selectedType ? 'active' : ''; ?>">All</button>
-                    <button onclick="filterByType('late')" class="filter-btn <?php echo $selectedType === 'late' ? 'active' : ''; ?>">Late</button>
-                    <button onclick="filterByType('absent')" class="filter-btn <?php echo $selectedType === 'absent' ? 'active' : ''; ?>">Absent</button>
-                    <button onclick="filterByType('violation')" class="filter-btn <?php echo $selectedType === 'violation' ? 'active' : ''; ?>">Rule Violation</button>
-                </div>
                 <div class="search-container">
                     <input type="text" id="searchInput" placeholder="Search by Name, Member ID, or Fine ID..." class="search-input">
                     <button onclick="clearSearch()" class="clear-btn"><i class="fas fa-times"></i></button>
                 </div>
+                
             </div>
         </div>
 
         <div id="members-view">
             <div class="fee-type-header">
-                <h2>Fine Details</h2>
-                <div class="fine-amounts">
-                    <span>Late Fine: Rs. <?php echo number_format($fineAmounts['late_fine'], 2); ?></span>
-                    <span>Absent Fine: Rs. <?php echo number_format($fineAmounts['absent_fine'], 2); ?></span>
-                    <span>Rule Violation: Rs. <?php echo number_format($fineAmounts['rules_violation_fine'], 2); ?></span>
-                </div>
+                <h2>Fine Details (Late Fine: Rs. <?php echo number_format($fineSettings['late_fine'], 2); ?>, Absent Fine: Rs. <?php echo number_format($fineSettings['absent_fine'], 2); ?>, Rule Violation: Rs. <?php echo number_format($fineSettings['rules_violation_fine'], 2); ?>)</h2>
             </div>
             <div class="table-container">
                 <table>
@@ -214,53 +329,56 @@ $months = [
                             <th>Name</th>
                             <th>Fine ID</th>
                             <th>Amount</th>
-                            <th>Date</th>
                             <th>Description</th>
                             <th>Status</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php 
-                        $memberFines = getMemberFines($selectedYear, $selectedType);
-                        while($row = $memberFines->fetch_assoc()): 
-                            $fineIds = $row['fine_ids'] ? explode(',', $row['fine_ids']) : [];
-                            $amounts = $row['amounts'] ? explode(',', $row['amounts']) : [];
-                            $dates = $row['dates'] ? explode(',', $row['dates']) : [];
-                            $descriptions = $row['descriptions'] ? explode(',', $row['descriptions']) : [];
-                            $paymentStatuses = $row['payment_statuses'] ? explode(',', $row['payment_statuses']) : [];
-                            
-                            if (empty($fineIds)):
-                        ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
-                            <td><?php echo htmlspecialchars($row['Name']); ?></td>
-                            <td>-</td>
-                            <td>Rs. 0.00</td>
-                            <td>-</td>
-                            <td>-</td>
-                            <td><span class="status-badge status-none">None</span></td>
-                        </tr>
-                        <?php else:
-                            foreach($fineIds as $index => $fineId):
-                        ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
-                            <td><?php echo htmlspecialchars($row['Name']); ?></td>
-                            <td><?php echo htmlspecialchars($fineId); ?></td>
-                            <td>Rs. <?php echo number_format($amounts[$index] ?? 0, 2); ?></td>
-                            <td><?php echo isset($dates[$index]) ? date('Y-m-d', strtotime($dates[$index])) : '-'; ?></td>
-                            <td><?php echo htmlspecialchars($descriptions[$index] ?? '-'); ?></td>
-                            <td>
-                                <span class="status-badge status-<?php echo strtolower($paymentStatuses[$index] ?? 'none'); ?>">
-                                    <?php echo $paymentStatuses[$index] == 'Yes' ? 'Paid' : 'Unpaid'; ?>
-                                </span>
-                            </td>
-                        </tr>
-                        <?php 
-                            endforeach;
-                        endif;
-                        endwhile; ?>
-                    </tbody>
+                    <?php 
+$memberFines = getMemberFines($selectedYear);
+
+while($row = $memberFines->fetch_assoc()): 
+    // Set the status badge class based on fine status
+    $statusClass = '';
+    switch($row['Status']) {
+        case 'Yes':
+            $statusClass = 'status-yes';
+            break;
+        case 'No':
+            $statusClass = 'status-no';
+            break;
+        default:
+            $statusClass = 'status-none';
+    }
+?>
+<tr>
+    <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
+    <td><?php echo htmlspecialchars($row['Name']); ?></td>
+    <td><?php echo htmlspecialchars($row['FineID']); ?></td>
+    <td>Rs. <?php echo number_format($row['Amount'] ?? 0, 2); ?></td>
+    <td><?php echo htmlspecialchars($row['Description'] ?? 'None'); ?></td>
+    <td><span class="status-badge <?php echo $statusClass; ?>"><?php echo $row['Status'] == 'Yes' ? 'Paid' : 'Unpaid'; ?></span></td>
+    <td class="actions">
+    <button onclick="viewFine('<?php echo $row['FineID']; ?>')" class="action-btn small">
+        <i class="fas fa-eye"></i>
+    </button>
+    
+    <?php if (!$isReportApproved): ?>
+        <button onclick="editFine('<?php echo $row['FineID']; ?>')" class="action-btn small">
+            <i class="fas fa-edit"></i>
+        </button>
+        <button onclick="openDeleteModal('<?php echo $row['FineID']; ?>')" class="action-btn small">
+            <i class="fas fa-trash"></i>
+        </button>
+    <?php else: ?>
+        <button onclick="showReportMessage()" class="action-btn small info-btn" title="Report approved">
+            <i class="fas fa-info-circle"></i>
+        </button>
+    <?php endif; ?>
+</td>
+</tr>
+<?php endwhile; ?>
                 </table>
             </div>
         </div>
@@ -294,43 +412,87 @@ $months = [
     </div>
     <?php include '../../templates/footer.php'; ?>
     </div>
+
+    <div id="fineModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeFineModal()">&times;</span>
+            <iframe id="fineFrame" class="modal-iframe"></iframe>
+        </div>
+    </div>
+
+<!-- Delete Modal -->
+<div id="deleteModal" class="delete-modal">
+        <div class="delete-modal-content">
+            <span class="close" onclick="closeDeleteModal()">&times;</span>
+            <h2>Confirm Delete</h2>
+            <p>Are you sure you want to delete this fine record? This action cannot be undone.</p>
+            <form method="POST">
+                <input type="hidden" id="delete_fine_id" name="fine_id">
+                <div class="delete-modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>
+                    <button type="submit" name="delete_fine" class="confirm-delete-btn">Delete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Fine Modal -->
+<div id="editFineModal" class="modal">
+    <div class="modal-content" style="max-width: 90%; height: 90%;">
+        <span class="close" onclick="closeEditModal()">&times;</span>
+        <iframe id="editFineFrame" style="width: 100%; height: 90%; border: none;"></iframe>
+    </div>
+</div>
+
     <script>
-        // Filter by fine type
-        function filterByType(type) {
-            const year = document.getElementById('yearSelect').value;
-            let url = `?year=${year}`;
-            if (type !== 'all') {
-                url += `&type=${type}`;
-            }
-            window.location.href = url;
+        function viewFine(fineID) {
+            // Set the iframe source to your viewFine.php page
+            document.getElementById('fineFrame').src = `viewFine.php?id=${fineID}&popup=true`;
+            
+            // Show the modal
+            document.getElementById('fineModal').style.display = 'block';
+        }
+
+        function closeFineModal() {
+            document.getElementById('fineModal').style.display = 'none';
+        }
+
+        // Edit Fine Modal Functions
+        function editFine(fineID) {
+            // Set the iframe source to your editFine.php page
+            document.getElementById('editFineFrame').src = `editFine.php?id=${fineID}&popup=true`;
+            
+            // Show the modal
+            document.getElementById('editFineModal').style.display = 'block';
+        }
+
+        function closeEditModal() {
+            document.getElementById('editFineModal').style.display = 'none';
+            
+            // After closing, refresh the fine list to see any changes
+            updateFilters();
         }
 
         function updateFilters() {
-            const year = document.getElementById('yearSelect').value;
-            const type = new URLSearchParams(window.location.search).get('type');
-            let url = `?year=${year}`;
-            if (type) {
-                url += `&type=${type}`;
-            }
-            
-            window.location.href = url;
-            
-            fetch(`fine.php${url}`)
-                .then(response => response.text())
-                .then(html => {
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, 'text/html');
-                    
-                    // Update stats cards
-                    document.getElementById('stats-section').innerHTML = doc.getElementById('stats-section').innerHTML;
-                    
-                    // Update members view
-                    document.getElementById('members-view').innerHTML = doc.getElementById('members-view').innerHTML;
-                    
-                    // Update months view
-                    document.getElementById('months-view').innerHTML = doc.getElementById('months-view').innerHTML;
-                })
-                .catch(error => console.error('Error:', error));
+        const year = document.getElementById('yearSelect').value;
+    
+        // Don't redirect, just update via fetch
+        fetch(`fine.php?year=${year}`)
+            .then(response => response.text())
+            .then(html => {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                // Update stats cards
+                document.getElementById('stats-section').innerHTML = doc.getElementById('stats-section').innerHTML;
+                
+                // Update members view
+                document.getElementById('members-view').innerHTML = doc.getElementById('members-view').innerHTML;
+                
+                // Update months view
+                document.getElementById('months-view').innerHTML = doc.getElementById('months-view').innerHTML;
+            })
+            .catch(error => console.error('Error:', error));
         }
 
         function showTab(tab) {
@@ -362,7 +524,7 @@ $months = [
                 const memberID = row.cells[0].textContent.toLowerCase();
                 const name = row.cells[1].textContent.toLowerCase();
                 const fineID = row.cells[2].textContent.toLowerCase();
-                const description = row.cells[5].textContent.toLowerCase();
+                const description = row.cells[4].textContent.toLowerCase();
                 
                 if (name.includes(searchTerm) || 
                     memberID.includes(searchTerm) || 
@@ -397,6 +559,82 @@ $months = [
             performSearch();
             searchInput.focus();
         }
+
+        function openDeleteModal(id) {
+            document.getElementById('deleteModal').style.display = 'block';
+            document.getElementById('delete_fine_id').value = id;
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').style.display = 'none';
+        }
+
+        // Update window.onclick to handle both modals
+        window.onclick = function(event) {
+            const fineModal = document.getElementById('fineModal');
+            const deleteModal = document.getElementById('deleteModal');
+            const editModal = document.getElementById('editFineModal');
+            
+            if (event.target == fineModal) {
+                closeFineModal();
+            }
+            
+            if (event.target == deleteModal) {
+                closeDeleteModal();
+            }
+
+            if (event.target == editModal) {
+                closeEditModal();
+            }
+        };
+
+        // Function to create and show alerts programmatically
+function showAlert(type, message) {
+    const alertsContainer = document.querySelector('.alerts-container');
+    
+    // Create alert element
+    const alertDiv = document.createElement('div');
+    alertDiv.className = type === 'success' ? 'alert alert-success'  : 
+                        type === 'info' ? 'alert alert-info' : 'alert alert-danger';
+    alertDiv.textContent = message;
+    
+    // Clear previous alerts
+    alertsContainer.innerHTML = '';
+    
+    // Add new alert
+    alertsContainer.appendChild(alertDiv);
+    
+    // Scroll to top to see the alert
+    window.scrollTo(0, 0);
+    
+    // Manually trigger the alert handler for this new alert
+    const closeBtn = document.createElement('span');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.className = 'alert-close';
+    closeBtn.style.float = 'right';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.fontWeight = 'bold';
+    closeBtn.style.fontSize = '20px';
+    closeBtn.style.marginLeft = '15px';
+    
+    closeBtn.addEventListener('click', function() {
+        alertDiv.style.display = 'none';
+    });
+    
+    alertDiv.insertBefore(closeBtn, alertDiv.firstChild);
+    
+    // Auto-hide alerts after 5 seconds
+    setTimeout(function() {
+        alertDiv.style.opacity = '0';
+        setTimeout(function() {
+            alertDiv.style.display = 'none';
+        }, 500);
+    }, 5000);
+}
+
+function showReportMessage() {
+    showAlert('info', 'This record cannot be modified as the financial report for this term has already been approved.');
+}
     </script>
 </body>
 </html>
