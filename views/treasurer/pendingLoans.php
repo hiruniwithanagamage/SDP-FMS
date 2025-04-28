@@ -92,19 +92,40 @@ function processLoanUpdate() {
                 if(!$loanData) {
                     throw new Exception("Loan record not found");
                 }
+
+                // Get current interest rate from Static table
+                $interestQuery = "SELECT interest FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+                $interestResult = search($interestQuery);
+                $interestRate = 3; // Default value if query fails
+                if ($interestResult && $interestResult->num_rows > 0) {
+                    $interestData = $interestResult->fetch_assoc();
+                    $interestRate = $interestData['interest'];
+                }
                 
+                // Get current interest rate from Static table
+                $interestQuery = "SELECT interest FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+                $interestResult = search($interestQuery);
+                $interestRate = 3; // Default value if query fails
+                if ($interestResult && $interestResult->num_rows > 0) {
+                    $interestData = $interestResult->fetch_assoc();
+                    $interestRate = $interestData['interest'];
+                }
+
+                // Calculate initial interest based on loan amount (for first month only)
+                $initialInterest = $loanData['Amount'] * ($interestRate / 100);
+
                 // Begin processing - create expense record
                 $expenseId = createExpenseRecord($loanId, $loanData['Amount']);
-                
+
                 if(!$expenseId) {
                     throw new Exception("Failed to create expense record");
                 }
-                
-                // After successfully inserting expense record, update loan with expense ID
-                $updateLoanStmt = prepare("UPDATE Loan SET Expenses_ExpenseID = ?, Status = ? WHERE LoanID = ?");
-                $updateLoanStmt->bind_param("sss", $expenseId, $status, $loanId);
+
+                // After successfully inserting expense record, update loan with expense ID and interest
+                $updateLoanStmt = prepare("UPDATE Loan SET Expenses_ExpenseID = ?, Status = ?, Remain_Interest = ? WHERE LoanID = ?");
+                $updateLoanStmt->bind_param("ssds", $expenseId, $status, $initialInterest, $loanId);
                 $updateLoanStmt->execute();
-                
+
                 if($updateLoanStmt->affected_rows > 0) {
                     $_SESSION['success_message'] = "Loan approved and expense recorded successfully!";
                 } else {

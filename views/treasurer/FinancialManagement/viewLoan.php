@@ -3,14 +3,95 @@ $isPopup = isset($_GET['popup']) && $_GET['popup'] === 'true';
 session_start();
 require_once "../../../config/database.php";
 
-// Check if ID parameter exists
-if (!isset($_GET['id']) || empty($_GET['id'])) {
-    $_SESSION['error_message'] = "No loan ID provided";
-    header("Location: loan.php");
-    exit();
+// Check if member is trying to view their own loan
+$isMemberView = isset($_SESSION['role']) && $_SESSION['role'] == 'member';
+$memberId = isset($_SESSION['member_id']) ? $_SESSION['member_id'] : null;
+
+// Get loan ID from various sources
+$loanID = null;
+
+if ($isMemberView && !isset($_GET['id'])) {
+    // Member is viewing without a specified loan ID - get their active loan
+    try {
+        $conn = getConnection();
+        $query = "SELECT LoanID FROM Loan 
+                  WHERE Member_MemberID = ? 
+                  AND Status = 'approved' 
+                  AND Remain_Loan > 0 
+                  ORDER BY Issued_Date DESC 
+                  LIMIT 1";
+        
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param("s", $memberId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result && $result->num_rows > 0) {
+            $loanData = $result->fetch_assoc();
+            $loanID = $loanData['LoanID'];
+        } else {
+            // No active loan found, check for any approved loan
+            $query = "SELECT LoanID FROM Loan 
+                      WHERE Member_MemberID = ? 
+                      AND Status = 'approved' 
+                      ORDER BY Issued_Date DESC 
+                      LIMIT 1";
+            
+            $stmt = $conn->prepare($query);
+            $stmt->bind_param("s", $memberId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            if ($result && $result->num_rows > 0) {
+                $loanData = $result->fetch_assoc();
+                $loanID = $loanData['LoanID'];
+            } else {
+                // Still no loan found, check for pending loans
+                $query = "SELECT LoanID FROM Loan 
+                          WHERE Member_MemberID = ? 
+                          ORDER BY Issued_Date DESC 
+                          LIMIT 1";
+                
+                $stmt = $conn->prepare($query);
+                $stmt->bind_param("s", $memberId);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                
+                if ($result && $result->num_rows > 0) {
+                    $loanData = $result->fetch_assoc();
+                    $loanID = $loanData['LoanID'];
+                }
+            }
+        }
+    } catch (Exception $e) {
+        $_SESSION['error_message'] = "Error retrieving loan data: " . $e->getMessage();
+    }
+    
+    // If no loan found at all
+    if (!$loanID) {
+        $_SESSION['error_message'] = "No loan found for your account";
+        if ($isMemberView) {
+            header("Location: ../member/home-member.php");
+        } else {
+            header("Location: loan.php");
+        }
+        exit();
+    }
+} else {
+    // Normal loan ID from GET parameter
+    $loanID = isset($_GET['id']) ? $_GET['id'] : null;
 }
 
-$loanID = $_GET['id'];
+// Check if ID parameter exists
+if (!$loanID) {
+    $_SESSION['error_message'] = "No loan ID provided";
+    if ($isMemberView) {
+        header("Location: ../member/home-member.php");
+    } else {
+        header("Location: loan.php");
+    }
+    exit();
+}
 
 // Function to get loan details
 function getLoanDetails($loanID) {
@@ -36,6 +117,26 @@ function getLoanDetails($loanID) {
     return $result->fetch_assoc();
 }
 
+// Security check for member access
+$loan = getLoanDetails($loanID);
+if (!$loan) {
+    $_SESSION['error_message'] = "Loan not found";
+    if ($isMemberView) {
+        header("Location: ../member/home-member.php");
+    } else {
+        header("Location: loan.php");
+    }
+    exit();
+}
+
+// If member is viewing, verify they can only see their own loans
+if ($isMemberView && $loan['Member_MemberID'] !== $memberId) {
+    $_SESSION['error_message'] = "You are not authorized to view this loan";
+    header("Location: ../member/home-member.php");
+    exit();
+}
+
+// Rest of the original viewLoan.php code follows...
 // Function to get guarantors for a loan
 function getLoanGuarantors($loanID) {
     $conn = getConnection();
@@ -65,14 +166,6 @@ function getLoanPayments($loanID) {
     $stmt->bind_param("s", $loanID);
     $stmt->execute();
     return $stmt->get_result();
-}
-
-// Get loan details
-$loan = getLoanDetails($loanID);
-if (!$loan) {
-    $_SESSION['error_message'] = "Loan not found";
-    header("Location: loan.php");
-    exit();
 }
 
 // Get guarantors
@@ -318,49 +411,223 @@ if ($isPopup): ?>
         <link rel="stylesheet" href="../../../assets/css/financialManagement.css">
         <link rel="stylesheet" href="../../../assets/css/alert.css">
         <script src="../../../assets/js/alertHandler.js"></script>
-: 8px 15px;
-                border: none;
-                border-radius: 4px;
-                font-size: 14px;
-                cursor: pointer;
-                transition: background-color 0.3s;
-                text-decoration: none;
-                display: inline-block;
-            }
-            .btn-primary {
-                background-color: #1e3c72;
-                color: white;
-            }
-            .btn-primary:hover {
-                background-color: #16305c;
-            }
-            .btn-secondary {
-                background-color: #6c757d;
-                color: white;
-            }
-            .btn-secondary:hover {
-                background-color: #5a6268;
-            }
-            .flex-container {
-                display: flex;
-                flex: 1;
-                overflow: hidden;
-            }
-            .left-column {
-                flex: 1;
-                padding-right: 10px;
-                overflow-y: auto;
-            }
-            .right-column {
-                flex: 1;
-                padding-left: 10px;
-                overflow-y: auto;
-            }
-            .tables-section {
-                flex: 1;
-                overflow-y: auto;
-            }
-        </style>
+        <style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f5f7fa;
+    }
+    .container {
+        padding: 20px;
+    }
+    .loan-detail-container {
+        background-color: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        padding: 20px;
+        max-width: 1000px;
+        margin: 20px auto;
+    }
+    .loan-detail-title {
+        color: #1e3c72;
+        margin-bottom: 20px;
+        text-align: center;
+        font-size: 1.5rem;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+    }
+    .top-info-container {
+        display: flex;
+        flex-direction: column;
+    }
+    .grid-container {
+        display: flex;
+        width: 100%;
+    }
+    .left-info {
+        flex: 1;
+        padding-right: 20px;
+    }
+    .right-info {
+        flex: 1;
+        padding-left: 20px;
+        border-left: 1px solid #eee;
+    }
+    .loan-details-section {
+        margin-bottom: 20px;
+        padding: 15px;
+        background-color: #f9f9f9;
+        border-radius: 5px;
+    }
+    .section-title {
+        font-weight: 600;
+        margin-bottom: 10px;
+        color: #1e3c72;
+        font-size: 1.2rem;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 8px;
+    }
+    .sub-section-title {
+        font-weight: 600;
+        margin-bottom: 10px;
+        color: #1e3c72;
+        font-size: 1.1rem;
+    }
+    .guarantor-block {
+        margin-bottom: 15px;
+        padding: 10px;
+        background-color: #f0f4f9;
+        border-radius: 5px;
+    }
+    .detail-row {
+        display: flex;
+        margin-bottom: 8px;
+    }
+    .detail-label {
+        flex: 1;
+        font-weight: 600;
+        color: #333;
+    }
+    .detail-value {
+        flex: 1.5;
+    }
+    .full-width {
+        width: 100%;
+        margin-top: 15px;
+    }
+    .payment-info-container {
+        width: 100%;
+    }
+    .payment-details {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+    .payment-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 10px;
+    }
+    .payment-item {
+        flex: 1;
+        padding: 0 10px;
+    }
+    .alert {
+        padding: 10px 15px;
+        margin-bottom: 15px;
+        border-radius: 4px;
+    }
+    .progress-container {
+        width: 100%;
+        background-color: #e0e0e0;
+        border-radius: 5px;
+        margin: 10px 0;
+    }
+    .progress-bar {
+        height: 20px;
+        background-color: #4CAF50;
+        border-radius: 5px;
+        text-align: center;
+        color: white;
+        font-weight: bold;
+        font-size: 0.8rem;
+        line-height: 20px;
+    }
+    .status-badge {
+        display: inline-block;
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
+    .status-approved {
+        background-color: #c2f1cd;
+        color: rgb(25, 151, 10);
+    }
+    .status-pending {
+        background-color: #fff8e8;
+        color: #f6a609;
+    }
+    .status-rejected {
+        background-color: #e2bcc0;
+        color: rgb(234, 59, 59);
+    }
+    .table-container {
+        margin-top: 10px;
+        overflow-x: auto;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    th, td {
+        padding: 10px 15px;
+        text-align: left;
+        border-bottom: 1px solid #e0e0e0;
+    }
+    th {
+        background-color: #f5f5f5;
+        font-weight: 600;
+        color: #333;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+    tr:hover {
+        background-color: #f9f9f9;
+    }
+    .btn-container {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 20px;
+    }
+    .btn {
+        padding: 8px 15px;
+        border: none;
+        border-radius: 4px;
+        font-size: 14px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+        text-decoration: none;
+        display: inline-block;
+    }
+    .btn-primary {
+        background-color: #1e3c72;
+        color: white;
+    }
+    .btn-primary:hover {
+        background-color: #16305c;
+    }
+    .btn-secondary {
+        background-color: #6c757d;
+        color: white;
+    }
+    .btn-secondary:hover {
+        background-color: #5a6268;
+    }
+    .flex-container {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+    }
+    .left-column {
+        flex: 1;
+        padding-right: 10px;
+        overflow-y: auto;
+    }
+    .right-column {
+        flex: 1;
+        padding-left: 10px;
+        overflow-y: auto;
+    }
+    .tables-section {
+        flex: 1;
+        overflow-y: auto;
+    }
+</style>
     </head>
     <body>
         <div class="main-container">
@@ -368,9 +635,15 @@ if ($isPopup): ?>
             <div class="container">
                 <div class="header-card">
                     <h1>View Loan</h1>
+                    <?php if ($isMemberView): ?>
+                    <a href="../../member/home-member.php" class="btn-secondary btn">
+                        <i class="fas fa-arrow-left"></i> Back to Dashboard
+                    </a>
+                <?php else: ?>
                     <a href="loan.php" class="btn-secondary btn">
                         <i class="fas fa-arrow-left"></i> Back to Loans
                     </a>
+                <?php endif; ?>
                 </div>
 <?php endif; ?>
 
@@ -554,12 +827,18 @@ if ($isPopup): ?>
                 
                 <?php if (!$isPopup): ?>
                 <div class="btn-container">
-                    <a href="loan.php" class="btn btn-secondary">
-                        <i class="fas fa-arrow-left"></i> Back to Loans
-                    </a>
-                    <a href="editLoan.php?id=<?php echo $loanID; ?>" class="btn btn-primary">
-                        <i class="fas fa-edit"></i> Edit Loan
-                    </a>
+                    <?php if ($isMemberView): ?>
+                        <a href="../../member/home-member.php" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left"></i> Back to Dashboard
+                        </a>
+                    <?php else: ?>
+                        <a href="loan.php" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left"></i> Back to Loans
+                        </a>
+                        <a href="editLoan.php?id=<?php echo $loanID; ?>" class="btn btn-primary">
+                            <i class="fas fa-edit"></i> Edit Loan
+                        </a>
+                    <?php endif; ?>
                 </div>
                 <?php endif; ?>
             </div>

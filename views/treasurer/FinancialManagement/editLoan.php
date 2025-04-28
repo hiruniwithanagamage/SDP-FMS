@@ -98,8 +98,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $dueDate = $_POST['due_date'];
     $status = $_POST['status'];
     
-    // Calculate interest based on loan settings
-    $interestRate = $loanSettings['interest'] / 100; // Convert percentage to decimal
+    // Get current interest rate from Static table
+    $interestQuery = "SELECT interest FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $interestResult = search($interestQuery);
+    $interestRate = 3; // Default value if query fails
+    if ($interestResult && $interestResult->num_rows > 0) {
+        $interestData = $interestResult->fetch_assoc();
+        $interestRate = $interestData['interest'];
+    }
+    $interestRate = $interestRate / 100; // Convert percentage to decimal
     $interestAmount = $amount * $interestRate;
     
     try {

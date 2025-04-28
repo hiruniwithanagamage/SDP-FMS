@@ -184,7 +184,15 @@ if (isset($_POST['apply'])) {
             // Calculate dates and interest
             $issuedDate = date('Y-m-d');
             $dueDate = date('Y-m-d', strtotime('+1 year'));
-            $initialInterest = $amount * 0.03 * 12; // 3% monthly for 12 months
+
+            $interestQuery = "SELECT interest FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+            $interestResult = search($interestQuery);
+            $interestRate = 3; // Default value if query fails
+            if ($interestResult && $interestResult->num_rows > 0) {
+                $interestData = $interestResult->fetch_assoc();
+                $interestRate = $interestData['interest'];
+            }
+            $initialInterest = $amount * ($interestRate / 100) / 12;
 
             // Debug: Print calculated values
             error_log("Loan Details: ID=$newLoanId, Amount=$amount, Interest=$initialInterest");

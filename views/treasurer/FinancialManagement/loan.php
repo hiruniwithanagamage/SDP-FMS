@@ -299,6 +299,38 @@ $isReportApproved = isReportApproved($selectedYear);
                     ?>
                 </div>
             <?php endif; ?>
+
+            <?php
+// Add this after your alerts-container div in loan.php
+
+// Check if interest was just calculated
+if(isset($_SESSION['interest_just_calculated']) && $_SESSION['interest_just_calculated']) {
+    echo '<div class="alert alert-info">';
+    echo '<span class="close" onclick="this.parentElement.style.display=\'none\'">&times;</span>';
+    echo '<i class="fas fa-info-circle"></i> Monthly interest has been calculated for ' . $_SESSION['interest_calculated_count'] . ' active loans.';
+    echo '</div>';
+    
+    // Clear the flag after showing the message
+    unset($_SESSION['interest_just_calculated']);
+}
+// Or show the last calculation for this month
+else {
+    $currentMonth = date('m');
+    $currentYear = date('Y');
+    $currentMonthYear = $currentMonth . '-' . $currentYear;
+    
+    $checkSql = "SELECT * FROM InterestCalculationLog WHERE MonthYear = '$currentMonthYear'";
+    $checkResult = search($checkSql);
+    
+    if ($checkResult->num_rows > 0) {
+        $logData = $checkResult->fetch_assoc();
+        echo '<div class="alert alert-info">';
+        echo '<span onclick="this.parentElement.style.display=\'none\'">&times;</span>';
+        echo '<i class="fas fa-info-circle"></i> Monthly interest was calculated on ' . date('d M Y', strtotime($logData['CalculationDate'])) . ' for ' . $logData['LoansUpdated'] . ' active loans.';
+        echo '</div>';
+    }
+}
+?>
         </div>
 
         <div id="stats-section" class="stats-cards">
