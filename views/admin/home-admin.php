@@ -2,6 +2,14 @@
     session_start();
     require_once "../../config/database.php";
 
+    // Check for success message
+$successMessage = isset($_SESSION['success_message']) ? $_SESSION['success_message'] : null;
+
+// Clear the session message after retrieving it
+if($successMessage) {
+    unset($_SESSION['success_message']);
+}
+
     // Get total members count using prepared statement
     $totalMembers = 0;
     try {
@@ -43,7 +51,7 @@
     }
 
     function getCurrentTerm() {
-        $sql = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
+        $sql = "SELECT year FROM Static WHERE Status='active' ORDER BY year";
         $result = search($sql);
         $row = $result->fetch_assoc();
         return $row['year'] ?? date('Y');
@@ -59,6 +67,8 @@
    <title>Admin Dashboard</title>
    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+   <link rel="stylesheet" href="../../assets/css/alert.css">
+   <script src="../../assets/js/alertHandler.js"></script>
    <style>
 /* Base Layout */
 .home-container {
@@ -289,6 +299,12 @@ h3 {
                     <i class="fas fa-chevron-right"></i>
                 </a>
            </div>
+
+           <?php if($successMessage): ?>
+    <div class="alert alert-success">
+        <?php echo htmlspecialchars($successMessage); ?>
+    </div>
+<?php endif; ?>
 
            <!-- Quick Statistics -->
     <div class="statistics-grid">

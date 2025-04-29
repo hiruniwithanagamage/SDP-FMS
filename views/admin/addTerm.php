@@ -171,6 +171,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_term'])) {
     
     if ($result->num_rows > 0) {
         $_SESSION['error_message'] = "A term for year $year already exists.";
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit();
     } else {
         // Using prepared statement to prevent SQL injection
         $stmt = prepare("INSERT INTO Static (year, monthly_fee, registration_fee, death_welfare, 
@@ -191,6 +193,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_term'])) {
                 }
                 
                 $_SESSION['success_message'] = "New term added successfully! The treasurer can now add financial details.";
+                $_SESSION['new_term_year'] = $year;  // Store the year for the modal
+                $_SESSION['show_officers_modal'] = true;  // Flag to show the modal
             } else {
                 throw new Exception("Database error: " . $stmt->error);
             }
@@ -206,8 +210,28 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_term'])) {
     exit();
 }
 
+// Handle redirection to add officers
+if(isset($_POST['add_officers'])) {
+    // Redirect to the add treasurer and auditor page
+    header("Location: addOfficers.php");
+    exit();
+}
+
+// Handle skipping the officers addition
+if(isset($_POST['skip_officers'])) {
+    // Set a thank you message
+    $_SESSION['success_message'] = "Thank you! You can add treasurer and auditor later from the officers management page.";
+    // Clear the session variables and stay on the same page
+    unset($_SESSION['new_term_year']);
+    unset($_SESSION['show_officers_modal']);
+    header("Location: " . $_SERVER['PHP_SELF']);
+    exit();
+}
+
 // Get all terms for display
 $terms = [];
+$nextYear = date('Y'); // Default to current year
+
 try {
     $termsQuery = "SELECT id, year, status FROM Static ORDER BY year DESC";
     $result = search($termsQuery);
@@ -215,6 +239,14 @@ try {
     if ($result && $result->num_rows > 0) {
         while ($row = $result->fetch_assoc()) {
             $terms[] = $row;
+        }
+        
+        // Find the next year based on existing years
+        if (!empty($terms)) {
+            // Get the highest year
+            $highestYear = intval($terms[0]['year']);
+            // Set next year as highest + 1
+            $nextYear = $highestYear + 1;
         }
     }
 } catch(Exception $e) {
@@ -479,7 +511,7 @@ try {
         }
         
         /* Modal Styles */
-        .modal, .delete-modal {
+        .modal, .delete-modal, .officers-modal {
             display: none;
             position: fixed;
             z-index: 1000;
@@ -491,7 +523,7 @@ try {
             background-color: rgba(0,0,0,0.4);
         }
         
-        .modal-content, .delete-modal-content {
+        .modal-content, .delete-modal-content, .officers-modal-content {
             background-color: white;
             margin: 10% auto;
             padding: 2rem;
@@ -513,12 +545,12 @@ try {
             color: #333;
         }
         
-        .modal h2, .delete-modal h2 {
+        .modal h2, .delete-modal h2, .officers-modal h2 {
             margin-top: 0;
             color: #1e3c72;
         }
         
-        .modal-footer, .delete-modal-buttons {
+        .modal-footer, .delete-modal-buttons, .officers-modal-buttons {
             display: flex;
             justify-content: flex-end;
             gap: 1rem;
@@ -563,6 +595,21 @@ try {
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
+        
+        /* Specific for Officers Modal */
+        .add-officers-btn {
+            background-color: #38a169;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        
+        .add-officers-btn:hover {
+            background-color: #2f855a;
+        }
     </style>
 </head>
 <body>
@@ -606,7 +653,7 @@ try {
                     <form method="POST">
                         <div class="form-group">
                             <label for="year">Year</label>
-                            <input type="number" id="year" name="year" required min="2024" max="2100" value="<?php echo date('Y'); ?>">
+                            <input type="number" id="year" name="year" required min="2024" max="2100" value="<?php echo $nextYear; ?>">
                         </div>
                         
                         <div class="form-group">
@@ -681,6 +728,20 @@ try {
             </div>
         </div>
         
+        <!-- Add Officers Modal -->
+        <div id="officersModal" class="officers-modal">
+            <div class="officers-modal-content">
+                <h2>Add Officers for New Term</h2>
+                <p>Would you like to add a treasurer and auditor for the new term (Year <?php echo isset($_SESSION['new_term_year']) ? $_SESSION['new_term_year'] : ''; ?>)?</p>
+                <form method="POST">
+                    <div class="officers-modal-buttons">
+                        <button type="submit" name="skip_officers" class="cancel-btn">Skip for Now</button>
+                        <button type="submit" name="add_officers" class="add-officers-btn">Yes, Add Officers</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
         <?php include '../templates/footer.php'; ?>
     </div>
     
@@ -706,16 +767,28 @@ try {
             document.getElementById('deleteModal').style.display = 'none';
         }
 
+        // Show the officers modal if needed
+        <?php if(isset($_SESSION['show_officers_modal']) && $_SESSION['show_officers_modal']): ?>
+            document.addEventListener('DOMContentLoaded', function() {
+                document.getElementById('officersModal').style.display = 'block';
+            });
+        <?php endif; ?>
+
         // Close modals when clicking outside
         window.onclick = function(event) {
             const editModal = document.getElementById('editModal');
             const deleteModal = document.getElementById('deleteModal');
+            const officersModal = document.getElementById('officersModal');
 
             if (event.target == editModal) {
                 closeEditModal();
             }
             if (event.target == deleteModal) {
                 closeDeleteModal();
+            }
+            if (event.target == officersModal) {
+                // We don't close the officers modal on outside click
+                // as it's an important decision
             }
         }
 
