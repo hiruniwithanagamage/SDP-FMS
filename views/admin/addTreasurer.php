@@ -2,61 +2,105 @@
 session_start();
 require_once "../../config/database.php";
 
-// Generate new Treasurer ID
-$query = "SELECT TreasurerID FROM Treasurer ORDER BY TreasurerID DESC LIMIT 1";
-$result = search($query);
+// Get the logged-in treasurer's ID from the session
+$treasurerID = isset($_SESSION['TreasurerID']) ? $_SESSION['TreasurerID'] : null;
 
-if ($result && $result->num_rows > 0) {
-    $row = $result->fetch_assoc();
-    if ($row && isset($row['TreasurerID'])) {
-        $lastId = $row['TreasurerID'];
-        // Use preg_replace to extract only numeric part
-        $numericPart = preg_replace('/[^0-9]/', '', $lastId);
-        $newNumericPart = intval($numericPart) + 1;
-        $newTreasurerId = "tres" . $newNumericPart;
-    } else {
-        $newTreasurerId = "tres1";
-    }
-} else {
-    $newTreasurerId = "tres1";
+// Fetch all terms (both active and inactive)
+$allTermsQuery = "SELECT * FROM Static ORDER BY year DESC";
+$allTermsResult = search($allTermsQuery);
+$allTerms = [];
+while ($term = $allTermsResult->fetch_assoc()) {
+    $allTerms[] = $term;
 }
 
-// Check if form is submitted
-if(isset($_POST['add'])) {
-    $name = $_POST['name'];
-    $treasurerId = $newTreasurerId;
+// Identify the current active term
+$currentActiveTerm = null;
+$availableTerms = [];
+foreach ($allTerms as $term) {
+    if ($term['status'] == 'active') {
+        $currentActiveTerm = $term;
+    }
+    $availableTerms[] = $term;
+}
+
+// Generate sequential Treasurer ID 
+$countQuery = "SELECT COUNT(*) as count FROM Treasurer";
+$countResult = search($countQuery);
+$treasurerCount = $countResult->fetch_assoc()['count'] + 1;
+$newTreasurerID = "tres" . str_pad($treasurerCount, 3, "0", STR_PAD_LEFT);
+
+// Handle form submission
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $memberID = $_POST['member_id'];
     $term = $_POST['term'];
-    
+    $treasurerID = $_POST['treasurer_id'];
+
     // Validate inputs
-    if(empty($name)) {
-        $error = "Name is required";
-    } elseif(empty($term)) {
-        $error = "Term is required";
-    } elseif(!is_numeric($term) || intval($term) <= 0) {
-        $error = "Term must be a positive number";
+    $errors = [];
+    
+    if (empty($memberID)) {
+        $errors[] = "Member selection is required";
+    }
+    
+    // Check if member is already a treasurer
+    $checkTreasurerQuery = "SELECT * FROM Treasurer WHERE MemberID = '$memberID'";
+    $checkTreasurerResult = search($checkTreasurerQuery);
+    if ($checkTreasurerResult->num_rows > 0) {
+        $errors[] = "This member is already a treasurer";
+    }
+
+    // Check if there's already an active treasurer for this term
+    $activeTreasurerQuery = "SELECT * FROM Treasurer WHERE Term = '$term' AND isActive = 1";
+    $activeTreasurerResult = search($activeTreasurerQuery);
+    if ($activeTreasurerResult->num_rows > 0) {
+        $activeTreasurer = $activeTreasurerResult->fetch_assoc();
+        $errors[] = "There is already an active treasurer for this term. Please deactivate the existing treasurer first.";
+    }
+
+    // Get member details
+    $memberQuery = "SELECT Name FROM Member WHERE MemberID = '$memberID'";
+    $memberResult = search($memberQuery);
+    
+    if ($memberResult->num_rows == 0) {
+        $errors[] = "Invalid member selected";
     } else {
+        $memberData = $memberResult->fetch_assoc();
+        $name = $memberData['Name'];
+    }
+
+    // Validate term
+    $termQuery = "SELECT * FROM Static WHERE year = '$term'";
+    $termResult = search($termQuery);
+    if ($termResult->num_rows == 0) {
+        $errors[] = "Invalid term selected";
+    }
+
+    // If no errors, proceed with insertion
+    if (empty($errors)) {
+        $insertQuery = "INSERT INTO Treasurer (TreasurerID, Name, Term, isActive, MemberID) 
+                        VALUES ('$treasurerID', '$name', '$term', 1, '$memberID')";
+        
         try {
-            $conn = getConnection();
-            
-            // Use prepared statement for insert
-            $stmt = $conn->prepare("INSERT INTO Treasurer (TreasurerID, Name, Term, isActive) VALUES (?, ?, ?, 1)");
-            $term = intval($term);
-            $stmt->bind_param("ssi", $treasurerId, $name, $term);
-            $stmt->execute();
-            
-            if($stmt->affected_rows > 0) {
-                $_SESSION['success_message'] = "Treasurer added successfully";
-            } else {
-                $error = "Failed to add treasurer";
-            }
-            $stmt->close();
-            
+            iud($insertQuery);
+            $_SESSION['success_message'] = "Treasurer added successfully!";
             header("Location: treasurerDetails.php");
             exit();
         } catch(Exception $e) {
-            $error = "Error adding treasurer: " . $e->getMessage();
+            $_SESSION['error_message'] = "Error adding treasurer: " . $e->getMessage();
         }
+    } else {
+        // Store errors in session to display on page reload
+        $_SESSION['error_messages'] = $errors;
     }
+}
+
+// Fetch existing members for dropdown
+$membersQuery = "SELECT MemberID, Name FROM Member";
+$membersResult = search($membersQuery);
+
+// Check if we have members
+if ($membersResult->num_rows == 0) {
+    $_SESSION['error_message'] = "No members found in the system.";
 }
 ?>
 
@@ -68,140 +112,192 @@ if(isset($_POST['add'])) {
     <title>Add Treasurer</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="../../assets/css/adminDetails.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="../../assets/js/alertHandler.js"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f5f7fa;
+        .select2-container {
+            width: 100% !important;
+            flex: 1;
+            margin-right: 50px;
         }
-
-        .container {
-            max-width: 800px;
-            margin: 2rem auto;
+        .select2-container .select2-selection--single {
+            height: 38px;
+            width: 100%;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__rendered {
+            line-height: 36px;
+            padding-left: 12px;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__arrow {
+            height: 36px;
+        }
+        .form-container {
+            background: white;
             padding: 2rem;
-            background-color: white;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
         }
-
-        h1 {
-            color: #1a237e;
-            margin-bottom: 2rem;
-        }
-
         .form-group {
-            margin-bottom: 1.5rem;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            color: #333;
-            font-weight: bold;
-        }
-
-        input[type="text"],
-        input[type="number"] {
-            width: 100%;
-            padding: 0.8rem;
-            border: 2px solid #e0e0e0;
-            border-radius: 4px;
-            font-size: 1rem;
-            transition: border-color 0.3s ease;
-        }
-
-        input[type="text"]:focus,
-        input[type="number"]:focus {
-            border-color: #1a237e;
-            outline: none;
-        }
-
-        .button-group {
             display: flex;
+            flex-direction: row;
+            align-items: center;
             gap: 1rem;
-            margin-top: 2rem;
-        }
-
-        .btn {
-            padding: 0.8rem 2rem;
-            border: none;
-            border-radius: 4px;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .btn-add {
-            background-color: #1a237e;
-            color: white;
-        }
-
-        .btn-add:hover {
-            background-color: #0d1757;
-        }
-
-        .btn-cancel {
-            background-color: white;
-            color: #1a237e;
-            border: 2px solid #1a237e;
-        }
-
-        .btn-cancel:hover {
-            background-color: #f5f7fa;
-        }
-
-        .alert {
-            padding: 1rem;
-            border-radius: 4px;
             margin-bottom: 1rem;
         }
-
-        .alert-error {
-            background-color: #ffebee;
-            color: #c62828;
-            border: 1px solid #ffcdd2;
+        .form-group label {
+            width: 150px;
+            text-align: right;
+            margin-right: 20px;
+            font-weight: 500;
         }
-
-        .alert-success {
-            background-color: #e8f5e9;
-            color: #2e7d32;
-            border: 1px solid #c8e6c9;
+        .form-group input,
+        .form-group select {
+            flex: 1;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .alert-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+        }
+        .form-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+            margin-top: 20px;
+        }
+        .term-status {
+            margin-left: 10px;
+            font-size: 0.8em;
+            color: #6c757d;
         }
     </style>
 </head>
 <body>
-    <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">
-    <?php include '../templates/navbar-admin.php'; ?>
-    <div class="container">
-        <h1>Treasurer Details</h1>
+    <div class="main-container">
+        <?php include '../templates/navbar-admin.php'; ?>
         
-        <?php if(isset($error)): ?>
-            <div class="alert alert-error"><?php echo $error; ?></div>
-        <?php endif; ?>
+        <div class="container">
+            <?php 
+            // Display error messages
+            if(isset($_SESSION['error_message'])): ?>
+                <div class="alert alert-danger">
+                    <?php 
+                        echo $_SESSION['error_message'];
+                        unset($_SESSION['error_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
 
-        <form method="POST" action="">
-            <div class="form-group">
-                <label for="name">Name</label>
-                <input type="text" id="name" name="name" required>
-            </div>
+            <?php 
+            // Display multiple error messages
+            if(isset($_SESSION['error_messages']) && is_array($_SESSION['error_messages'])): ?>
+                <div class="alert alert-danger">
+                    <?php 
+                        foreach($_SESSION['error_messages'] as $error) {
+                            echo htmlspecialchars($error) . "<br>";
+                        }
+                        unset($_SESSION['error_messages']);
+                    ?>
+                </div>
+            <?php endif; ?>
 
-            <div class="form-group">
-                <label for="treasurer_id">Treasurer ID</label>
-                <input type="text" id="treasurer_id" name="treasurer_id" value="<?php echo $newTreasurerId; ?>" disabled>
-            </div>
+            <div class="form-container">
+                <h2 class="form-title" style="text-align: left; margin-bottom: 2rem; color:#1a237e">Add New Treasurer</h2>
 
-            <div class="form-group">
-                <label for="term">Term</label>
-                <input type="number" id="term" name="term" required>
-            </div>
+                <form method="POST">
+                    <div class="form-group">
+                        <label for="treasurer_id">Treasurer ID</label>
+                        <input type="text" id="treasurer_id" name="treasurer_id" 
+                               value="<?php echo htmlspecialchars($newTreasurerID); ?>" 
+                               readonly>
+                    </div>
 
-            <div class="button-group">
-                <button type="submit" name="add" class="btn btn-add">Add</button>
-                <button type="button" onclick="window.location.href='treasurerDetails.php'" class="btn btn-cancel">Cancel</button>
+                    <div class="form-group">
+                        <label for="member_id">Member Name</label>
+                        <select id="member_id" name="member_id" class="member-select" required>
+                            <option value="">Select Member</option>
+                            <?php 
+                            if($membersResult && $membersResult->num_rows > 0):
+                                // Reset the pointer to the beginning
+                                $membersResult->data_seek(0);
+                                while($member = $membersResult->fetch_assoc()): 
+                            ?>
+                                <option value="<?php echo htmlspecialchars($member['MemberID']); ?>">
+                                    <?php echo htmlspecialchars($member['Name'] . " (ID: " . $member['MemberID'] . ")"); ?>
+                                </option>
+                            <?php 
+                                endwhile; 
+                            endif;
+                            ?>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="term">Term</label>
+                        <select id="term" name="term" required>
+                            <?php if($currentActiveTerm): ?>
+                                <option value="<?php echo htmlspecialchars($currentActiveTerm['year']); ?>">
+                                    <?php 
+                                    echo htmlspecialchars($currentActiveTerm['year']); 
+                                    echo ' <span class="term-status">(Active)</span>';
+                                    $termCheckQuery = "SELECT Name FROM Treasurer WHERE Term = '{$currentActiveTerm['year']}' AND isActive = 1";
+                                    $termCheckResult = search($termCheckQuery);
+                                    if ($termCheckResult->num_rows > 0) {
+                                        $existingTreasurer = $termCheckResult->fetch_assoc();
+                                    }
+                                    ?>
+                                </option>
+                            <?php endif; ?>
+
+                            <?php foreach($availableTerms as $termOption): 
+                                // Skip the current active term as it's already added
+                                if($currentActiveTerm && $termOption['year'] == $currentActiveTerm['year']) continue;
+                            ?>
+                                <option value="<?php echo htmlspecialchars($termOption['year']); ?>">
+                                    <?php 
+                                    echo htmlspecialchars($termOption['year']); 
+                                    echo $termOption['status'] == 'active' ? ' <span class="term-status">(Active)</span>' : ' <span class="term-status">(Inactive)</span>';
+                                    ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <div class="form-footer">
+                        <a href="treasurerDetails.php" class="cancel-btn">Cancel</a>
+                        <button type="submit" class="save-btn" 
+                                <?php echo (count($availableTerms) == 0) ? 'disabled' : ''; ?>>
+                            Add Treasurer
+                        </button>
+                    </div>
+                </form>
             </div>
-        </form>
+        </div>
     </div>
-    </div>
+
+    <script>
+    $(document).ready(function() {
+        // Initialize Select2 for member dropdown
+        $('.member-select').select2({
+            placeholder: 'Select or search for a member...',
+            allowClear: true,
+            width: '100%'
+        });
+    });
+    </script>
 </body>
 </html>

@@ -119,9 +119,11 @@ if ($membersResult->num_rows == 0) {
     <link rel="stylesheet" href="../../assets/css/alert.css">
     <script src="../../assets/js/alertHandler.js"></script>
     <style>
+        
         .select2-container {
             width: 100% !important;
             flex: 1;
+            margin-right: 50px;
         }
         .select2-container .select2-selection--single {
             height: 38px;
@@ -217,7 +219,7 @@ if ($membersResult->num_rows == 0) {
             <?php endif; ?>
 
             <div class="form-container">
-                <h2 class="form-title" style="text-align: right; margin-bottom: 2rem;">Add New Auditor</h2>
+                <h2 class="form-title" style="text-align: left; margin-bottom: 2rem; color:#1a237e;">Add New Auditor</h2>
 
                 <form method="POST">
                     <div class="form-group">
