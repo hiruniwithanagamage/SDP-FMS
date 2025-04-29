@@ -563,7 +563,7 @@ $currentTerm = getCurrentTerm();
                                 <i class="fas fa-users"></i>
                                 Member Reports
                             </div>
-                            <div class="dropdown-item" onclick="window.location.href='audit_reports.php'">
+                            <div class="dropdown-item" onclick="window.location.href='dashboard.php'">
                                 <i class="fas fa-clipboard-check"></i>
                                 Financial Reports
                             </div>

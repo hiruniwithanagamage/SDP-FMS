@@ -1,0 +1,1131 @@
+<?php
+session_start();
+require_once "../../config/database.php";
+
+// Check if user is logged in and has treasurer role
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'treasurer') {
+    header("Location: ../login.php");
+    exit();
+}
+
+// Function to get total balance
+function getTotalBalance() {
+    $sql = "SELECT 
+        (SELECT COALESCE(SUM(Amount), 0) FROM Payment) - 
+        (SELECT COALESCE(SUM(Amount), 0) FROM Expenses) as total_balance";
+    $result = search($sql);
+    $row = $result->fetch_assoc();
+    return $row['total_balance'] ?? 0;
+}
+
+// Function to get income vs expenses by month
+function getIncomeVsExpensesByMonth($year) {
+    $data = [];
+    
+    // Get monthly income
+    $sql = "SELECT 
+                MONTH(Date) as month,
+                SUM(Amount) as amount
+            FROM Payment
+            WHERE YEAR(Date) = ?
+            GROUP BY MONTH(Date)
+            ORDER BY MONTH(Date)";
+    
+    $stmt = prepare($sql);
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    // Initialize all months with 0
+    for ($i = 1; $i <= 12; $i++) {
+        $data['income'][$i] = 0;
+        $data['expenses'][$i] = 0;
+    }
+    
+    while ($row = $result->fetch_assoc()) {
+        $data['income'][$row['month']] = $row['amount'];
+    }
+    
+    // Get monthly expenses
+    $sql = "SELECT 
+                MONTH(Date) as month,
+                SUM(Amount) as amount
+            FROM Expenses
+            WHERE YEAR(Date) = ?
+            GROUP BY MONTH(Date)
+            ORDER BY MONTH(Date)";
+    
+    $stmt = prepare($sql);
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    while ($row = $result->fetch_assoc()) {
+        $data['expenses'][$row['month']] = $row['amount'];
+    }
+    
+    return $data;
+}
+
+// Function to get membership fee statistics
+function getMembershipFeeStats($year) {
+    $sql = "SELECT 
+                COUNT(*) as total_fees,
+                SUM(CASE WHEN IsPaid = 'Yes' THEN 1 ELSE 0 END) as paid_fees,
+                SUM(CASE WHEN IsPaid = 'No' THEN 1 ELSE 0 END) as unpaid_fees,
+                SUM(CASE WHEN IsPaid = 'Yes' THEN Amount ELSE 0 END) as collected_amount,
+                SUM(CASE WHEN IsPaid = 'No' THEN Amount ELSE 0 END) as outstanding_amount
+            FROM MembershipFee
+            WHERE Term = ?";
+    
+    $stmt = prepare($sql);
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($row = $result->fetch_assoc()) {
+        return $row;
+    }
+    
+    return [
+        'total_fees' => 0,
+        'paid_fees' => 0,
+        'unpaid_fees' => 0,
+        'collected_amount' => 0,
+        'outstanding_amount' => 0
+    ];
+}
+
+// Function to get loan statistics
+function getLoanStats($year) {
+    $sql = "SELECT 
+                COUNT(*) as total_loans,
+                SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END) as approved_loans,
+                SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END) as pending_loans,
+                SUM(CASE WHEN Status = 'rejected' THEN 1 ELSE 0 END) as rejected_loans,
+                SUM(CASE WHEN Status = 'approved' THEN Amount ELSE 0 END) as approved_amount,
+                SUM(CASE WHEN Status = 'approved' THEN Paid_Loan ELSE 0 END) as paid_amount,
+                SUM(CASE WHEN Status = 'approved' THEN Remain_Loan ELSE 0 END) as remaining_amount,
+                SUM(CASE WHEN Status = 'approved' THEN Paid_Interest ELSE 0 END) as paid_interest,
+                SUM(CASE WHEN Status = 'approved' THEN Remain_Interest ELSE 0 END) as remaining_interest
+            FROM Loan
+            WHERE YEAR(Issued_Date) = ? OR Status = 'pending'";
+    
+    $stmt = prepare($sql);
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($row = $result->fetch_assoc()) {
+        return $row;
+    }
+    
+    return [
+        'total_loans' => 0,
+        'approved_loans' => 0,
+        'pending_loans' => 0,
+        'rejected_loans' => 0,
+        'approved_amount' => 0,
+        'paid_amount' => 0,
+        'remaining_amount' => 0,
+        'paid_interest' => 0,
+        'remaining_interest' => 0
+    ];
+}
+
+// Function to get expense categories
+function getExpenseCategories($year) {
+    $sql = "SELECT 
+                Category,
+                SUM(Amount) as amount
+            FROM Expenses
+            WHERE YEAR(Date) = ?
+            GROUP BY Category
+            ORDER BY amount DESC";
+    
+    $stmt = prepare($sql);
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    return $stmt->get_result();
+}
+
+// Function to get payment methods
+function getPaymentMethods($year) {
+    $sql = "SELECT 
+                Method as method,
+                SUM(Amount) as amount
+            FROM Payment
+            WHERE YEAR(Date) = ?
+            GROUP BY Method
+            ORDER BY amount DESC";
+    
+    $stmt = prepare($sql);
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    return $stmt->get_result();
+}
+
+// Function to get member statistics
+function getMemberStats() {
+    $sql = "SELECT 
+                COUNT(*) as total_members,
+                SUM(CASE WHEN Status = 'active' THEN 1 ELSE 0 END) as active_members,
+                SUM(CASE WHEN Status != 'active' THEN 1 ELSE 0 END) as inactive_members,
+                AVG(TIMESTAMPDIFF(YEAR, Joined_Date, CURDATE())) as avg_membership_years
+            FROM Member";
+    
+    $result = search($sql);
+    
+    if ($row = $result->fetch_assoc()) {
+        return $row;
+    }
+    
+    return [
+        'total_members' => 0,
+        'active_members' => 0,
+        'inactive_members' => 0,
+        'avg_membership_years' => 0
+    ];
+}
+
+// Get current active term
+function getCurrentTerm() {
+    $sql = "SELECT year FROM Static WHERE status = 'active'";
+    $result = search($sql);
+    $row = $result->fetch_assoc();
+    return $row['year'] ?? date('Y');
+}
+
+// Get selected year from URL parameter, or use current term
+$selectedYear = isset($_GET['year']) ? (int)$_GET['year'] : getCurrentTerm();
+
+// Get data for all charts
+$totalBalance = getTotalBalance();
+$monthlyData = getIncomeVsExpensesByMonth($selectedYear);
+$membershipStats = getMembershipFeeStats($selectedYear);
+$loanStats = getLoanStats($selectedYear);
+$expenseCategories = getExpenseCategories($selectedYear);
+$paymentMethods = getPaymentMethods($selectedYear);
+$memberStats = getMemberStats();
+
+// Calculate percentage for membership fees
+$membershipCollectionRate = 0;
+if ($membershipStats['total_fees'] > 0) {
+    $membershipCollectionRate = ($membershipStats['paid_fees'] / $membershipStats['total_fees']) * 100;
+}
+
+// Calculate percentage for loan repayment
+$loanRepaymentRate = 0;
+if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
+    $loanRepaymentRate = ($loanStats['paid_amount'] / ($loanStats['paid_amount'] + $loanStats['remaining_amount'])) * 100;
+}
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Financial Analytics Dashboard - FMS</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .dashboard-container {
+            min-height: 100vh;
+            background: #f5f7fa;
+            padding: 2rem;
+        }
+
+        .content {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .page-header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 35px 0 2rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .year-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 8px 15px;
+            border-radius: 50px;
+            backdrop-filter: blur(5px);
+        }
+
+        .year-selector select {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 5px 10px;
+            border-radius: 5px;
+            color: white;
+            outline: none;
+        }
+
+        .year-selector select option {
+            background: #2a5298;
+            color: white;
+        }
+
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .stat-icon {
+            font-size: 1.8rem;
+            color: #1e3c72;
+            background: #f0f5ff;
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #666;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #1e3c72;
+            margin: 5px 0;
+        }
+
+        .stat-change {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.85rem;
+        }
+
+        .stat-change.positive {
+            color: #28a745;
+        }
+
+        .stat-change.negative {
+            color: #dc3545;
+        }
+
+        .dashboard-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        @media (max-width: 992px) {
+            .dashboard-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .chart-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .chart-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #1e3c72;
+        }
+
+        .chart-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chart-action {
+            background: #f0f5ff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: #1e3c72;
+            font-size: 0.9rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.2s ease;
+        }
+
+        .chart-action:hover {
+            background: #e0ebff;
+        }
+
+        .chart-container {
+            height: 300px;
+            position: relative;
+        }
+
+        .progress-container {
+            margin: 15px 0;
+        }
+
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background: #e9ecef;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #1e3c72;
+            border-radius: 5px;
+        }
+
+        .data-grid {
+            margin-top: 15px;
+        }
+
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .data-row:last-child {
+            border-bottom: none;
+        }
+
+        .data-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .data-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .data-value {
+            font-weight: 600;
+        }
+
+        .dashboard-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .refresh-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .refresh-button {
+            background: transparent;
+            border: none;
+            color: #1e3c72;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .refresh-button:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <?php include '../templates/navbar-treasurer.php'; ?>
+        <div class="content">
+            <div class="page-header">
+                <h1>Financial Analytics Dashboard</h1>
+                <form action="" method="GET" class="year-selector">
+                    <span>Year:</span>
+                    <select name="year" onchange="this.form.submit()">
+                        <?php
+                        // Generate options for the last 5 years
+                        $currentYear = (int)date('Y');
+                        for ($i = 0; $i < 5; $i++) {
+                            $year = $currentYear - $i;
+                            $selected = ($year == $selectedYear) ? 'selected' : '';
+                            echo "<option value=\"$year\" $selected>$year</option>";
+                        }
+                        ?>
+                    </select>
+                </form>
+            </div>
+
+            <!-- Stats Row -->
+            <div class="dashboard-stats">
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-icon">
+                            <i class="fas fa-money-bill-wave"></i>
+                        </div>
+                        <div class="stat-label">Total Balance</div>
+                    </div>
+                    <div class="stat-value">Rs.<?php echo number_format($totalBalance, 2); ?></div>
+                    <div class="stat-change positive">
+                        <i class="fas fa-arrow-up"></i> Current Term
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-icon">
+                            <i class="fas fa-hand-holding-usd"></i>
+                        </div>
+                        <div class="stat-label">Membership Collection</div>
+                    </div>
+                    <div class="stat-value"><?php echo number_format($membershipCollectionRate, 1); ?>%</div>
+                    <div class="stat-change <?php echo $membershipCollectionRate >= 75 ? 'positive' : 'negative'; ?>">
+                        <i class="fas fa-<?php echo $membershipCollectionRate >= 75 ? 'check' : 'exclamation-triangle'; ?>"></i>
+                        <?php echo $membershipStats['paid_fees']; ?> of <?php echo $membershipStats['total_fees']; ?> paid
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-icon">
+                            <i class="fas fa-landmark"></i>
+                        </div>
+                        <div class="stat-label">Loan Repayment</div>
+                    </div>
+                    <div class="stat-value"><?php echo number_format($loanRepaymentRate, 1); ?>%</div>
+                    <div class="stat-change <?php echo $loanRepaymentRate >= 60 ? 'positive' : 'negative'; ?>">
+                        <i class="fas fa-<?php echo $loanRepaymentRate >= 60 ? 'check' : 'exclamation-triangle'; ?>"></i>
+                        Rs.<?php echo number_format($loanStats['paid_amount'], 2); ?> paid
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="stat-label">Members</div>
+                    </div>
+                    <div class="stat-value"><?php echo $memberStats['total_members']; ?></div>
+                    <div class="stat-change positive">
+                        <i class="fas fa-user-check"></i>
+                        <?php echo $memberStats['active_members']; ?> active
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row 1 -->
+            <div class="dashboard-row">
+                <!-- Income vs Expenses Chart -->
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div class="chart-title">Income vs Expenses (<?php echo $selectedYear; ?>)</div>
+                        <div class="chart-actions">
+                            <button class="chart-action" onclick="downloadChart('incomeExpensesChart', 'Income_vs_Expenses')">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="incomeExpensesChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Membership Fee Status -->
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div class="chart-title">Membership Fee Status (<?php echo $selectedYear; ?>)</div>
+                        <div class="chart-actions">
+                            <button class="chart-action" onclick="downloadChart('membershipChart', 'Membership_Fee_Status')">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="membershipChart"></canvas>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span>Collection Progress</span>
+                            <span><?php echo number_format($membershipCollectionRate, 1); ?>%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: <?php echo $membershipCollectionRate; ?>%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row 2 -->
+            <div class="dashboard-row">
+                <!-- Expense Categories -->
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div class="chart-title">Expense Categories (<?php echo $selectedYear; ?>)</div>
+                        <div class="chart-actions">
+                            <button class="chart-action" onclick="downloadChart('expenseCategoriesChart', 'Expense_Categories')">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="expenseCategoriesChart"></canvas>
+                    </div>
+                    <div class="data-grid">
+                        <?php
+                        // Generate category colors
+                        $colors = ['#1e3c72', '#2a5298', '#3a67b8', '#4a7bd8', '#5a8ff8', '#6aa3ff', '#7ab7ff', '#8acbff', '#9adfff', '#aaf3ff'];
+                        $colorIndex = 0;
+                        $expenseCategories->data_seek(0); // Reset result pointer
+                        while ($category = $expenseCategories->fetch_assoc()) {
+                            $color = $colors[$colorIndex % count($colors)];
+                            echo '<div class="data-row">';
+                            echo '<div class="data-label"><div class="data-color" style="background: ' . $color . '"></div>' . htmlspecialchars($category['Category']) . '</div>';
+                            echo '<div class="data-value">Rs.' . number_format($category['amount'], 2) . '</div>';
+                            echo '</div>';
+                            $colorIndex++;
+                        }
+                        ?>
+                    </div>
+                </div>
+
+                <!-- Loan Status -->
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div class="chart-title">Loan Status (<?php echo $selectedYear; ?>)</div>
+                        <div class="chart-actions">
+                            <button class="chart-action" onclick="downloadChart('loanStatusChart', 'Loan_Status')">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="loanStatusChart"></canvas>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span>Repayment Progress</span>
+                            <span><?php echo number_format($loanRepaymentRate, 1); ?>%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: <?php echo $loanRepaymentRate; ?>%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row 3 -->
+            <div class="dashboard-row">
+                <!-- Payment Methods -->
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div class="chart-title">Payment Methods (<?php echo $selectedYear; ?>)</div>
+                        <div class="chart-actions">
+                            <button class="chart-action" onclick="downloadChart('paymentMethodsChart', 'Payment_Methods')">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="paymentMethodsChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Member Statistics -->
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div class="chart-title">Member Statistics</div>
+                        <div class="chart-actions">
+                            <button class="chart-action" onclick="downloadChart('memberStatsChart', 'Member_Statistics')">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="memberStatsChart"></canvas>
+                    </div>
+                    <div class="data-grid">
+                        <div class="data-row">
+                            <div class="data-label"><div class="data-color" style="background: #1e3c72"></div>Total Members</div>
+                            <div class="data-value"><?php echo $memberStats['total_members']; ?></div>
+                        </div>
+                        <div class="data-row">
+                            <div class="data-label"><div class="data-color" style="background: #2a5298"></div>Active Members</div>
+                            <div class="data-value"><?php echo $memberStats['active_members']; ?></div>
+                        </div>
+                        <div class="data-row">
+                            <div class="data-label"><div class="data-color" style="background: #3a67b8"></div>Inactive Members</div>
+                            <div class="data-value"><?php echo $memberStats['inactive_members']; ?></div>
+                        </div>
+                        <div class="data-row">
+                            <div class="data-label"><div class="data-color" style="background: #4a7bd8"></div>Avg. Membership Years</div>
+                            <div class="data-value"><?php echo number_format($memberStats['avg_membership_years'], 1); ?> years</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard Footer -->
+            <div class="dashboard-footer">
+                <div>Report generated for financial year <?php echo $selectedYear; ?></div>
+                <div class="refresh-info">
+                    Last refreshed: <?php echo date('M d, Y H:i'); ?>
+                    <button class="refresh-button" onclick="window.location.reload()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+        <?php include '../templates/footer.php'; ?>
+    </div>
+
+    <script>
+        // Chart.js configuration
+        Chart.defaults.font.family = "'Segoe UI', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif";
+        Chart.defaults.font.size = 12;
+        Chart.defaults.color = '#666';
+        
+        // Chart colors
+        const colors = {
+            blue: '#1e3c72',
+            lightBlue: '#2a5298',
+            green: '#28a745',
+            red: '#dc3545',
+            yellow: '#ffc107',
+            purple: '#6f42c1',
+            orange: '#fd7e14',
+            cyan: '#17a2b8',
+            gray: '#6c757d'
+        };
+
+        // Monthly labels
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        
+        // Initialize charts when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            createIncomeExpensesChart();
+            createMembershipChart();
+            createExpenseCategoriesChart();
+            createLoanStatusChart();
+            createPaymentMethodsChart();
+            createMemberStatsChart();
+        });
+        
+        // Create Income vs Expenses Chart
+        function createIncomeExpensesChart() {
+            const ctx = document.getElementById('incomeExpensesChart').getContext('2d');
+            
+            // Get data from PHP
+            const incomeData = <?php echo json_encode(array_values($monthlyData['income'])); ?>;
+            const expensesData = <?php echo json_encode(array_values($monthlyData['expenses'])); ?>;
+            
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: months,
+                    datasets: [
+                        {
+                            label: 'Income',
+                            data: incomeData,
+                            backgroundColor: colors.green,
+                            borderColor: colors.green,
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Expenses',
+                            data: expensesData,
+                            backgroundColor: colors.red,
+                            borderColor: colors.red,
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Amount (Rs.)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': Rs.' + context.raw.toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Create Membership Fee Status Chart
+        function createMembershipChart() {
+            const ctx = document.getElementById('membershipChart').getContext('2d');
+            
+            // Get data from PHP
+            const paidFees = <?php echo $membershipStats['paid_fees']; ?>;
+            const unpaidFees = <?php echo $membershipStats['unpaid_fees']; ?>;
+            
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Paid', 'Unpaid'],
+                    datasets: [{
+                        data: [paidFees, unpaidFees],
+                        backgroundColor: [colors.green, colors.red],
+                        borderColor: ['#fff', '#fff'],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '65%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const total = paidFees + unpaidFees;
+                                    const percentage = Math.round((context.raw / total) * 100);
+                                    return context.label + ': ' + context.raw + ' (' + percentage + '%)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Create Expense Categories Chart
+        function createExpenseCategoriesChart() {
+            const ctx = document.getElementById('expenseCategoriesChart').getContext('2d');
+            
+            // Get data from PHP
+            const categories = [];
+            const amounts = [];
+            const backgroundColors = [];
+            
+            <?php
+            // Generate category data for chart
+            $expenseCategories->data_seek(0); // Reset result pointer
+            $colorIndex = 0;
+            while ($category = $expenseCategories->fetch_assoc()) {
+                echo "categories.push('" . addslashes($category['Category']) . "');\n";
+                echo "amounts.push(" . $category['amount'] . ");\n";
+                echo "backgroundColors.push('" . $colors[$colorIndex % count($colors)] . "');\n";
+                $colorIndex++;
+            }
+            ?>
+            
+            new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: categories,
+                    datasets: [{
+                        data: amounts,
+                        backgroundColor: backgroundColors,
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = Math.round((context.raw / total) * 100);
+                                    return context.label + ': Rs.' + context.raw.toLocaleString() + ' (' + percentage + '%)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Create Loan Status Chart
+        function createLoanStatusChart() {
+            const ctx = document.getElementById('loanStatusChart').getContext('2d');
+            
+            // Get data from PHP
+            const paidAmount = <?php echo $loanStats['paid_amount']; ?>;
+            const remainingAmount = <?php echo $loanStats['remaining_amount']; ?>;
+            const paidInterest = <?php echo $loanStats['paid_interest']; ?>;
+            const remainingInterest = <?php echo $loanStats['remaining_interest']; ?>;
+            
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Loan Principal', 'Interest'],
+                    datasets: [
+                        {
+                            label: 'Paid',
+                            data: [paidAmount, paidInterest],
+                            backgroundColor: colors.green,
+                            borderColor: colors.green,
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Remaining',
+                            data: [remainingAmount, remainingInterest],
+                            backgroundColor: colors.orange,
+                            borderColor: colors.orange,
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            stacked: false
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Amount (Rs.)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': Rs.' + context.raw.toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Create Payment Methods Chart
+        function createPaymentMethodsChart() {
+            const ctx = document.getElementById('paymentMethodsChart').getContext('2d');
+            
+            // Get data from PHP
+            const methods = [];
+            const amounts = [];
+            const backgroundColors = [colors.blue, colors.purple, colors.cyan, colors.orange];
+            
+            <?php
+            // Generate payment method data for chart
+            $methodIndex = 0;
+            while ($method = $paymentMethods->fetch_assoc()) {
+                echo "methods.push('" . addslashes($method['method']) . "');\n";
+                echo "amounts.push(" . $method['amount'] . ");\n";
+                $methodIndex++;
+            }
+            ?>
+            
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: methods,
+                    datasets: [{
+                        data: amounts,
+                        backgroundColor: backgroundColors.slice(0, methods.length),
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '50%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = Math.round((context.raw / total) * 100);
+                                    return context.label + ': Rs.' + context.raw.toLocaleString() + ' (' + percentage + '%)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Create Member Stats Chart
+        function createMemberStatsChart() {
+            const ctx = document.getElementById('memberStatsChart').getContext('2d');
+            
+            // Get data from PHP
+            const activeMembers = <?php echo $memberStats['active_members']; ?>;
+            const inactiveMembers = <?php echo $memberStats['inactive_members']; ?>;
+            
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Member Status'],
+                    datasets: [
+                        {
+                            label: 'Active Members',
+                            data: [activeMembers],
+                            backgroundColor: colors.blue,
+                            borderColor: colors.blue,
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Inactive Members',
+                            data: [inactiveMembers],
+                            backgroundColor: colors.gray,
+                            borderColor: colors.gray,
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            stacked: true
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of Members'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const total = activeMembers + inactiveMembers;
+                                    const percentage = Math.round((context.raw / total) * 100);
+                                    return context.dataset.label + ': ' + context.raw + ' (' + percentage + '%)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Function to download chart as image
+        function downloadChart(chartId, filename) {
+            const canvas = document.getElementById(chartId);
+            const image = canvas.toDataURL('image/png');
+            
+            // Create temporary link and trigger download
+            const link = document.createElement('a');
+            link.href = image;
+            link.download = filename + '_' + <?php echo $selectedYear; ?> + '.png';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
