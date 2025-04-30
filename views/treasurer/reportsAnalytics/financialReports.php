@@ -61,7 +61,7 @@
 
     // Function to get total income for current term
     function getTotalIncome($term) {
-        $sql = "SELECT COALESCE(SUM(Amount), 0) as total FROM Payment WHERE YEAR(Date) = ?";
+        $sql = "SELECT COALESCE(SUM(Amount), 0) as total FROM Payment WHERE Term = ?";
         $stmt = prepare($sql);
         $stmt->bind_param("i", $term);
         $stmt->execute();
@@ -72,7 +72,7 @@
 
     // Function to get total expenses for current term
     function getTotalExpenses($term) {
-        $sql = "SELECT COALESCE(SUM(Amount), 0) as total FROM Expenses WHERE YEAR(Date) = ?";
+        $sql = "SELECT COALESCE(SUM(Amount), 0) as total FROM Expenses WHERE Term = ?";
         $stmt = prepare($sql);
         $stmt->bind_param("i", $term);
         $stmt->execute();
@@ -83,12 +83,12 @@
 
     // Function to get previous year's balance
     function getPreviousYearBalance($term) {
-        $prevYear = $term - 1;
+        $prevTerm = $term - 1;
         $sql = "SELECT Net_Income as balance FROM FinancialReportVersions 
                 WHERE Term = ? AND Status = 'approved' 
                 ORDER BY ReportID DESC LIMIT 1";
         $stmt = prepare($sql);
-        $stmt->bind_param("i", $prevYear);
+        $stmt->bind_param("i", $prevTerm);
         $stmt->execute();
         $result = $stmt->get_result();
         
@@ -97,12 +97,12 @@
             return floatval($row['balance']);
         }
         
-        // If no previous year report, calculate from payments and expenses
+        // If no previous term report, calculate from payments and expenses
         $sql = "SELECT 
-                (SELECT COALESCE(SUM(Amount), 0) FROM Payment WHERE YEAR(Date) <= ?) - 
-                (SELECT COALESCE(SUM(Amount), 0) FROM Expenses WHERE YEAR(Date) <= ?) as balance";
+                (SELECT COALESCE(SUM(Amount), 0) FROM Payment WHERE Term <= ?) - 
+                (SELECT COALESCE(SUM(Amount), 0) FROM Expenses WHERE Term <= ?) as balance";
         $stmt = prepare($sql);
-        $stmt->bind_param("ii", $prevYear, $prevYear);
+        $stmt->bind_param("ii", $prevTerm, $prevTerm);
         $stmt->execute();
         $result = $stmt->get_result();
         $row = $result->fetch_assoc();
@@ -116,7 +116,7 @@
                 Payment_Type as type,
                 COALESCE(SUM(Amount), 0) as amount
                 FROM Payment 
-                WHERE YEAR(Date) = ?
+                WHERE Term = ?
                 GROUP BY Payment_Type";
         $stmt = prepare($sql);
         $stmt->bind_param("i", $term);
@@ -130,7 +130,7 @@
                 Category as type,
                 COALESCE(SUM(Amount), 0) as amount
                 FROM Expenses 
-                WHERE YEAR(Date) = ?
+                WHERE Term = ?
                 GROUP BY Category";
         $stmt = prepare($sql);
         $stmt->bind_param("i", $term);
@@ -545,6 +545,96 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        /* Responsive table styles */
+    .responsive-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 1.5rem;
+    }
+
+    .responsive-table th, 
+    .responsive-table td {
+        padding: 1rem;
+        text-align: left;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .responsive-table th {
+        background-color: #f8f9fa;
+        font-weight: 600;
+    }
+
+    /* Responsive styles for tablets and smaller devices */
+    @media screen and (max-width: 992px) {
+        /* Convert table to a card-like layout */
+        .responsive-table, 
+        .responsive-table thead, 
+        .responsive-table tbody, 
+        .responsive-table th, 
+        .responsive-table td, 
+        .responsive-table tr {
+            display: block;
+        }
+        
+        /* Hide table headers (but not display: none, for accessibility) */
+        .responsive-table thead tr {
+            position: absolute;
+            top: -9999px;
+            left: -9999px;
+        }
+        
+        .responsive-table tr {
+            border: 1px solid #e0e0e0;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            background-color: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+        
+        .responsive-table td {
+            /* Make like a "row" */
+            border: none;
+            border-bottom: 1px solid #eee;
+            position: relative;
+            padding-left: 50%;
+            white-space: normal;
+            text-align: right;
+        }
+        
+        .responsive-table td:last-child {
+            border-bottom: 0;
+        }
+        
+        .responsive-table td:before {
+            /* Add a label */
+            content: attr(data-label);
+            position: absolute;
+            left: 1rem;
+            width: 45%;
+            padding-right: 10px;
+            white-space: nowrap;
+            text-align: left;
+            font-weight: 600;
+            color: #1e3c72;
+        }
+    }
+
+    /* Further adjustments for very small screens */
+    @media screen and (max-width: 480px) {
+        .responsive-table td {
+            padding-left: 1rem;
+            padding-top: 2.5rem;
+            text-align: left;
+        }
+        
+        .responsive-table td:before {
+            position: absolute;
+            top: 0.6rem;
+            left: 1rem;
+            width: 100%;
+        }
+}
     </style>
 </head>
 <body>
@@ -697,7 +787,8 @@
                     <h2 class="card-title">Report History</h2>
                 </div>
 
-                <table>
+                <!-- Replace your existing table with this responsive table -->
+                <table class="responsive-table">
                     <thead>
                         <tr>
                             <th>Term</th>
@@ -714,14 +805,14 @@
                         <?php if ($reportHistory->num_rows > 0): ?>
                             <?php while ($report = $reportHistory->fetch_assoc()): ?>
                                 <tr>
-                                    <td><?php echo $report['Term']; ?></td>
-                                    <td><?php echo $report['ReportID']; ?></td>
-                                    <td><?php echo $report['VersionID']; ?></td>
-                                    <td><?php echo date('M d, Y', strtotime($report['Date'])); ?></td>
-                                    <td>Rs. <?php echo number_format($report['Total_Income'], 2); ?></td>
-                                    <td>Rs. <?php echo number_format($report['Total_Expenses'], 2); ?></td>
-                                    <td>Rs. <?php echo number_format($report['Net_Income'], 2); ?></td>
-                                    <td>
+                                    <td data-label="Term"><?php echo $report['Term']; ?></td>
+                                    <td data-label="Report ID"><?php echo $report['ReportID']; ?></td>
+                                    <td data-label="Version"><?php echo $report['VersionID']; ?></td>
+                                    <td data-label="Date"><?php echo date('M d, Y', strtotime($report['Date'])); ?></td>
+                                    <td data-label="Total Income">Rs. <?php echo number_format($report['Total_Income'], 2); ?></td>
+                                    <td data-label="Total Expenses">Rs. <?php echo number_format($report['Total_Expenses'], 2); ?></td>
+                                    <td data-label="Net Income">Rs. <?php echo number_format($report['Net_Income'], 2); ?></td>
+                                    <td data-label="Status">
                                         <span class="status-badge status-<?php echo strtolower($report['Status']); ?>">
                                             <?php echo ucfirst($report['Status']); ?>
                                         </span>
