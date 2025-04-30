@@ -2,11 +2,40 @@
 session_start();
 require_once "../../config/database.php";
 
+// Get current term
+function getCurrentTerm() {
+    $sql = "SELECT year FROM Static WHERE status = 'active'";
+    $result = search($sql);
+    $row = $result->fetch_assoc();
+    return $row['year'] ?? date('Y');
+}
+
 // Function to get total balance
 function getTotalBalance() {
-    $sql = "SELECT 
-        (SELECT COALESCE(SUM(Amount), 0) FROM Payment) - 
-        (SELECT COALESCE(SUM(Amount), 0) FROM Expenses) as total_balance";
+    $currentTerm = getCurrentTerm();
+    $previousTerm = $currentTerm - 1;
+    
+    // First check if there's an approved financial report for the previous term
+    $checkReportSql = "SELECT Net_Income FROM FinancialReportVersions 
+                       WHERE Term = '$previousTerm' AND Status = 'approved'";
+    $reportResult = search($checkReportSql);
+    
+    // If there's no approved report for previous term, don't subtract anything
+    if ($reportResult->num_rows == 0) {
+        $sql = "SELECT 
+            (SELECT COALESCE(SUM(Amount), 0) FROM Payment WHERE Term = '$currentTerm') - 
+            (SELECT COALESCE(SUM(Amount), 0) FROM Expenses WHERE Term = '$currentTerm') 
+            as total_balance";
+    } else {
+        // If there is an approved report, include it in the calculation
+        $sql = "SELECT 
+            (SELECT COALESCE(SUM(Amount), 0) FROM Payment WHERE Term = '$currentTerm') - 
+            (SELECT COALESCE(SUM(Amount), 0) FROM Expenses WHERE Term = '$currentTerm') -
+            (SELECT COALESCE(Net_Income, 0) FROM FinancialReportVersions 
+            WHERE Term = '$previousTerm' AND Status = 'approved') 
+            as total_balance";
+    }
+    
     $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['total_balance'] ?? 0;
@@ -70,14 +99,6 @@ function getPaymentStatusCounts() {
     
     $result = search($sql);
     return $result->fetch_assoc();
-}
-
-// Get current term
-function getCurrentTerm() {
-    $sql = "SELECT year FROM Static WHERE status = 'active'";
-    $result = search($sql);
-    $row = $result->fetch_assoc();
-    return $row['year'] ?? date('Y');
 }
 
 // Fetch all the data

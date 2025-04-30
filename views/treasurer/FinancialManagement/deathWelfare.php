@@ -10,8 +10,8 @@ function getCurrentTerm() {
     return $row['year'] ?? date('Y');
 }
 
-// Get death welfare details for all members
-function getMemberWelfare($year) {
+// Get death welfare details for all members - Updated to filter by term instead of year
+function getMemberWelfare($term) {
     $sql = "SELECT 
             m.MemberID,
             m.Name,
@@ -52,15 +52,15 @@ function getMemberWelfare($year) {
             ) as statuses
         FROM Member m
         LEFT JOIN DeathWelfare dw ON m.MemberID = dw.Member_MemberID 
-            AND YEAR(dw.Date) = $year
+            AND dw.Term = $term
         GROUP BY m.MemberID, m.Name
         ORDER BY m.Name";
     
     return search($sql);
 }
 
-// Get all welfare claims for the year
-function getWelfareClaims($year) {
+// Get all welfare claims for the term - Updated to filter by term instead of year
+function getWelfareClaims($term) {
     $sql = "SELECT 
             dw.WelfareID,
             dw.Amount,
@@ -71,35 +71,43 @@ function getWelfareClaims($year) {
             m.Name
         FROM DeathWelfare dw
         INNER JOIN Member m ON dw.Member_MemberID = m.MemberID 
-        WHERE YEAR(dw.Date) = $year
+        WHERE dw.Term = $term
         ORDER BY dw.Date DESC";
     
     return search($sql);
 }
 
-// Get welfare summary for the year
-function getWelfareSummary($year) {
+// Get welfare summary for the term - Updated to filter by term and calculate total_amount properly
+function getWelfareSummary($term) {
     $sql = "SELECT 
             COUNT(*) as total_claims,
-            SUM(Amount) as total_amount,
             COUNT(CASE WHEN Status = 'approved' THEN 1 END) as approved_claims,
             COUNT(CASE WHEN Status = 'pending' THEN 1 END) as pending_claims,
-            COUNT(CASE WHEN Status = 'rejected' THEN 1 END) as rejected_claims
+            COUNT(CASE WHEN Status = 'rejected' THEN 1 END) as rejected_claims,
+            (SELECT COALESCE(SUM(e.Amount), 0) 
+             FROM Expenses e 
+             INNER JOIN DeathWelfare dw ON e.ExpenseID = dw.Expense_ExpenseID 
+             WHERE dw.Term = $term AND dw.Status = 'approved'
+            ) as total_amount
         FROM DeathWelfare
-        WHERE YEAR(Date) = $year";
+        WHERE Term = $term";
     
     return search($sql);
 }
 
-// Get monthly welfare statistics
-function getMonthlyWelfareStats($year) {
+// Get monthly welfare statistics - Updated to filter by term instead of year
+function getMonthlyWelfareStats($term) {
     $sql = "SELECT 
             MONTH(Date) as month,
             COUNT(*) as claims_filed,
-            SUM(Amount) as total_amount,
-            COUNT(CASE WHEN Status = 'approved' THEN 1 END) as approved_claims
+            COUNT(CASE WHEN Status = 'approved' THEN 1 END) as approved_claims,
+            (SELECT COALESCE(SUM(e.Amount), 0) 
+             FROM Expenses e 
+             INNER JOIN DeathWelfare dw ON e.ExpenseID = dw.Expense_ExpenseID 
+             WHERE MONTH(dw.Date) = month AND dw.Term = $term AND dw.Status = 'approved'
+            ) as total_amount
         FROM DeathWelfare
-        WHERE YEAR(Date) = $year
+        WHERE Term = $term
         GROUP BY MONTH(Date)
         ORDER BY month";
     
@@ -122,7 +130,7 @@ function getAllTerms() {
 // Handle Delete Welfare Claim
 if(isset($_POST['delete_welfare'])) {
     $welfareId = $_POST['welfare_id'];
-    $currentYear = isset($_GET['year']) ? $_GET['year'] : (isset($_POST['year']) ? $_POST['year'] : getCurrentTerm());
+    $currentTerm = isset($_GET['year']) ? $_GET['year'] : (isset($_POST['year']) ? $_POST['year'] : getCurrentTerm());
     
     try {
         $conn = getConnection();
@@ -166,12 +174,12 @@ if(isset($_POST['delete_welfare'])) {
     }
     
     // Redirect back to welfare page
-    header("Location: deathWelfare.php?year=" . $currentYear);
+    header("Location: deathWelfare.php?year=" . $currentTerm);
     exit();
 }
 
 // Function to check if financial report for a specific term is approved
-function isReportApproved($year) {
+function isReportApproved($term) {
     $conn = getConnection();
     $stmt = $conn->prepare("
         SELECT Status 
@@ -181,7 +189,7 @@ function isReportApproved($year) {
         LIMIT 1
     ");
     
-    $stmt->bind_param("i", $year);
+    $stmt->bind_param("i", $term);
     $stmt->execute();
     $result = $stmt->get_result();
     
@@ -194,11 +202,11 @@ function isReportApproved($year) {
 }
 
 $currentTerm = getCurrentTerm();
-$selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
+$selectedTerm = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
 $allTerms = getAllTerms();
 
-$welfareStats = getWelfareSummary($selectedYear);
-$monthlyStats = getMonthlyWelfareStats($selectedYear);
+$welfareStats = getWelfareSummary($selectedTerm);
+$monthlyStats = getMonthlyWelfareStats($selectedTerm);
 $welfareAmount = getWelfareAmount();
 
 $months = [
@@ -208,8 +216,7 @@ $months = [
     10 => 'October', 11 => 'November', 12 => 'December'
 ];
 
-$selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
-$isReportApproved = isReportApproved($selectedYear);
+$isReportApproved = isReportApproved($selectedTerm);
 
 ?>
 
@@ -348,7 +355,7 @@ $isReportApproved = isReportApproved($selectedYear);
             <h1>Death Welfare Details</h1>
             <select class="filter-select" onchange="updateFilters()" id="yearSelect">
                 <?php while($term = $allTerms->fetch_assoc()): ?>
-                    <option value="<?php echo $term['year']; ?>" <?php echo $term['year'] == $selectedYear ? 'selected' : ''; ?>>
+                    <option value="<?php echo $term['year']; ?>" <?php echo $term['year'] == $selectedTerm ? 'selected' : ''; ?>>
                         Year <?php echo $term['year']; ?>
                     </option>
                 <?php endwhile; ?>
@@ -383,7 +390,7 @@ $isReportApproved = isReportApproved($selectedYear);
             <div class="stat-card">
                 <i class="fas fa-file-medical"></i>
                 <div class="stat-number"><?php echo $stats['total_claims'] ?? 0; ?></div>
-                <div class="stat-label">Total Claims (<?php echo $selectedYear; ?>)</div>
+                <div class="stat-label">Total Claims (<?php echo $selectedTerm; ?>)</div>
             </div>
             <div class="stat-card">
                 <i class="fas fa-check-circle"></i>
@@ -428,7 +435,7 @@ $isReportApproved = isReportApproved($selectedYear);
                     </thead>
                     <tbody>
                     <?php 
-                    $welfareClaims = getWelfareClaims($selectedYear);
+                    $welfareClaims = getWelfareClaims($selectedTerm);
                     
                     while($row = $welfareClaims->fetch_assoc()): 
                         // Set the status badge class based on welfare status
@@ -571,23 +578,8 @@ $isReportApproved = isReportApproved($selectedYear);
         function updateFilters() {
             const year = document.getElementById('yearSelect').value;
         
-            // Don't redirect, just update via fetch
-            fetch(`deathWelfare.php?year=${year}`)
-                .then(response => response.text())
-                .then(html => {
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, 'text/html');
-                    
-                    // Update stats cards
-                    document.getElementById('stats-section').innerHTML = doc.getElementById('stats-section').innerHTML;
-                    
-                    // Update members view
-                    document.getElementById('members-view').innerHTML = doc.getElementById('members-view').innerHTML;
-                    
-                    // Update months view
-                    document.getElementById('months-view').innerHTML = doc.getElementById('months-view').innerHTML;
-                })
-                .catch(error => console.error('Error:', error));
+            // Redirect to the page with the selected term
+            window.location.href = `deathWelfare.php?year=${year}`;
         }
 
         function showTab(tab) {

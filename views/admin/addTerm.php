@@ -16,7 +16,7 @@ if (isset($_POST['activate'])) {
     try {
         // Check current status of the term
         $checkStatusStmt = prepare("SELECT status FROM Static WHERE id = ?");
-        $checkStatusStmt->bind_param("i", $id);
+        $checkStatusStmt->bind_param("s", $id);
         $checkStatusStmt->execute();
         $result = $checkStatusStmt->get_result();
         $row = $result->fetch_assoc();
@@ -34,7 +34,7 @@ if (isset($_POST['activate'])) {
             } else {
                 // Deactivate the selected term
                 $deactivateThisStmt = prepare("UPDATE Static SET status = 'inactive' WHERE id = ?");
-                $deactivateThisStmt->bind_param("i", $id);
+                $deactivateThisStmt->bind_param("s", $id);
                 $deactivateThisStmt->execute();
                 $_SESSION['success_message'] = "Term deactivated successfully!";
             }
@@ -45,7 +45,7 @@ if (isset($_POST['activate'])) {
             
             // Then, activate the selected term
             $activateStmt = prepare("UPDATE Static SET status = 'active' WHERE id = ?");
-            $activateStmt->bind_param("i", $id);
+            $activateStmt->bind_param("s", $id);
             $activateStmt->execute();
             
             $_SESSION['success_message'] = "Term activated successfully!";
@@ -67,7 +67,7 @@ if(isset($_POST['update'])) {
     try {
         // Check if the year already exists for another term
         $checkYearStmt = prepare("SELECT id FROM Static WHERE year = ? AND id != ?");
-        $checkYearStmt->bind_param("ii", $year, $id);
+        $checkYearStmt->bind_param("is", $year, $id);
         $checkYearStmt->execute();
         $result = $checkYearStmt->get_result();
         
@@ -76,13 +76,13 @@ if(isset($_POST['update'])) {
         } else {
             $updateQuery = "UPDATE Static SET year = ?, status = ? WHERE id = ?";
             $stmt = prepare($updateQuery);
-            $stmt->bind_param("isi", $year, $status, $id);
+            $stmt->bind_param("iss", $year, $status, $id);
             $stmt->execute();
             
             // If setting this term to active, deactivate other terms
             if ($status === 'active') {
                 $deactivateStmt = prepare("UPDATE Static SET status = 'inactive' WHERE id != ? AND status = 'active'");
-                $deactivateStmt->bind_param("i", $id);
+                $deactivateStmt->bind_param("s", $id);
                 $deactivateStmt->execute();
             }
             
@@ -105,7 +105,7 @@ if(isset($_POST['delete'])) {
         // This is a simplified check - you might need to expand this to check all related tables
         $checkRelatedRecordsQuery = "SELECT COUNT(*) AS count FROM MembershipFee WHERE Term IN (SELECT year FROM Static WHERE id = ?)";
         $checkStmt = prepare($checkRelatedRecordsQuery);
-        $checkStmt->bind_param("i", $id);
+        $checkStmt->bind_param("s", $id);
         $checkStmt->execute();
         $result = $checkStmt->get_result();
         $row = $result->fetch_assoc();
@@ -116,7 +116,7 @@ if(isset($_POST['delete'])) {
             // Check if this is the active term and if it's the only term
             $checkActiveQuery = "SELECT status FROM Static WHERE id = ?";
             $activeStmt = prepare($checkActiveQuery);
-            $activeStmt->bind_param("i", $id);
+            $activeStmt->bind_param("s", $id);
             $activeStmt->execute();
             $activeResult = $activeStmt->get_result();
             $activeRow = $activeResult->fetch_assoc();
@@ -134,7 +134,7 @@ if(isset($_POST['delete'])) {
             } else {
                 $deleteQuery = "DELETE FROM Static WHERE id = ?";
                 $deleteStmt = prepare($deleteQuery);
-                $deleteStmt->bind_param("i", $id);
+                $deleteStmt->bind_param("s", $id);
                 $deleteStmt->execute();
                 
                 $_SESSION['success_message'] = "Term deleted successfully!";
@@ -153,6 +153,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_term'])) {
     $year = $_POST['year'];
     $status = $_POST['status']; 
     
+    $termId = "STAT" . $year;
+
     // Set default values for fields that will be updated by treasurer later
     $monthly_fee = 0;
     $registration_fee = 0;
@@ -164,8 +166,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_term'])) {
     $max_loan_limit = 0;
     
     // Check if the year already exists
-    $checkYearStmt = prepare("SELECT id FROM Static WHERE year = ?");
-    $checkYearStmt->bind_param("i", $year);
+    $checkYearStmt = prepare("SELECT id FROM Static WHERE year = ? OR id = ?");
+    $checkYearStmt->bind_param("is", $year, $termId);
     $checkYearStmt->execute();
     $result = $checkYearStmt->get_result();
     
@@ -175,11 +177,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_term'])) {
         exit();
     } else {
         // Using prepared statement to prevent SQL injection
-        $stmt = prepare("INSERT INTO Static (year, monthly_fee, registration_fee, death_welfare, 
+        $stmt = prepare("INSERT INTO Static (id, year, monthly_fee, registration_fee, death_welfare, 
                         late_fine, absent_fine, rules_violation_fine, interest, max_loan_limit, status) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         
-        $stmt->bind_param("iddddddids", $year, $monthly_fee, $registration_fee, $death_welfare,
+        $stmt->bind_param("siddddddids", $termId, $year, $monthly_fee, $registration_fee, $death_welfare,
                        $late_fine, $absent_fine, $rules_violation_fine, $interest, $max_loan_limit, $status);
         
         try {

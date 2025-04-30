@@ -114,7 +114,76 @@ if (isset($_POST['updateReportStatus'])) {
                 $updatePreviousVersionsStmt = prepare($updatePreviousVersionsSql);
                 $updatePreviousVersionsStmt->bind_param("ss", $reportId, $versionId);
                 $updatePreviousVersionsStmt->execute();
+                
+                // Extract the term year from the report ID
+                $termYear = $selectedTerm;
+                
+                // 1. Set current active term to inactive
+                $setInactiveSql = "UPDATE Static SET status = 'inactive' WHERE year = ? AND status = 'active'";
+                $setInactiveStmt = prepare($setInactiveSql);
+                $setInactiveStmt->bind_param("i", $termYear);
+                $setInactiveStmt->execute();
+                
+                // 2. Check if next term exists
+                $nextTermYear = $termYear + 1;
+                $nextTermStaticId = "STAT" . $nextTermYear;
+
+                $checkNextTermSql = "SELECT * FROM Static WHERE year = ?";
+                $checkNextTermStmt = prepare($checkNextTermSql);
+                $checkNextTermStmt->bind_param("i", $nextTermYear);
+                $checkNextTermStmt->execute();
+                $checkNextTermResult = $checkNextTermStmt->get_result();
+                
+                if ($checkNextTermResult->num_rows > 0) {
+                    // 3. Next term exists, set it to active
+                    $setNextTermActiveSql = "UPDATE Static SET status = 'active' WHERE year = ?";
+                    $setNextTermActiveStmt = prepare($setNextTermActiveSql);
+                    $setNextTermActiveStmt->bind_param("i", $nextTermYear);
+                    $setNextTermActiveStmt->execute();
+                } else {
+                    // 4. Next term doesn't exist, create it and set to active
+                    // First, get the current term's settings to copy them
+                    $getCurrentTermSettingsSql = "SELECT monthly_fee, registration_fee, death_welfare, late_fine, 
+                                                absent_fine, rules_violation_fine, interest, max_loan_limit 
+                                                FROM Static WHERE year = ?";
+                    $getCurrentTermSettingsStmt = prepare($getCurrentTermSettingsSql);
+                    $getCurrentTermSettingsStmt->bind_param("i", $termYear);
+                    $getCurrentTermSettingsStmt->execute();
+                    $result = $getCurrentTermSettingsStmt->get_result();
+                    
+                    if ($result->num_rows > 0) {
+                        $currentTermSettings = $result->fetch_assoc();
+                        
+                        // Now insert the new term with the same settings
+                        $insertNextTermSql = "INSERT INTO Static (id, year, monthly_fee, registration_fee, death_welfare, 
+                                            late_fine, absent_fine, rules_violation_fine, interest, max_loan_limit, status) 
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')";
+                        $insertNextTermStmt = prepare($insertNextTermSql);
+                        $insertNextTermStmt->bind_param("sidddddddd", 
+                            $nextTermStaticId,
+                            $nextTermYear, 
+                            $currentTermSettings['monthly_fee'], 
+                            $currentTermSettings['registration_fee'], 
+                            $currentTermSettings['death_welfare'], 
+                            $currentTermSettings['late_fine'], 
+                            $currentTermSettings['absent_fine'], 
+                            $currentTermSettings['rules_violation_fine'], 
+                            $currentTermSettings['interest'], 
+                            $currentTermSettings['max_loan_limit']
+                        );
+                        $insertNextTermStmt->execute();
+                    } else {
+                        // If we couldn't find the current term's settings, use default values
+                        $insertNextTermSql = "INSERT INTO Static (year, monthly_fee, registration_fee, death_welfare, 
+                                            late_fine, absent_fine, rules_violation_fine, interest, max_loan_limit, status) 
+                                            VALUES (?, 100.00, 5000.00, 10000.00, 50.00, 1010.00, 20.00, 3.00, 20000.00, 'active')";
+                        $insertNextTermStmt = prepare($insertNextTermSql);
+                        $insertNextTermStmt->bind_param("i", $nextTermYear);
+                        $insertNextTermStmt->execute();
+                    }
+                }
             }
+            
             $message = "Report " . ($status === 'approved' ? 'approved' : 'sent back for changes') . " successfully";
         } else {
             $message = "Error updating report status: " . $stmt->error;
