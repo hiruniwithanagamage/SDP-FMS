@@ -1,239 +1,250 @@
 <?php
-session_start();
-require_once "../../../config/database.php";
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+    session_start();
+    require_once "../../../config/database.php";
 
-// Get current term
-function getCurrentTerm() {
-    $sql = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    // Check if user is logged in and is a treasurer
+    if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'treasurer') {
+        header("Location: ../../../loginProcess.php");
+        exit();
+    }
+
+    $userID = $_SESSION['user_id'];
+    // Get the treasurer ID from the User table
+    $sql = "SELECT Treasurer_TreasurerID FROM User WHERE UserId = ?";
     $stmt = prepare($sql);
+    $stmt->bind_param("s", $userID);
     $stmt->execute();
     $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
-    return $row['year'] ?? date('Y');
-}
-
-// Get death welfare details for all members - Using prepared statements
-function getMemberWelfare($term) {
-    $sql = "SELECT 
-            m.MemberID,
-            m.Name,
-            GROUP_CONCAT(
-                CASE 
-                    WHEN dw.Status = 'approved' 
-                    THEN dw.WelfareID
-                    ELSE NULL 
-                END
-            ) as welfare_ids,
-            GROUP_CONCAT(
-                CASE 
-                    WHEN dw.Status = 'approved' 
-                    THEN dw.Amount
-                    ELSE NULL 
-                END
-            ) as amounts,
-            GROUP_CONCAT(
-                CASE 
-                    WHEN dw.Status = 'approved' 
-                    THEN dw.Date
-                    ELSE NULL 
-                END
-            ) as dates,
-            GROUP_CONCAT(
-                CASE 
-                    WHEN dw.Status = 'approved' 
-                    THEN dw.Relationship
-                    ELSE NULL 
-                END
-            ) as relationships,
-            GROUP_CONCAT(
-                CASE 
-                    WHEN dw.Status = 'approved' 
-                    THEN dw.Status
-                    ELSE NULL 
-                END
-            ) as statuses
-        FROM Member m
-        LEFT JOIN DeathWelfare dw ON m.MemberID = dw.Member_MemberID 
-            AND dw.Term = ?
-        GROUP BY m.MemberID, m.Name
-        ORDER BY m.Name";
-    
-    $stmt = prepare($sql);
-    $stmt->bind_param("i", $term);
-    $stmt->execute();
-    return $stmt->get_result();
-}
-
-// Get all welfare claims for the term - Using prepared statements
-function getWelfareClaims($term) {
-    $sql = "SELECT 
-            dw.WelfareID,
-            dw.Amount,
-            dw.Date,
-            dw.Relationship,
-            dw.Status,
-            dw.Member_MemberID,
-            m.Name
-        FROM DeathWelfare dw
-        INNER JOIN Member m ON dw.Member_MemberID = m.MemberID 
-        WHERE dw.Term = ?
-        ORDER BY dw.Date DESC";
-    
-    $stmt = prepare($sql);
-    $stmt->bind_param("i", $term);
-    $stmt->execute();
-    return $stmt->get_result();
-}
-
-// Get welfare summary for the term - Using prepared statements
-function getWelfareSummary($term) {
-    $sql = "SELECT 
-            COUNT(*) as total_claims,
-            COUNT(CASE WHEN Status = 'approved' THEN 1 END) as approved_claims,
-            COUNT(CASE WHEN Status = 'pending' THEN 1 END) as pending_claims,
-            COUNT(CASE WHEN Status = 'rejected' THEN 1 END) as rejected_claims,
-            (SELECT COALESCE(SUM(e.Amount), 0) 
-             FROM Expenses e 
-             INNER JOIN DeathWelfare dw ON e.ExpenseID = dw.Expense_ExpenseID 
-             WHERE dw.Term = ? AND dw.Status = 'approved'
-            ) as total_amount
-        FROM DeathWelfare
-        WHERE Term = ?";
-    
-    $stmt = prepare($sql);
-    $stmt->bind_param("ii", $term, $term);
-    $stmt->execute();
-    return $stmt->get_result();
-}
-
-// Get monthly welfare statistics - Using prepared statements
-function getMonthlyWelfareStats($term) {
-    $sql = "SELECT 
-            MONTH(Date) as month,
-            COUNT(*) as claims_filed,
-            COUNT(CASE WHEN Status = 'approved' THEN 1 END) as approved_claims,
-            (SELECT COALESCE(SUM(e.Amount), 0) 
-             FROM Expenses e 
-             INNER JOIN DeathWelfare dw ON e.ExpenseID = dw.Expense_ExpenseID 
-             WHERE MONTH(dw.Date) = MONTH(d.Date) AND dw.Term = ? AND dw.Status = 'approved'
-            ) as total_amount
-        FROM DeathWelfare d
-        WHERE Term = ?
-        GROUP BY MONTH(Date)
-        ORDER BY month";
-    
-    $stmt = prepare($sql);
-    $stmt->bind_param("ii", $term, $term);
-    $stmt->execute();
-    return $stmt->get_result();
-}
-
-// Get welfare amount from Static table - Using prepared statements
-function getWelfareAmount() {
-    $sql = "SELECT death_welfare FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
-    $stmt = prepare($sql);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    return $result->fetch_assoc();
-}
-
-// Get all available terms/years - Using prepared statements
-function getAllTerms() {
-    $sql = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
-    $stmt = prepare($sql);
-    $stmt->execute();
-    return $stmt->get_result();
-}
-
-// Function to check if financial report for a specific term is approved - Using prepared statements
-function isReportApproved($term) {
-    $sql = "SELECT Status 
-            FROM FinancialReportVersions 
-            WHERE Term = ? 
-            ORDER BY Date DESC 
-            LIMIT 1";
-    
-    $stmt = prepare($sql);
-    $stmt->bind_param("i", $term);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
     if ($result->num_rows > 0) {
         $row = $result->fetch_assoc();
-        return ($row['Status'] === 'approved');
+        $treasurerID = $row['Treasurer_TreasurerID'];
+    } else {
+        // If no treasurer ID is found, use the user ID as a fallback
+        $treasurerID = $userID;
+        // You might want to log an error here as this shouldn't happen
     }
-    
-    return false; // If no report exists, it's not approved
-}
+    $currentYear = date('Y');
+    $message = '';
+    $alertType = '';
 
-// Handle Delete Welfare Claim
-if(isset($_POST['delete_welfare'])) {
-    $welfareId = $_POST['welfare_id'];
-    $currentTerm = isset($_GET['year']) ? $_GET['year'] : (isset($_POST['year']) ? $_POST['year'] : getCurrentTerm());
-    
-    try {
-        $conn = getConnection();
-        
-        // Start transaction
-        $conn->begin_transaction();
-        
-        // Check if this welfare has linked expenses
-        $checkQuery = "SELECT * FROM DeathWelfare WHERE WelfareID = ? AND Expense_ExpenseID IS NOT NULL";
-        $stmt = $conn->prepare($checkQuery);
-        $stmt->bind_param("s", $welfareId);
+    // Get selected year from URL parameter or default to current term
+    $selectedYear = isset($_GET['year']) ? (int)$_GET['year'] : null;
+
+    // Function to get all years from Static table
+    function getAllYears() {
+        $sql = "SELECT year FROM Static ORDER BY year DESC";
+        $result = search($sql);
+        $years = [];
+        while ($row = $result->fetch_assoc()) {
+            $years[] = $row['year'];
+        }
+        return $years;
+    }
+
+    // Get current term from Static table
+    function getCurrentTerm() {
+        $sql = "SELECT year FROM Static WHERE status ='active'";
+        $result = search($sql);
+        $row = $result->fetch_assoc();
+        return $row['year'] ?? date('Y');
+    }
+
+    $years = getAllYears();
+    $currentTerm = getCurrentTerm();
+
+    // If no year is selected, default to the current term
+    if ($selectedYear === null) {
+        $selectedYear = $currentTerm;
+    }
+
+    // Function to get total income for current term
+    function getTotalIncome($term) {
+        $sql = "SELECT COALESCE(SUM(Amount), 0) as total FROM Payment WHERE YEAR(Date) = ?";
+        $stmt = prepare($sql);
+        $stmt->bind_param("i", $term);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
+        return floatval($row['total']);
+    }
+
+    // Function to get total expenses for current term
+    function getTotalExpenses($term) {
+        $sql = "SELECT COALESCE(SUM(Amount), 0) as total FROM Expenses WHERE YEAR(Date) = ?";
+        $stmt = prepare($sql);
+        $stmt->bind_param("i", $term);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
+        return floatval($row['total']);
+    }
+
+    // Function to get previous year's balance
+    function getPreviousYearBalance($term) {
+        $prevYear = $term - 1;
+        $sql = "SELECT Net_Income as balance FROM FinancialReportVersions 
+                WHERE Term = ? AND Status = 'approved' 
+                ORDER BY ReportID DESC LIMIT 1";
+        $stmt = prepare($sql);
+        $stmt->bind_param("i", $prevYear);
         $stmt->execute();
         $result = $stmt->get_result();
         
-        // If there are expenses linked to this welfare claim, handle them
-        if($result->num_rows > 0) {
+        if ($result->num_rows > 0) {
             $row = $result->fetch_assoc();
-            $expenseId = $row['Expense_ExpenseID'];
-            
-            // Delete the expense record
-            $deleteExpenseQuery = "DELETE FROM Expenses WHERE ExpenseID = ?";
-            $stmt = $conn->prepare($deleteExpenseQuery);
-            $stmt->bind_param("s", $expenseId);
-            $stmt->execute();
+            return floatval($row['balance']);
         }
         
-        // Delete the welfare record
-        $deleteWelfareQuery = "DELETE FROM DeathWelfare WHERE WelfareID = ?";
-        $stmt = $conn->prepare($deleteWelfareQuery);
-        $stmt->bind_param("s", $welfareId);
+        // If no previous year report, calculate from payments and expenses
+        $sql = "SELECT 
+                (SELECT COALESCE(SUM(Amount), 0) FROM Payment WHERE YEAR(Date) <= ?) - 
+                (SELECT COALESCE(SUM(Amount), 0) FROM Expenses WHERE YEAR(Date) <= ?) as balance";
+        $stmt = prepare($sql);
+        $stmt->bind_param("ii", $prevYear, $prevYear);
         $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
         
-        // Commit transaction
-        $conn->commit();
-        
-        $_SESSION['success_message'] = "Welfare claim #$welfareId was successfully deleted.";
-    } catch(Exception $e) {
-        // Rollback on error
-        $conn->rollback();
-        $_SESSION['error_message'] = "Error deleting welfare claim: " . $e->getMessage();
+        return floatval($row['balance']);
     }
-    
-    // Redirect back to welfare page
-    header("Location: deathWelfare.php?year=" . $currentTerm);
-    exit();
-}
 
-// Set up page variables
-$currentTerm = getCurrentTerm();
-$selectedTerm = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
-$allTerms = getAllTerms();
+    // Function to get income breakdown by type
+    function getIncomeBreakdown($term) {
+        $sql = "SELECT 
+                Payment_Type as type,
+                COALESCE(SUM(Amount), 0) as amount
+                FROM Payment 
+                WHERE YEAR(Date) = ?
+                GROUP BY Payment_Type";
+        $stmt = prepare($sql);
+        $stmt->bind_param("i", $term);
+        $stmt->execute();
+        return $stmt->get_result();
+    }
 
-$welfareStats = getWelfareSummary($selectedTerm);
-$monthlyStats = getMonthlyWelfareStats($selectedTerm);
-$welfareAmount = getWelfareAmount();
+    // Function to get expense breakdown by category
+    function getExpenseBreakdown($term) {
+        $sql = "SELECT 
+                Category as type,
+                COALESCE(SUM(Amount), 0) as amount
+                FROM Expenses 
+                WHERE YEAR(Date) = ?
+                GROUP BY Category";
+        $stmt = prepare($sql);
+        $stmt->bind_param("i", $term);
+        $stmt->execute();
+        return $stmt->get_result();
+    }
 
-$months = [
-    1 => 'January', 2 => 'February', 3 => 'March', 
-    4 => 'April', 5 => 'May', 6 => 'June',
-    7 => 'July', 8 => 'August', 9 => 'September',
-    10 => 'October', 11 => 'November', 12 => 'December'
-];
+    // Function to check if a report already exists for this term
+    function reportExists($term, $treasurerID) {
+        $sql = "SELECT * FROM FinancialReportVersions 
+                WHERE Term = ? AND Treasurer_TreasurerID = ? 
+                ORDER BY VersionID DESC LIMIT 1";
+        $stmt = prepare($sql);
+        $stmt->bind_param("is", $term, $treasurerID);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows > 0) {
+            return $result->fetch_assoc();
+        }
+        
+        return false;
+    }
 
-$isReportApproved = isReportApproved($selectedTerm);
+    // Function to get all reports for this treasurer
+    function getReportHistory($treasurerID, $selectedYear = null) {
+        if ($selectedYear) {
+            $sql = "SELECT * FROM FinancialReportVersions 
+                    WHERE Treasurer_TreasurerID = ? AND Term = ?
+                    ORDER BY Term DESC, VersionID DESC";
+            $stmt = prepare($sql);
+            $stmt->bind_param("si", $treasurerID, $selectedYear);
+        } else {
+            $sql = "SELECT * FROM FinancialReportVersions 
+                    WHERE Treasurer_TreasurerID = ? 
+                    ORDER BY Term DESC, VersionID DESC";
+            $stmt = prepare($sql);
+            $stmt->bind_param("s", $treasurerID);
+        }
+        $stmt->execute();
+        return $stmt->get_result();
+    }
+
+    // Process form submission to generate a new report
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
+        $term = $_POST['term'];
+        $previousYearBalance = getPreviousYearBalance($term);
+        $totalIncome = getTotalIncome($term);
+        $totalExpenses = getTotalExpenses($term);
+        $netIncome = $previousYearBalance + $totalIncome - $totalExpenses;
+
+        // Check if a report already exists for this term
+        $existingReport = reportExists($term, $treasurerID);
+
+        if ($existingReport) {
+            $reportID = $existingReport['ReportID'];
+            $newVersionID = intval($existingReport['VersionID']) + 1;
+        } else {
+            // Generate a new report ID
+            $sql = "SELECT MAX(SUBSTRING(ReportID, 4)) as max_id FROM FinancialReportVersions WHERE ReportID LIKE 'RPT%'";
+            $result = search($sql);
+            $row = $result->fetch_assoc();
+            $max_id = $row['max_id'] ? intval($row['max_id']) : 0;
+            $next_id = $max_id + 1;
+            $reportID = 'RPT' . str_pad($next_id, 3, '0', STR_PAD_LEFT);
+            $newVersionID = 1;
+        }
+
+        // Generate a new version
+        $currentDate = new DateTime();
+        $date = $currentDate->format('Y-m-d');
+        $status = 'pending';
+        
+        $sql = "INSERT INTO FinancialReportVersions 
+            (ReportID, VersionID, Term, Date, Previous_Year_Balance, 
+            Total_Income, Total_Expenses, Net_Income, Status, Treasurer_TreasurerID, Comments) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    date_default_timezone_set('Asia/Colombo');
+
+    $comments = "Generated on " . date('Y-m-d H:i:s');
+
+    $stmt = prepare($sql);
+    $stmt->bind_param("sissddddsss", $reportID, $newVersionID, $term, $date, 
+                    $previousYearBalance, $totalIncome, $totalExpenses, 
+                    $netIncome, $status, $treasurerID, $comments);
+
+        if ($stmt->execute()) {
+            $message = "Year-end financial report for $term has been generated and submitted for approval.";
+            $alertType = "success";
+        } else {
+            $message = "Error generating report: " . $stmt->error;
+            $alertType = "danger";
+        }
+    }
+
+    // Calculate report data for the selected year
+    $previousYearBalance = getPreviousYearBalance($selectedYear);
+    $totalIncome = getTotalIncome($selectedYear);
+    $totalExpenses = getTotalExpenses($selectedYear);
+    $netIncome = $previousYearBalance + $totalIncome - $totalExpenses;
+
+    // Get income and expense breakdowns
+    $incomeBreakdown = getIncomeBreakdown($selectedYear);
+    $expenseBreakdown = getExpenseBreakdown($selectedYear);
+
+    // Check if a report already exists for this term
+    $existingReport = reportExists($selectedYear, $treasurerID);
+
+    // Check if this is the current treasurer's term (to control access to report generation)
+    $isCurrentTerm = ($selectedYear == $currentTerm);
+
+    // Get report history - filtered by selected year
+    $reportHistory = getReportHistory($treasurerID, $selectedYear);
 ?>
 
 <!DOCTYPE html>
