@@ -29,10 +29,10 @@ function getTotalBalance() {
     } else {
         // If there is an approved report, include it in the calculation
         $sql = "SELECT 
-            (SELECT COALESCE(SUM(Amount), 0) FROM Payment WHERE Term = '$currentTerm') - 
-            (SELECT COALESCE(SUM(Amount), 0) FROM Expenses WHERE Term = '$currentTerm') -
             (SELECT COALESCE(Net_Income, 0) FROM FinancialReportVersions 
-            WHERE Term = '$previousTerm' AND Status = 'approved') 
+            WHERE Term = '$previousTerm' AND Status = 'approved') +
+            (SELECT COALESCE(SUM(Amount), 0) FROM Payment WHERE Term = '$currentTerm') - 
+            (SELECT COALESCE(SUM(Amount), 0) FROM Expenses WHERE Term = '$currentTerm')
             as total_balance";
     }
     
