@@ -1,0 +1,13 @@
+--------------------------------------------------
+Time: 2025-05-01 11:08:23
+Phone: 0703804216 (Mobitel)
+Email: 0703804216@sms.mobitel.lk
+Message: New Death Welfare Application
+ID: WF002
+Member:  (Member1)
+Relationship: Dog
+Amount: Rs.200.00
+Date: 2025-05-01
+From: Society Management System
+--------------------------------------------------
+

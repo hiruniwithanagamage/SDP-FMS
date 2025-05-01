@@ -16,6 +16,120 @@ if ($result && $result->num_rows > 0) {
     $newWelfareId = "WF001";
 }
 
+// Function to simulate SMS sending for XAMPP testing
+function sendEmailToSMS($phone, $message) {
+    // Clean the phone number
+    $phone = preg_replace('/[^0-9]/', '', $phone);
+    
+    // Ensure it's a 10-digit number
+    if (strlen($phone) === 10 && $phone[0] === '0') {
+        // Valid Sri Lankan number
+    } elseif (strlen($phone) === 9) {
+        // Add 0 prefix if missing
+        $phone = '0' . $phone;
+    } else {
+        // Invalid number format
+        return false;
+    }
+    
+    // Determine carrier based on phone number prefix
+    $prefix = substr($phone, 0, 3);
+    $carrier = '';
+    $email_domain = '';
+    
+    if(in_array($prefix, ['071', '077'])) {
+        $carrier = 'Dialog';
+        $email_domain = '@sms.dialog.lk';
+    } elseif(in_array($prefix, ['072', '070'])) {
+        $carrier = 'Mobitel';
+        $email_domain = '@sms.mobitel.lk';
+    } elseif(in_array($prefix, ['075', '078'])) {
+        $carrier = 'Etisalat';
+        $email_domain = '@sms.etisalat.lk';
+    } elseif(in_array($prefix, ['076'])) {
+        $carrier = 'Hutch';
+        $email_domain = '@sms.hutch.lk';
+    } else {
+        $carrier = 'Unknown';
+    }
+    
+    // Create log directory if it doesn't exist - let's fix this part
+    $logDir = __DIR__ . '../../../sms_logs';
+    
+    // Debug: Log directory creation attempt
+    error_log("Attempting to create directory: " . $logDir);
+    
+    if (!file_exists($logDir)) {
+        if(!mkdir($logDir, 0777, true)) {
+            error_log("Failed to create directory: " . $logDir);
+            // Fallback to current directory if mkdir fails
+            $logDir = __DIR__;
+        } else {
+            error_log("Successfully created directory: " . $logDir);
+        }
+    } else {
+        error_log("Directory already exists: " . $logDir);
+    }
+    
+    // Log file path
+    $logFile = $logDir . '/sms_log_' . date('Y-m-d') . '.txt';
+    
+    // Prepare log message
+    $logMessage = str_repeat("-", 50) . "\n";
+    $logMessage .= "Time: " . date('Y-m-d H:i:s') . "\n";
+    $logMessage .= "Phone: " . $phone . " (" . $carrier . ")\n";
+    $logMessage .= "Email: " . $phone . $email_domain . "\n";
+    $logMessage .= "Message: " . $message . "\n";
+    $logMessage .= str_repeat("-", 50) . "\n\n";
+    
+    // Write to log file
+    if(file_put_contents($logFile, $logMessage, FILE_APPEND) === false) {
+        error_log("Failed to write to log file: " . $logFile);
+    } else {
+        error_log("Successfully wrote to log file: " . $logFile);
+    }
+    
+    // Show in browser for debugging
+    if(isset($_SESSION['debug_mode']) && $_SESSION['debug_mode'] === true) {
+        echo "<div style='background: #e8f5e9; border: 1px solid #4caf50; padding: 15px; margin: 10px; border-radius: 5px;'>";
+        echo "<h4 style='margin: 0 0 10px 0; color: #2e7d32;'>SMS Simulation</h4>";
+        echo "<strong>To:</strong> " . $phone . " (" . $carrier . ")<br>";
+        echo "<strong>Gateway:</strong> " . $email_domain . "<br>";
+        echo "<strong>Message:</strong><br>" . nl2br(htmlspecialchars($message)) . "<br>";
+        echo "<small style='color: #666;'>This message would be sent when hosted on a real server.</small>";
+        echo "</div>";
+    }
+    
+    return true;
+}
+
+// Function to get active treasurer's phone number
+function getActiveTreasurerPhone() {
+    // First, get the active treasurer
+    $query = "SELECT MemberID FROM Treasurer WHERE isActive = 1 LIMIT 1";
+    $result = search($query);
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        $memberID = $row['MemberID'];
+        
+        // Now get the phone number from the Member table
+        $phoneQuery = "SELECT Mobile_Number FROM Member WHERE MemberID = ?";
+        $stmt = prepare($phoneQuery);
+        $stmt->bind_param("s", $memberID);
+        $stmt->execute();
+        $phoneResult = $stmt->get_result();
+        
+        if ($phoneResult && $phoneResult->num_rows > 0) {
+            $phoneRow = $phoneResult->fetch_assoc();
+            return $phoneRow['Mobile_Number'];
+        }
+    }
+    
+    // If no active treasurer found, return null
+    return null;
+}
+
 // Check for pending applications first
 function hasPendingApplication($memberId, $term) {
     $checkQuery = "SELECT * FROM DeathWelfare 
@@ -109,6 +223,27 @@ if(isset($_POST['apply'])) {
             
             if($stmt->execute()) {
                 $_SESSION['success_message'] = "Death welfare application submitted successfully";
+                
+                // Enable debug mode for testing
+                $_SESSION['debug_mode'] = true;
+                
+                // Get treasurer's phone number from database
+                $treasurerPhone = getActiveTreasurerPhone();
+                
+                if($treasurerPhone) {
+                    // Prepare the SMS message
+                    $smsMessage = "New Death Welfare Application\n";
+                    $smsMessage .= "ID: " . $newWelfareId . "\n";
+                    $smsMessage .= "Member: " . $memberName . " (" . $memberId . ")\n";
+                    $smsMessage .= "Relationship: " . $relationships[$relationship] . "\n";
+                    $smsMessage .= "Amount: Rs." . number_format($amount, 2) . "\n";
+                    $smsMessage .= "Date: " . date('Y-m-d') . "\n";
+                    $smsMessage .= "From: Society Management System";
+                    
+                    // Send SMS (simulated in XAMPP)
+                    sendEmailToSMS($treasurerPhone, $smsMessage);
+                }
+                
                 header("Location: home-member.php");
                 exit();
             } else {
