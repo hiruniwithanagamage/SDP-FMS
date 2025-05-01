@@ -1,6 +1,22 @@
 <?php
+// Prevent any output before JSON response
+ob_start();
+
+// Disable error display (but still log errors)
+ini_set('display_errors', 0);
+error_reporting(E_ALL);
+ini_set('log_errors', 1);
+ini_set('error_log', 'php_errors.log');
+
+// Set content type to JSON
+header('Content-Type: application/json');
+
 session_start();
 require "config/database.php";
+
+// Security constants
+define('MAX_LOGIN_ATTEMPTS', 5);
+define('LOCKOUT_DURATION', 15); // minutes
 
 function checkAndCalculateMonthlyInterest() {
     // Get the current month and year
@@ -48,7 +64,7 @@ function checkAndCalculateMonthlyInterest() {
                                     SET Remain_Interest = ? 
                                     WHERE LoanID = ?";
                         
-                        $stmt = $conn->prepare($updateSql);
+                        $stmt = prepare($updateSql);
                         $stmt->bind_param("ds", $newRemainingInterest, $loan['LoanID']);
                         $stmt->execute();
                         
@@ -60,7 +76,7 @@ function checkAndCalculateMonthlyInterest() {
                     // Log the calculation in the database
                     $logSql = "INSERT INTO InterestCalculationLog (MonthYear, CalculationDate, LoansUpdated) 
                                VALUES (?, NOW(), ?)";
-                    $logStmt = $conn->prepare($logSql);
+                    $logStmt = prepare($logSql);
                     $logStmt->bind_param("si", $currentMonthYear, $updateCount);
                     $logStmt->execute();
                     
@@ -88,63 +104,187 @@ function checkAndCalculateMonthlyInterest() {
     return false;
 }
 
-$Username = $_POST["u"];
-$password = $_POST["p"];
+// Function to check account lockout status
+function isAccountLocked($userId) {
+    $query = "SELECT locked_until FROM User WHERE UserId = ?";
+    $stmt = prepare($query);
+    $stmt->bind_param("s", $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        if ($row['locked_until'] && strtotime($row['locked_until']) > time()) {
+            return true;
+        }
+    }
+    return false;
+}
 
-if(empty($Username)){
-    echo json_encode(["status" => "error", "message" => "Please enter your Username"]);
-}else if(strlen($Username) > 100){
-    echo json_encode(["status" => "error", "message" => "Username must have less than 100 characters"]);
-}else if (!preg_match("/^[a-zA-Z0-9_]{3,100}$/", $Username)) {
-    echo json_encode(["status" => "error", "message" => "Invalid Username"]);
-}else if(empty($password)){
-    echo json_encode(["status" => "error", "message" => "Please enter your Password"]);
-}else if(strlen($password) < 5 || strlen($password) > 20){
-    echo json_encode(["status" => "error", "message" => "Invalid Password"]);
-}else{
-    // Using procedural function
-    $rs = search("SELECT u.*, 
-            CASE
-                WHEN u.Admin_AdminID IS NOT NULL THEN 'admin'
-                WHEN u.Member_MemberID IS NOT NULL THEN 'member'
-                WHEN u.Treasurer_TreasurerID IS NOT NULL THEN 'treasurer'
-                WHEN u.Auditor_AuditorID IS NOT NULL THEN 'auditor'
-            END as role,
-            COALESCE(u.Admin_AdminID, u.Member_MemberID, u.Treasurer_TreasurerID, u.Auditor_AuditorID) as role_id
-        FROM `User` u 
-        WHERE `Username`='".$Username."'");
+// Function to record failed login attempt
+function recordFailedAttempt($username) {
+    $checkQuery = "SELECT UserId FROM User WHERE Username = BINARY ?";
+    $checkStmt = prepare($checkQuery);
+    $checkStmt->bind_param("s", $username);
+    $checkStmt->execute();
+    $checkResult = $checkStmt->get_result();
+    
+    if ($checkResult->num_rows == 0) {
+        return; // Skip if user doesn't exist
+    }
+    
+    $query = "UPDATE User 
+              SET failed_attempts = failed_attempts + 1,
+                  locked_until = IF(failed_attempts + 1 >= ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), NULL)
+              WHERE Username = BINARY ?";
+              
+    $stmt = prepare($query);
+    $maxAttempts = MAX_LOGIN_ATTEMPTS;
+    $lockoutDuration = LOCKOUT_DURATION;
+    $stmt->bind_param("iis", $maxAttempts, $lockoutDuration, $username);
+    $stmt->execute();
+}
+
+// Function to reset login attempts
+function resetLoginAttempts($userId) {
+    $query = "UPDATE User 
+              SET failed_attempts = 0, 
+                  locked_until = NULL 
+              WHERE UserId = ?";
+    $stmt = prepare($query);
+    $stmt->bind_param("s", $userId);
+    $stmt->execute();
+}
+
+// Function to log authentication attempts
+function logLoginAttempt($userId, $username, $success, $failureReason = null) {
+    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+    $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+    
+    $query = "INSERT INTO login_audit_log 
+              (UserId, username_attempt, success, ip_address, user_agent, failure_reason) 
+              VALUES (?, ?, ?, ?, ?, ?)";
+              
+    $stmt = prepare($query);
+    $stmt->bind_param("ssisss", $userId, $username, $success, $ipAddress, $userAgent, $failureReason);
+    $stmt->execute();
+}
+
+try {
+    // Get inputs
+    $Username = $_POST["u"] ?? '';
+    $password = $_POST["p"] ?? '';
+
+    // Simple validation
+    if (empty($Username)) {
+        throw new Exception("Please enter your Username");
+    }
+
+    if (empty($password)) {
+        throw new Exception("Please enter your Password");
+    }
+
+    // Get validated values
+    $validUsername = trim($Username);
+    $validPassword = trim($password);
+
+    // Check if account exists and get info
+    $query = "SELECT u.*, 
+                CASE
+                    WHEN u.Admin_AdminID IS NOT NULL THEN 'admin'
+                    WHEN u.Member_MemberID IS NOT NULL THEN 'member'
+                    WHEN u.Treasurer_TreasurerID IS NOT NULL THEN 'treasurer'
+                    WHEN u.Auditor_AuditorID IS NOT NULL THEN 'auditor'
+                END as role,
+                COALESCE(u.Admin_AdminID, u.Member_MemberID, u.Treasurer_TreasurerID, u.Auditor_AuditorID) as role_id,
+                u.failed_attempts, u.locked_until
+            FROM `User` u 
+            WHERE BINARY `Username` = ?";
+            
+    $stmt = prepare($query);
+    $stmt->bind_param("s", $validUsername);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($result->num_rows == 1) {
+        $d = $result->fetch_assoc();
         
-    $n = $rs->num_rows;
-
-    if($n == 1){
-        $d = $rs->fetch_assoc();
-
-        if ($password == $d['Password']) {
+        // Check if account is locked
+        if (isAccountLocked($d['UserId'])) {
+            $remainingTime = ceil((strtotime($d['locked_until']) - time()) / 60);
+            throw new Exception("Account locked due to too many failed attempts. Please try again in $remainingTime minutes.");
+        }
+        
+        // Check password
+        $passwordCorrect = false;
+        $isHashed = strlen($d['Password']) > 20 && strpos($d['Password'], '$') === 0;
+        
+        if ($isHashed) {
+            $passwordCorrect = password_verify($validPassword, $d['Password']);
+        } else {
+            $passwordCorrect = ($validPassword == $d['Password']);
+        }
+        
+        if ($passwordCorrect) {
+            // Reset login attempts on successful login
+            resetLoginAttempts($d['UserId']);
+            
+            // Set session variables
             $_SESSION["u"] = $d;
             $_SESSION["role"] = $d["role"];
             $_SESSION["role_id"] = $d["role_id"];
-            $_SESSION["user_id"] = $d["UserId"]; 
+            $_SESSION["user_id"] = $d["UserId"];
             $_SESSION["member_id"] = $d["Member_MemberID"];
             $_SESSION["admin_id"] = $d["Admin_AdminID"];
             $_SESSION["treasurer_id"] = $d["Treasurer_TreasurerID"];
             $_SESSION["auditor_id"] = $d["Auditor_AuditorID"];
-
-            // If treasurer is logging in, calculate interest if needed
-            if ($d["role"] == "treasurer" || $d["role"] == "member") {
-                checkAndCalculateMonthlyInterest();
-            }
-
-            // Return success with role for redirection
+            
+            // Get the user's last login time
+            $lastLogin = $d["last_login"] ?? null;
+            
+            // Update last login time
+            $updateLoginSql = "UPDATE `User` SET last_login = NOW() WHERE `Username` = ?";
+            $updateStmt = prepare($updateLoginSql);
+            $updateStmt->bind_param("s", $validUsername);
+            $updateStmt->execute();
+            
+            // Clear output buffer and send JSON response
+            ob_end_clean();
             echo json_encode([
                 "status" => "success",
-                "role" => $d["role"]
+                "role" => $d["role"],
+                "lastLogin" => $lastLogin
             ]);
+            exit;
             
         } else {
-            echo json_encode(["status" => "error", "message" => "Invalid Username or Password"]);
+            // Record failed attempt
+            recordFailedAttempt($validUsername);
+            
+            $failedAttempts = $d['failed_attempts'] + 1;
+            $remainingAttempts = MAX_LOGIN_ATTEMPTS - $failedAttempts;
+            
+            if ($remainingAttempts > 0) {
+                throw new Exception("Invalid Username or Password. $remainingAttempts attempts remaining.");
+            } else {
+                throw new Exception("Account locked due to too many failed attempts. Please try again in " . LOCKOUT_DURATION . " minutes.");
+            }
         }
-    }else{
-        echo json_encode(["status" => "error", "message" => "Invalid Username or Password"]);
-    } 
+    } else {
+        throw new Exception("Invalid Username or Password");
+    }
+    
+} catch (Exception $e) {
+    // Clear output buffer and send error response
+    ob_end_clean();
+    http_response_code(400);
+    echo json_encode([
+        "status" => "error",
+        "message" => $e->getMessage()
+    ]);
+    exit;
 }
+
+// Clear output buffer to prevent any leftover content
+ob_end_clean();
 ?>

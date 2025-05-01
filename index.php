@@ -214,12 +214,12 @@
             <button type="submit">Login</button>
             
             <div>
-                <a href="#" class="forgot-password">Forgot Password?</a>
+                <a href="resetPassword.php" class="forgot-password">Forgot Password?</a>
             </div>
         </form>
     </div>
     
-    <script src="assets/js/loginProcess.js"></script>
+    <script src="assets/js/loginProcessAuth.js"></script>
     <script>
         function togglePasswordVisibility() {
             const passwordInput = document.getElementById('password');
