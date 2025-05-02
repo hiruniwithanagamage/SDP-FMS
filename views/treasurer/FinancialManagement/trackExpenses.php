@@ -2,308 +2,248 @@
 session_start();
 require_once "../../../config/database.php";
 
-// Initialize search parameters
+// Function to get current term/year
+function getCurrentTerm() {
+    $sql = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $result = search($sql);
+    $row = $result->fetch_assoc();
+    return $row['year'] ?? date('Y');
+}
+
+// Get all available terms
+function getAllTerms() {
+    $sql = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
+    return search($sql);
+}
+
+// Function to check if financial report for a specific term is approved
+function isReportApproved($year) {
+    $conn = getConnection();
+    $stmt = $conn->prepare("
+        SELECT Status 
+        FROM FinancialReportVersions 
+        WHERE Term = ? 
+        ORDER BY Date DESC 
+        LIMIT 1
+    ");
+    
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return ($row['Status'] === 'approved');
+    }
+    
+    return false; // If no report exists, it's not approved
+}
+
+// Get expenses based on filters
+function getExpenses($year, $category = '', $method = '', $fromDate = '', $toDate = '') {
+    $sql = "SELECT e.*, t.Name as TreasurerName 
+            FROM Expenses e 
+            LEFT JOIN Treasurer t ON e.Treasurer_TreasurerID = t.TreasurerID
+            WHERE e.Term = $year";
+    
+    if (!empty($category)) {
+        $sql .= " AND e.Category = '$category'";
+    }
+    if (!empty($method)) {
+        $sql .= " AND e.Method = '$method'";
+    }
+    if (!empty($fromDate)) {
+        $sql .= " AND e.Date >= '$fromDate'";
+    }
+    if (!empty($toDate)) {
+        $sql .= " AND e.Date <= '$toDate'";
+    }
+    
+    $sql .= " ORDER BY e.Date DESC";
+    
+    return search($sql);
+}
+
+// Get expense summary for the year
+function getExpenseSummary($year) {
+    $sql = "SELECT 
+            COUNT(*) as total_expenses,
+            SUM(Amount) as total_amount
+        FROM Expenses
+        WHERE Term = $year";
+    
+    return search($sql);
+}
+
+// Get monthly expense statistics
+function getMonthlyExpenseStats($year) {
+    $sql = "SELECT 
+            MONTH(Date) as month,
+            COUNT(*) as expenses_count,
+            SUM(Amount) as total_amount
+        FROM Expenses
+        WHERE Term = $year
+        GROUP BY MONTH(Date)
+        ORDER BY month";
+    
+    return search($sql);
+}
+
+// Get expense breakdown by category
+function getCategoryBreakdown($year) {
+    $sql = "SELECT 
+            Category,
+            COUNT(*) as count,
+            SUM(Amount) as total_amount
+        FROM Expenses
+        WHERE Term = $year
+        GROUP BY Category
+        ORDER BY total_amount DESC";
+    
+    return search($sql);
+}
+
+// Handle Delete Expense
+if(isset($_GET['delete']) && isset($_GET['id'])) {
+    $expenseId = $_GET['id'];
+    $currentYear = isset($_GET['year']) ? $_GET['year'] : getCurrentTerm();
+    
+    // Check if this expense is linked to a Death Welfare
+    $checkQuery = "SELECT * FROM DeathWelfare WHERE Expense_ExpenseID = ?";
+    
+    try {
+        $conn = getConnection();
+        
+        // Start transaction
+        $conn->begin_transaction();
+        
+        // Check for linked records
+        $stmt = $conn->prepare($checkQuery);
+        $stmt->bind_param("s", $expenseId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if($result->num_rows > 0) {
+            $_SESSION['error_message'] = "Cannot delete this expense as it is linked to a Death Welfare record.";
+        } else {
+            // Delete the expense
+            $deleteQuery = "DELETE FROM Expenses WHERE ExpenseID = ?";
+            $stmt = $conn->prepare($deleteQuery);
+            $stmt->bind_param("s", $expenseId);
+            $stmt->execute();
+            
+            $conn->commit();
+            $_SESSION['success_message'] = "Expense #$expenseId was successfully deleted.";
+        }
+    } catch(Exception $e) {
+        // Rollback on error
+        $conn->rollback();
+        $_SESSION['error_message'] = "Error deleting expense: " . $e->getMessage();
+    }
+    
+    // Redirect back to expenses page
+    header("Location: trackExpenses.php?year=" . $currentYear);
+    exit();
+}
+
+$currentTerm = getCurrentTerm();
+$selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
+$allTerms = getAllTerms();
+
+// Initialize filter parameters
 $category = isset($_GET['category']) ? $_GET['category'] : '';
 $method = isset($_GET['method']) ? $_GET['method'] : '';
 $fromDate = isset($_GET['from_date']) ? $_GET['from_date'] : '';
 $toDate = isset($_GET['to_date']) ? $_GET['to_date'] : '';
-$term = isset($_GET['term']) ? $_GET['term'] : '';
 
-// Get all available terms
-$termQuery = "SELECT DISTINCT Term FROM Expenses ORDER BY Term DESC";
-$termResult = search($termQuery);
-$terms = [];
-if ($termResult && $termResult->num_rows > 0) {
-    while ($termRow = $termResult->fetch_assoc()) {
-        $terms[] = $termRow['Term'];
-    }
-}
+$expenseSummary = getExpenseSummary($selectedYear);
+$monthlyStats = getMonthlyExpenseStats($selectedYear);
+$categoryBreakdown = getCategoryBreakdown($selectedYear);
 
-// Base query
-$baseQuery = "SELECT e.*, t.Name as TreasurerName 
-              FROM Expenses e 
-              LEFT JOIN Treasurer t ON e.Treasurer_TreasurerID = t.TreasurerID
-              WHERE 1=1";
+$months = [
+    1 => 'January', 2 => 'February', 3 => 'March', 
+    4 => 'April', 5 => 'May', 6 => 'June',
+    7 => 'July', 8 => 'August', 9 => 'September',
+    10 => 'October', 11 => 'November', 12 => 'December'
+];
 
-// Apply filters if provided
-if (!empty($category)) {
-    $baseQuery .= " AND e.Category = '" . $category . "'";
-}
-if (!empty($method)) {
-    $baseQuery .= " AND e.Method = '" . $method . "'";
-}
-if (!empty($fromDate)) {
-    $baseQuery .= " AND e.Date >= '" . $fromDate . "'";
-}
-if (!empty($toDate)) {
-    $baseQuery .= " AND e.Date <= '" . $toDate . "'";
-}
-if (!empty($term)) {
-    $baseQuery .= " AND e.Term = " . $term;
-}
-
-// Add ordering
-$baseQuery .= " ORDER BY e.Date DESC";
-
-// Execute query
-$result = search($baseQuery);
-
-// Calculate total expenses and category breakdown
-$totalExpenses = 0;
-$categoryTotals = array();
-
-if ($result && $result->num_rows > 0) {
-    // Create a copy of the result to iterate through for calculations
-    $calcResult = search($baseQuery);
-    
-    while ($row = $calcResult->fetch_assoc()) {
-        $totalExpenses += $row['Amount'];
-        
-        // Track totals by category
-        if (!isset($categoryTotals[$row['Category']])) {
-            $categoryTotals[$row['Category']] = 0;
-        }
-        $categoryTotals[$row['Category']] += $row['Amount'];
-    }
-}
-
-// Define delete functionality
-if (isset($_GET['delete']) && isset($_GET['id'])) {
-    $expenseId = $_GET['id'];
-    
-    // Check if this expense is linked to a Death Welfare
-    $checkDeathWelfareQuery = "SELECT * FROM DeathWelfare WHERE Expense_ExpenseID = '$expenseId'";
-    $checkResult = search($checkDeathWelfareQuery);
-    
-    if ($checkResult && $checkResult->num_rows > 0) {
-        $_SESSION['error_message'] = "Cannot delete this expense as it is linked to a Death Welfare record.";
-    } else {
-        // Delete the expense
-        $deleteQuery = "DELETE FROM Expenses WHERE ExpenseID = '$expenseId'";
-        
-        try {
-            Database::iud($deleteQuery);
-            $_SESSION['success_message'] = "Expense deleted successfully";
-            
-            // Redirect to remove the 'delete' parameter from URL
-            header("Location: trackExpenses.php");
-            exit();
-        } catch(Exception $e) {
-            $_SESSION['error_message'] = "Error deleting expense: " . $e->getMessage();
-        }
-    }
-}
+$isReportApproved = isReportApproved($selectedYear);
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Track Expenses</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <title>Expense Details</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="../../../assets/css/adminDetails.css">
+    <link rel="stylesheet" href="../../../assets/css/financialManagement.css">
     <link rel="stylesheet" href="../../../assets/css/alert.css">
     <script src="../../../assets/js/alertHandler.js"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f5f7fa;
+        .status-approved {
+            background-color: #c2f1cd;
+            color: rgb(25, 151, 10);
+        }
+        .status-rejected {
+            background-color: #e2bcc0;
+            color: rgb(234, 59, 59);
+        }
+        
+        /* Modal Styles */
+        #expenseModal, #editExpenseModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            overflow: auto;
         }
 
-        .container {
-            max-width: 1200px;
-            margin: 2rem auto;
-            padding: 2rem;
+        #expenseModal .modal-content, #editExpenseModal .modal-content {
             background-color: white;
+            margin: 5% auto;
+            padding: 20px;
+            width: 90%;
+            max-width: 900px;
+            height: 90%;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            position: relative;
         }
 
-        h1, h2 {
-            color: #1a237e;
-            margin-bottom: 1.5rem;
-        }
-
-        .filter-section {
-            background-color: #f0f2f5;
-            padding: 1.5rem;
-            border-radius: 5px;
-            margin-bottom: 2rem;
-        }
-
-        .filter-form {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-        }
-
-        .form-group {
-            margin-bottom: 1rem;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 0.5rem;
-            color: #333;
+        #expenseModal .close, #editExpenseModal .close {
+            position: absolute;
+            right: 20px;
+            top: 10px;
+            font-size: 28px;
             font-weight: bold;
-        }
-
-        .form-group select, .form-group input {
-            width: 100%;
-            padding: 0.8rem;
-            border: 2px solid #e0e0e0;
-            border-radius: 4px;
-            font-size: 1rem;
-            transition: border-color 0.3s ease;
-        }
-
-        .form-group select:focus, .form-group input:focus {
-            border-color: #1a237e;
-            outline: none;
-        }
-
-        .btn {
-            padding: 0.8rem 2rem;
-            border: none;
-            border-radius: 4px;
-            font-size: 1rem;
             cursor: pointer;
-            transition: all 0.3s ease;
         }
 
-        .btn-filter {
-            background-color: #1a237e;
-            color: white;
-        }
-
-        .btn-filter:hover {
-            background-color: #0d1757;
-        }
-
-        .btn-reset {
-            background-color: white;
-            color: #1a237e;
-            border: 2px solid #1a237e;
-        }
-
-        .btn-reset:hover {
-            background-color: #f5f7fa;
-        }
-
-        .btn-add {
-            background-color: #1a237e;
-            color: white;
-            text-decoration: none;
-            float: right;
-        }
-
-        .btn-add:hover {
-            background-color: #0d1757;
-        }
-
-        .btn-delete {
-            background-color: #f44336;
-            color: white;
-            padding: 0.5rem;
-            font-size: 0.9rem;
-        }
-
-        .btn-delete:hover {
-            background-color: #d32f2f;
-        }
-
-        .btn-view {
-            background-color: #2196F3;
-            color: white;
-            padding: 0.5rem;
-            font-size: 0.9rem;
-        }
-
-        .btn-view:hover {
-            background-color: #1976D2;
-        }
-
-        .expense-table {
+        .modal-iframe {
             width: 100%;
-            border-collapse: collapse;
-            margin-top: 1rem;
+            height: 100%;
+            border: none;
         }
 
-        .expense-table th, .expense-table td {
-            padding: 0.8rem;
-            text-align: left;
-            border-bottom: 1px solid #e0e0e0;
+        .alert-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
         }
-
-        .expense-table th {
-            background-color: #f5f7fa;
-            color: #1a237e;
-            font-weight: bold;
-        }
-
-        .expense-table tr:hover {
-            background-color: #f9f9f9;
-        }
-
+        
         .receipt-preview {
-            max-width: 100px;
+            max-width: 60px;
             max-height: 60px;
             cursor: pointer;
             border-radius: 4px;
             border: 1px solid #e0e0e0;
         }
-
-        .summary-section {
-            margin-top: 2rem;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .summary-card {
-            background-color: #f0f2f5;
-            padding: 1.5rem;
-            border-radius: 5px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        }
-
-        .summary-total {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #1a237e;
-        }
-
-        .summary-label {
-            color: #555;
-            font-size: 0.9rem;
-        }
-
-        .category-breakdown {
-            margin-top: 1rem;
-        }
-
-        .alert {
-            padding: 1rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-        }
-
-        .alert-error {
-            background-color: #ffebee;
-            color: #c62828;
-            border: 1px solid #ffcdd2;
-        }
-
-        .alert-success {
-            background-color: #e8f5e9;
-            color: #2e7d32;
-            border: 1px solid #c8e6c9;
-        }
-
-        .modal {
+        
+        #receiptModal {
             display: none;
             position: fixed;
             z-index: 1000;
@@ -314,8 +254,8 @@ if (isset($_GET['delete']) && isset($_GET['id'])) {
             background-color: rgba(0, 0, 0, 0.7);
             overflow: auto;
         }
-
-        .modal-content {
+        
+        #receiptModal .modal-content {
             margin: 5% auto;
             padding: 20px;
             max-width: 800px;
@@ -323,181 +263,417 @@ if (isset($_GET['delete']) && isset($_GET['id'])) {
             border-radius: 8px;
             position: relative;
         }
-
-        .close-modal {
-            position: absolute;
-            top: 15px;
-            right: 20px;
-            font-size: 28px;
-            cursor: pointer;
-        }
-
+        
         .receipt-image {
             max-width: 100%;
             display: block;
             margin: 0 auto;
         }
+        
+        /* Delete Modal */
+        #deleteModal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        
+        .delete-modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 30%;
+            border-radius: 8px;
+        }
+        
+        .delete-modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+        
+        .cancel-btn {
+            background-color: #f1f1f1;
+            color: #333;
+            border: none;
+            padding: 8px 16px;
+            margin-right: 10px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        
+        .confirm-delete-btn {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .filter-dropdown {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            background-color: #fff;
+            margin-left: 10px;
+            min-width: 150px;
+        }
+
+        .filter-dropdown:focus {
+            border-color: #1e3c72;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(30, 60, 114, 0.2);
+        }
+
+        .filters {
+            display: flex;
+            align-items: center;
+            margin-left: auto;
+            flex-wrap: wrap;
+        }
+
+        .search-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+            flex: 1;
+            min-width: 200px;
+        }
+        .search-input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        /* Responsive styles for filters */
+        @media screen and (max-width: 900px) {
+            .filters {
+                flex-direction: column;
+                align-items: flex-start;
+                margin-top: 10px;
+                width: 100%;
+            }
+            
+            .search-container {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+            
+            .search-input {
+                width: 100%;
+            }
+            
+            .filter-dropdown {
+                width: 100%;
+                margin-left: 0;
+                margin-bottom: 10px;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">
+    <div class="main-container">
     <?php include '../../templates/navbar-treasurer.php'; ?>
-        <div class="container">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                <h1 style="margin-bottom: 0;">Track Expenses</h1>
-                <a href="../addExpenses.php" class="btn btn-add">
+    <div class="container">
+        <div class="header-card">
+            <h1>Expense Details</h1>
+            <select class="filter-select" onchange="updateFilters()" id="yearSelect">
+                <?php while($term = $allTerms->fetch_assoc()): ?>
+                    <option value="<?php echo $term['year']; ?>" <?php echo $term['year'] == $selectedYear ? 'selected' : ''; ?>>
+                        Year <?php echo $term['year']; ?>
+                    </option>
+                <?php endwhile; ?>
+            </select>
+        </div>
+
+        <!-- Alerts container -->
+        <div class="alerts-container">
+            <?php if(isset($_SESSION['success_message'])): ?>
+                <div class="alert alert-success">
+                    <?php 
+                        echo $_SESSION['success_message'];
+                        unset($_SESSION['success_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if(isset($_SESSION['error_message'])): ?>
+                <div class="alert alert-danger">
+                    <?php 
+                        echo $_SESSION['error_message'];
+                        unset($_SESSION['error_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <div id="stats-section" class="stats-cards">
+            <?php
+            $stats = $expenseSummary->fetch_assoc();
+            ?>
+            <div class="stat-card">
+                <i class="fas fa-chart-line"></i>
+                <div class="stat-number">Rs. <?php echo number_format($stats['total_amount'] ?? 0, 2); ?></div>
+                <div class="stat-label">Total Expenses (<?php echo $selectedYear; ?>)</div>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-receipt"></i>
+                <div class="stat-number"><?php echo $stats['total_expenses'] ?? 0; ?></div>
+                <div class="stat-label">Number of Transactions</div>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-money-bill-wave"></i>
+                <div class="stat-number">
+                    <?php 
+                    $avgAmount = 0;
+                    if (($stats['total_expenses'] ?? 0) > 0) {
+                        $avgAmount = ($stats['total_amount'] ?? 0) / ($stats['total_expenses'] ?? 1);
+                    }
+                    echo 'Rs. ' . number_format($avgAmount, 2); 
+                    ?>
+                </div>
+                <div class="stat-label">Average Transaction Amount</div>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('expense')">Expense-wise View</button>
+            <button class="tab" onclick="showTab('category')">Category-wise View</button>
+            <button class="tab" onclick="showTab('months')">Month-wise View</button>
+            <div class="filters">
+                <div class="search-container">
+                    <input type="text" id="searchInput" placeholder="Search by ID, Category, or Amount..." class="search-input">
+                    <button onclick="clearSearch()" class="clear-btn"><i class="fas fa-times"></i></button>
+                </div>
+                
+                <!-- Add category filter dropdown -->
+                <select id="categoryFilter" onchange="filterExpenses()" class="filter-dropdown">
+                    <option value="">All Categories</option>
+                    <option value="Death Welfare">Death Welfare</option>
+                    <option value="Administrative">Administrative</option>
+                    <option value="Utility">Utility</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="Event">Event</option>
+                    <option value="Other">Other</option>
+                </select>
+                
+                <!-- Add payment method filter dropdown -->
+                <select id="methodFilter" onchange="filterExpenses()" class="filter-dropdown">
+                    <option value="">All Methods</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Check">Check</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Digital Payment">Digital Payment</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="expense-view">
+            <div class="fee-type-header">
+                <h2>Expense Details</h2>
+                <a href="../addExpenses.php" class="btn-add">
                     <i class="fas fa-plus"></i> Add New Expense
                 </a>
             </div>
-            
-            <?php if(isset($_SESSION['error_message'])): ?>
-                <div class="alert alert-error"><?php echo $_SESSION['error_message']; ?></div>
-                <?php unset($_SESSION['error_message']); ?>
-            <?php endif; ?>
-            
-            <?php if(isset($_SESSION['success_message'])): ?>
-                <div class="alert alert-success"><?php echo $_SESSION['success_message']; ?></div>
-                <?php unset($_SESSION['success_message']); ?>
-            <?php endif; ?>
-            
-            <div class="filter-section">
-                <h2>Filter Expenses</h2>
-                <form action="" method="GET" class="filter-form">
-                    <div class="form-group">
-                        <label for="category">Category</label>
-                        <select id="category" name="category">
-                            <option value="">All Categories</option>
-                            <option value="Death Welfare" <?php echo $category == 'Death Welfare' ? 'selected' : ''; ?>>Death Welfare</option>
-                            <option value="Administrative" <?php echo $category == 'Administrative' ? 'selected' : ''; ?>>Administrative</option>
-                            <option value="Utility" <?php echo $category == 'Utility' ? 'selected' : ''; ?>>Utility</option>
-                            <option value="Maintenance" <?php echo $category == 'Maintenance' ? 'selected' : ''; ?>>Maintenance</option>
-                            <option value="Event" <?php echo $category == 'Event' ? 'selected' : ''; ?>>Event</option>
-                            <option value="Other" <?php echo $category == 'Other' ? 'selected' : ''; ?>>Other</option>
-                        </select>
-                    </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Category</th>
+                            <th>Amount</th>
+                            <th>Method</th>
+                            <th>Date</th>
+                            <th>Treasurer</th>
+                            <th>Receipt</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php 
+                    $expenses = getExpenses($selectedYear, $category, $method, $fromDate, $toDate);
                     
-                    <div class="form-group">
-                        <label for="method">Payment Method</label>
-                        <select id="method" name="method">
-                            <option value="">All Methods</option>
-                            <option value="Cash" <?php echo $method == 'Cash' ? 'selected' : ''; ?>>Cash</option>
-                            <option value="Check" <?php echo $method == 'Check' ? 'selected' : ''; ?>>Check</option>
-                            <option value="Bank Transfer" <?php echo $method == 'Bank Transfer' ? 'selected' : ''; ?>>Bank Transfer</option>
-                            <option value="Digital Payment" <?php echo $method == 'Digital Payment' ? 'selected' : ''; ?>>Digital Payment</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="from_date">From Date</label>
-                        <input type="date" id="from_date" name="from_date" value="<?php echo $fromDate; ?>">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="to_date">To Date</label>
-                        <input type="date" id="to_date" name="to_date" value="<?php echo $toDate; ?>">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="term">Term</label>
-                        <select id="term" name="term">
-                            <option value="">All Terms</option>
-                            <?php foreach ($terms as $t): ?>
-                                <option value="<?php echo $t; ?>" <?php echo $term == $t ? 'selected' : ''; ?>>Term <?php echo $t; ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group" style="display: flex; align-items: flex-end;">
-                        <button type="submit" class="btn btn-filter">Filter</button>
-                        <button type="button" onclick="window.location.href='trackExpenses.php'" class="btn btn-reset" style="margin-left: 0.5rem;">Reset</button>
-                    </div>
-                </form>
+                    while($row = $expenses->fetch_assoc()): 
+                    ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($row['ExpenseID']); ?></td>
+                        <td><?php echo htmlspecialchars($row['Category']); ?></td>
+                        <td>Rs. <?php echo number_format($row['Amount'] ?? 0, 2); ?></td>
+                        <td><?php echo htmlspecialchars($row['Method']); ?></td>
+                        <td><?php echo date('Y-m-d', strtotime($row['Date'])); ?></td>
+                        <td><?php echo htmlspecialchars($row['TreasurerName']); ?></td>
+                        <td>
+                            <?php if (!empty($row['Image'])): ?>
+                                <img src="../../<?php echo $row['Image']; ?>" alt="Receipt" class="receipt-preview" onclick="showReceiptModal('../../<?php echo $row['Image']; ?>')">
+                            <?php else: ?>
+                                N/A
+                            <?php endif; ?>
+                        </td>
+                        <td class="actions">
+                            <button onclick="viewExpense('<?php echo $row['ExpenseID']; ?>')" class="action-btn small">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            
+                            <?php if (!$isReportApproved): ?>
+                                <button onclick="editExpense('<?php echo $row['ExpenseID']; ?>')" class="action-btn small">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button onclick="openDeleteModal('<?php echo $row['ExpenseID']; ?>')" class="action-btn small">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            <?php else: ?>
+                                <button onclick="showReportMessage()" class="action-btn small info-btn" title="Report approved">
+                                    <i class="fas fa-info-circle"></i>
+                                </button>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php endwhile; ?>
+                    </tbody>
+                </table>
             </div>
-            
-            <div class="expenses-list">
-                <h2>Expenses List</h2>
-                
-                <?php if ($result && $result->num_rows > 0): ?>
-                    <table class="expense-table">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Category</th>
-                                <th>Amount</th>
-                                <th>Method</th>
-                                <th>Date</th>
-                                <th>Term</th>
-                                <th>Treasurer</th>
-                                <th>Receipt</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php while ($row = $result->fetch_assoc()): ?>
-                                <tr>
-                                    <td><?php echo $row['ExpenseID']; ?></td>
-                                    <td><?php echo $row['Category']; ?></td>
-                                    <td>Rs. <?php echo number_format($row['Amount'], 2); ?></td>
-                                    <td><?php echo $row['Method']; ?></td>
-                                    <td><?php echo date('Y-m-d', strtotime($row['Date'])); ?></td>
-                                    <td><?php echo $row['Term']; ?></td>
-                                    <td><?php echo $row['TreasurerName']; ?></td>
-                                    <td>
-                                        <?php if (!empty($row['Image'])): ?>
-                                            <img src="../../<?php echo $row['Image']; ?>" alt="Receipt" class="receipt-preview" onclick="showReceiptModal('../../<?php echo $row['Image']; ?>')">
-                                        <?php else: ?>
-                                            N/A
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <a href="viewExpense.php?id=<?php echo $row['ExpenseID']; ?>" class="btn btn-view">
-                                            <i class="fas fa-eye"></i>
-                                        </a>
-                                        
-                                        <button class="btn btn-delete" onclick="confirmDelete('<?php echo $row['ExpenseID']; ?>')">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    </td>
-                                </tr>
-                            <?php endwhile; ?>
-                        </tbody>
-                    </table>
-                <?php else: ?>
-                    <p>No expenses found.</p>
-                <?php endif; ?>
+        </div>
+
+        <div id="category-view" style="display: none;">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Transactions</th>
+                            <th>Total Amount</th>
+                            <th>Average Amount</th>
+                            <th>Percentage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php 
+                        $totalAmount = $stats['total_amount'] ?? 0;
+                        while($row = $categoryBreakdown->fetch_assoc()): 
+                            $percentage = ($totalAmount > 0) ? ($row['total_amount'] / $totalAmount) * 100 : 0;
+                            $avgAmount = ($row['count'] > 0) ? $row['total_amount'] / $row['count'] : 0;
+                        ?>
+                        <tr>
+                            <td><?php echo htmlspecialchars($row['Category']); ?></td>
+                            <td><?php echo $row['count']; ?></td>
+                            <td>Rs. <?php echo number_format($row['total_amount'], 2); ?></td>
+                            <td>Rs. <?php echo number_format($avgAmount, 2); ?></td>
+                            <td><?php echo number_format($percentage, 1); ?>%</td>
+                        </tr>
+                        <?php endwhile; ?>
+                    </tbody>
+                </table>
             </div>
-            
-            <div class="summary-section">
-                <div class="summary-card">
-                    <div class="summary-label">Total Expenses</div>
-                    <div class="summary-total">Rs. <?php echo number_format($totalExpenses, 2); ?></div>
-                </div>
-                
-                <div class="summary-card">
-                    <div class="summary-label">Category Breakdown</div>
-                    <div class="category-breakdown">
-                        <?php foreach ($categoryTotals as $cat => $amount): ?>
-                            <div>
-                                <strong><?php echo $cat; ?>:</strong> Rs. <?php echo number_format($amount, 2); ?>
-                                (<?php echo round(($amount / $totalExpenses) * 100, 1); ?>%)
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
+        </div>
+
+        <div id="months-view" style="display: none;">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th>Transactions</th>
+                            <th>Total Amount</th>
+                            <th>Average Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php while($row = $monthlyStats->fetch_assoc()): 
+                            $avgAmount = ($row['expenses_count'] > 0) ? $row['total_amount'] / $row['expenses_count'] : 0;
+                        ?>
+                        <tr>
+                            <td><?php echo $months[$row['month']]; ?></td>
+                            <td><?php echo $row['expenses_count']; ?></td>
+                            <td>Rs. <?php echo number_format($row['total_amount'], 2); ?></td>
+                            <td>Rs. <?php echo number_format($avgAmount, 2); ?></td>
+                        </tr>
+                        <?php endwhile; ?>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
+    <?php include '../../templates/footer.php'; ?>
+    </div>
+
+    <div id="expenseModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeExpenseModal()">&times;</span>
+            <iframe id="expenseFrame" class="modal-iframe"></iframe>
+        </div>
+    </div>
     
+    <!-- Edit Expense Modal -->
+    <div id="editExpenseModal" class="modal">
+        <div class="modal-content" style="max-width: 90%; height: 90%;">
+            <span class="close" onclick="closeEditModal()">&times;</span>
+            <iframe id="editExpenseFrame" style="width: 100%; height: 90%; border: none;"></iframe>
+        </div>
+    </div>
+
     <!-- Receipt Modal -->
     <div id="receiptModal" class="modal">
         <div class="modal-content">
-            <span class="close-modal" onclick="closeReceiptModal()">&times;</span>
+            <span class="close" onclick="closeReceiptModal()">&times;</span>
             <h2>Receipt Image</h2>
             <img id="fullReceiptImage" src="" alt="Receipt" class="receipt-image">
         </div>
     </div>
-    
+
+    <!-- Delete Modal -->
+    <div id="deleteModal" class="delete-modal">
+        <div class="delete-modal-content">
+            <span class="close" onclick="closeDeleteModal()">&times;</span>
+            <h2>Confirm Delete</h2>
+            <p>Are you sure you want to delete this expense record? This action cannot be undone.</p>
+            <form method="GET">
+                <input type="hidden" id="delete_expense_id" name="id">
+                <input type="hidden" name="delete" value="true">
+                <input type="hidden" name="year" value="<?php echo $selectedYear; ?>">
+                <div class="delete-modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>
+                    <button type="submit" class="confirm-delete-btn">Delete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
+        function viewExpense(expenseID) {
+            // Set the iframe source to your viewExpense.php page
+            document.getElementById('expenseFrame').src = `viewExpense.php?id=${expenseID}&popup=true`;
+            
+            // Show the modal
+            document.getElementById('expenseModal').style.display = 'block';
+        }
+
+        function closeExpenseModal() {
+            document.getElementById('expenseModal').style.display = 'none';
+        }
+        
+        // Edit Expense Modal Functions
+        function editExpense(expenseID) {
+            // Set the iframe source to your editExpense.php page
+            document.getElementById('editExpenseFrame').src = `editExpense.php?id=${expenseID}&popup=true`;
+            
+            // Show the modal
+            document.getElementById('editExpenseModal').style.display = 'block';
+        }
+
+        function closeEditModal() {
+            document.getElementById('editExpenseModal').style.display = 'none';
+            
+            // After closing, refresh the expense list to see any changes
+            updateFilters();
+        }
+        
         // Show receipt image in modal
         function showReceiptModal(imageSrc) {
             document.getElementById('fullReceiptImage').src = imageSrc;
@@ -508,20 +684,259 @@ if (isset($_GET['delete']) && isset($_GET['id'])) {
         function closeReceiptModal() {
             document.getElementById('receiptModal').style.display = 'none';
         }
-        
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            const modal = document.getElementById('receiptModal');
-            if (event.target == modal) {
-                modal.style.display = 'none';
+
+        function updateFilters() {
+            const year = document.getElementById('yearSelect').value;
+            const category = document.getElementById('categoryFilter')?.value || '';
+            const method = document.getElementById('methodFilter')?.value || '';
+            
+            // Don't redirect, just update via fetch
+            fetch(`trackExpenses.php?year=${year}&category=${category}&method=${method}`)
+                .then(response => response.text())
+                .then(html => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    
+                    // Update stats cards
+                    document.getElementById('stats-section').innerHTML = doc.getElementById('stats-section').innerHTML;
+                    
+                    // Update expense view
+                    document.getElementById('expense-view').innerHTML = doc.getElementById('expense-view').innerHTML;
+                    
+                    // Update category view
+                    document.getElementById('category-view').innerHTML = doc.getElementById('category-view').innerHTML;
+                    
+                    // Update months view
+                    document.getElementById('months-view').innerHTML = doc.getElementById('months-view').innerHTML;
+                    
+                    // Re-add event listeners for the newly loaded content
+                    addEventListeners();
+                })
+                .catch(error => console.error('Error:', error));
+        }
+
+        // Function to reattach event listeners after DOM updates
+        function addEventListeners() {
+            // Add event listeners for search input
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) {
+                searchInput.addEventListener('input', performSearch);
+            }
+            
+            // Check if a modal might need to show alerts
+            const editModal = document.getElementById('editExpenseModal');
+            if (editModal && editModal.style.display === 'block') {
+                // If there are stored alerts, show them
+                const alertType = sessionStorage.getItem('alertType');
+                const alertMessage = sessionStorage.getItem('alertMessage');
+                
+                if (alertType && alertMessage) {
+                    showAlert(alertType, alertMessage);
+                    sessionStorage.removeItem('alertType');
+                    sessionStorage.removeItem('alertMessage');
+                }
             }
         }
-        
-        // Confirm delete
-        function confirmDelete(expenseId) {
-            if (confirm('Are you sure you want to delete this expense?')) {
-                window.location.href = 'trackExpenses.php?delete=true&id=' + expenseId;
+
+        // Add this to the DOMContentLoaded event
+        document.addEventListener('DOMContentLoaded', function() {
+            addEventListeners();
+        });
+
+        function showTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('expense-view').style.display = 'none';
+            document.getElementById('category-view').style.display = 'none';
+            document.getElementById('months-view').style.display = 'none';
+            
+            if (tab === 'expense') {
+                document.getElementById('expense-view').style.display = 'block';
+                document.querySelector('button[onclick="showTab(\'expense\')"]').classList.add('active');
+            } else if (tab === 'category') {
+                document.getElementById('category-view').style.display = 'block';
+                document.querySelector('button[onclick="showTab(\'category\')"]').classList.add('active');
+            } else {
+                document.getElementById('months-view').style.display = 'block';
+                document.querySelector('button[onclick="showTab(\'months\')"]').classList.add('active');
             }
+        }
+
+        // Search functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) {
+                searchInput.addEventListener('input', performSearch);
+            }
+        });
+
+        function performSearch() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const tableRows = document.querySelectorAll('#expense-view tbody tr');
+            let hasResults = false;
+
+            tableRows.forEach(row => {
+                const expenseID = row.cells[0].textContent.toLowerCase();
+                const category = row.cells[1].textContent.toLowerCase();
+                const amount = row.cells[2].textContent.toLowerCase();
+                
+                if (expenseID.includes(searchTerm) || 
+                    category.includes(searchTerm) || 
+                    amount.includes(searchTerm)) {
+                    row.style.display = '';
+                    hasResults = true;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+
+            // Show/hide no results message
+            let noResultsMsg = document.querySelector('.no-results');
+            if (!hasResults && tableRows.length > 0) {
+                if (!noResultsMsg) {
+                    noResultsMsg = document.createElement('div');
+                    noResultsMsg.className = 'no-results';
+                    noResultsMsg.textContent = 'No matching records found';
+                    const table = document.querySelector('#expense-view .table-container');
+                    table.appendChild(noResultsMsg);
+                }
+                noResultsMsg.style.display = 'block';
+            } else if (noResultsMsg) {
+                noResultsMsg.style.display = 'none';
+            }
+        }
+
+        function clearSearch() {
+            const searchInput = document.getElementById('searchInput');
+            searchInput.value = '';
+            performSearch();
+            searchInput.focus();
+        }
+        
+        function filterExpenses() {
+            const categoryFilter = document.getElementById('categoryFilter').value.toLowerCase();
+            const methodFilter = document.getElementById('methodFilter').value.toLowerCase();
+            const tableRows = document.querySelectorAll('#expense-view tbody tr');
+            
+            tableRows.forEach(row => {
+                const category = row.cells[1].textContent.toLowerCase();
+                const method = row.cells[3].textContent.toLowerCase();
+                
+                const categoryMatch = categoryFilter === '' || category.includes(categoryFilter);
+                const methodMatch = methodFilter === '' || method.includes(methodFilter);
+                
+                if (categoryMatch && methodMatch) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+
+        function openDeleteModal(id) {
+            document.getElementById('deleteModal').style.display = 'block';
+            document.getElementById('delete_expense_id').value = id;
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').style.display = 'none';
+        }
+
+        // Update window.onclick to handle all modals
+        window.onclick = function(event) {
+            const expenseModal = document.getElementById('expenseModal');
+            const editModal = document.getElementById('editExpenseModal');
+            const receiptModal = document.getElementById('receiptModal');
+            const deleteModal = document.getElementById('deleteModal');
+            
+            if (event.target == expenseModal) {
+                closeExpenseModal();
+            }
+            
+            if (event.target == editModal) {
+                closeEditModal();
+            }
+            
+            if (event.target == receiptModal) {
+                closeReceiptModal();
+            }
+            
+            if (event.target == deleteModal) {
+                closeDeleteModal();
+            }
+        };
+
+        // Function to create and show alerts programmatically
+function showAlert(type, message) {
+    // Store the alert in sessionStorage
+    sessionStorage.setItem('alertType', type);
+    sessionStorage.setItem('alertMessage', message);
+    
+    // Create and display the alert (original code)
+    const alertsContainer = document.querySelector('.alerts-container');
+    
+    // Create alert element
+    const alertDiv = document.createElement('div');
+    alertDiv.className = type === 'success' ? 'alert alert-success' : 
+                        type === 'info' ? 'alert alert-info' : 'alert alert-danger';
+    alertDiv.textContent = message;
+    
+    // Clear previous alerts
+    alertsContainer.innerHTML = '';
+    
+    // Add new alert
+    alertsContainer.appendChild(alertDiv);
+    
+    // Scroll to top to see the alert
+    window.scrollTo(0, 0);
+    
+    // Manually trigger the alert handler for this new alert
+    const closeBtn = document.createElement('span');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.className = 'alert-close';
+    closeBtn.style.float = 'right';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.fontWeight = 'bold';
+    closeBtn.style.fontSize = '20px';
+    closeBtn.style.marginLeft = '15px';
+    
+    closeBtn.addEventListener('click', function() {
+        alertDiv.style.display = 'none';
+    });
+    
+    alertDiv.insertBefore(closeBtn, alertDiv.firstChild);
+    
+    // Auto-hide alerts after 5 seconds
+    setTimeout(function() {
+        alertDiv.style.opacity = '0';
+        setTimeout(function() {
+            alertDiv.style.display = 'none';
+        }, 500);
+    }, 5000);
+}
+        // Check for stored alerts on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if there are any stored alerts
+            const alertType = sessionStorage.getItem('alertType');
+            const alertMessage = sessionStorage.getItem('alertMessage');
+            
+            if (alertType && alertMessage) {
+                // Display the alert
+                showAlert(alertType, alertMessage);
+                
+                // Clear the stored alert
+                sessionStorage.removeItem('alertType');
+                sessionStorage.removeItem('alertMessage');
+            }
+            
+            // Rest of your DOMContentLoaded code...
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) {
+                searchInput.addEventListener('input', performSearch);
+            }
+        });
+
+        function showReportMessage() {
+            showAlert('info', 'This record cannot be modified as the financial report for this term has already been approved.');
         }
     </script>
 </body>
