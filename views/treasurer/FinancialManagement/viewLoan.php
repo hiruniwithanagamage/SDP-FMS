@@ -419,7 +419,7 @@ if ($isPopup): ?>
         background-color: #f5f7fa;
     }
     .container {
-        padding: 20px;
+        /* padding: 20px; */
     }
     .loan-detail-container {
         background-color: #fff;
@@ -631,7 +631,12 @@ if ($isPopup): ?>
     </head>
     <body>
         <div class="main-container">
-            <?php include '../../templates/navbar-treasurer.php'; ?>
+            <?php if ($isMemberView): ?>
+                <?php include '../../templates/navbar-member.php'; ?>
+            <?php else: ?>
+                <?php include '../../templates/navbar-treasurer.php'; ?>
+            <?php endif; ?>
+
             <div class="container">
                 <div class="header-card">
                     <h1>View Loan</h1>

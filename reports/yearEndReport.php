@@ -12,6 +12,12 @@ if (!isset($_SESSION["u"])) {
 
 require_once "../config/database.php";
 
+// Replace the current referrer tracking code with this
+if (!isset($_SESSION['report_referrer']) || 
+    (strpos($_SERVER['HTTP_REFERER'] ?? '', 'yearEndReport.php') === false)) {
+    $_SESSION['report_referrer'] = $_SERVER['HTTP_REFERER'] ?? '../index.php';
+}
+
 // We'll use JavaScript history.back() for navigation, no need to track referrer in PHP
 
 // Get available report years from database - only approved reports
@@ -537,9 +543,9 @@ function getAmountColor($amount) {
             <h2 class="no-report-title">No Approved Reports Available</h2>
             <p class="no-report-message">There are currently no approved financial reports available. Reports will appear here once they have been reviewed and approved by the auditor.</p>
             
-            <button class="btn btn-back">
+            <a href="<?php echo $_SESSION['report_referrer'] ?? '../index.php'; ?>" class="btn btn-back">
                 <i class="fas fa-arrow-left"></i> Back
-            </button>
+            </a>
         </div>
         
         <?php elseif ($report === null): ?>
@@ -567,9 +573,9 @@ function getAmountColor($amount) {
                 </form>
             </div>
             
-            <button class="btn btn-back">
+            <a href="<?php echo $_SESSION['report_referrer'] ?? '../index.php'; ?>" class="btn btn-back">
                 <i class="fas fa-arrow-left"></i> Back
-            </button>
+            </a>
         </div>
         
         <?php else: ?>
@@ -596,7 +602,7 @@ function getAmountColor($amount) {
         </div>
         
         <div class="action-buttons">
-            <a href="<?php echo htmlspecialchars($referrer); ?>" class="btn btn-back">
+            <a href="<?php echo $_SESSION['report_referrer'] ?? '../index.php'; ?>" class="btn btn-back">
                 <i class="fas fa-arrow-left"></i> Back
             </a>
             <button class="btn btn-primary" id="downloadBtn">
@@ -727,11 +733,11 @@ function getAmountColor($amount) {
     <script>
         // Handle back button clicks using browser history
         document.querySelectorAll('.btn-back').forEach(function(button) {
-            button.addEventListener('click', function(e) {
-                e.preventDefault();
-                history.back();
-            });
+        button.addEventListener('click', function(e) {
+            e.preventDefault();
+            window.location.href = "<?php echo $_SESSION['report_referrer']; ?>";
         });
+    });
         
         // PDF Download functionality
         <?php if ($report !== null): ?>

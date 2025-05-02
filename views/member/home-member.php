@@ -348,7 +348,7 @@ $formattedDues = number_format($totalDues, 2);
                    <i class="fas fa-heart icon"></i>
                    <h3>Apply Death Welfare</h3>
                </div>
-               <div class="action-card" onclick="window.location.href='../../reports/yearEndReport.php'">
+               <div class="action-card" onclick="window.location.href='../treasurer/financialManagement/viewLoan.php'">
                    <i class="fas fa-chart-bar icon"></i>
                    <h3>View Reports</h3>
                </div>

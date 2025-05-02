@@ -10,11 +10,29 @@
       exit();
    }
 
+   function getBasePath() {
+      // Get the current script path
+      $currentPath = $_SERVER['SCRIPT_NAME'];
+      
+      // Check if we're in the Management subfolder
+      if (strpos($currentPath, '/financialManagement/') !== false) {
+          return "../../../";  // One level deeper, so need an extra ../
+      } else if (strpos($currentPath, '/reportsAnalytics/') !== false) {
+          return "../../../";  // One level deeper, so need an extra ../
+      } else if (strpos($currentPath, '/reports/') !== false) {
+          return "../";     // Direct in reports folder
+      } else {
+          return "../../";     // Direct in treasurer folder
+      }
+  }
+  
+  $basepath = getBasePath();
+
    $userData = $_SESSION["u"];
 
    // Get member details if this is a member user
    $memberName = "Guest";
-   $memberImage = "../../assets/images/profile_photo.jpg"; // default image
+   $memberImage = $basepath."assets/images/profile_photo.jpg"; // default image
 
    if (isset($userData['Member_MemberID'])) {
       $memberQuery = "SELECT Name, Image FROM Member WHERE MemberID = '" . $userData['Member_MemberID'] . "'";
@@ -25,7 +43,7 @@
          $memberName = $memberData['Name'];
          // Use member's image if available, otherwise keep default
          if (!empty($memberData['Image'])) {
-               $memberImage = "../../uploads/" . $memberData['Image'];
+               $memberImage = $basepath."uploads/" . $memberData['Image'];
          }
       }
    }
@@ -230,16 +248,21 @@
 <nav class="modern-nav">
    <div class="nav-content">
        <div class="nav-brand">
-           <img src="../../assets/images/society_logo.png" alt="Logo" class="brand-logo">
+       <img src="<?php echo $basepath; ?>assets/images/society_logo.png" 
+                 alt="Logo" 
+                 class="brand-logo"
+                 onerror="this.src='<?php echo $defaultProfileImage; ?>'">
            <span class="society-name">එක්සත් මරණාධාර සමිතිය</span>
        </div>
 
        <div class="nav-links">
-           <a href="home-member.php" class="nav-link">
+       <a href="<?php echo $basepath; ?>views/member/home-member.php" class="nav-link">
+           <!-- <a href="home-member.php" class="nav-link"> -->
                <i class="fas fa-home"></i>
                <span>Home</span>
            </a>
-           <a href="memberPayment.php" class="nav-link">
+           <a href="<?php echo $basepath; ?>views/member/memberPayment.php" class="nav-link">
+           <!-- <a href="memberPayment.php" class="nav-link"> -->
                <i class="fas fa-credit-card"></i>
                <span>Payments</span>
            </a>
