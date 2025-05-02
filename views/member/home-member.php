@@ -308,6 +308,74 @@ $formattedDues = number_format($totalDues, 2);
             color: #b45309;
             font-weight: bold;
         }
+
+        /* Modal styles */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 10% auto;
+    padding: 2rem;
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    width: 80%;
+    max-width: 700px;
+}
+
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover,
+.close:focus {
+    color: black;
+    text-decoration: none;
+}
+
+.report-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.report-option {
+    background: #f5f7fa;
+    padding: 1.5rem;
+    border-radius: 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.report-option:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+}
+
+.report-option h3 {
+    margin: 0.5rem 0;
+    color: #1e3c72;
+}
+
+.report-option p {
+    color: #555;
+    margin-top: 0.5rem;
+}
    </style>
 </head>
 <body>
@@ -411,6 +479,25 @@ $formattedDues = number_format($totalDues, 2);
        <?php include '../templates/footer.php'; ?>
    </div>
 
+   <div id="reportModal" class="modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>Select Report Type</h2>
+        <div class="report-options">
+            <div class="report-option" onclick="window.location.href='../treasurer/financialManagement/viewLoan.php'">
+                <i class="fas fa-file-invoice-dollar icon"></i>
+                <h3>Loan Reports</h3>
+                <p>View your loan history, current status, and payment schedule</p>
+            </div>
+            <div class="report-option" onclick="window.location.href='../../reports/yearEndReport.php'">
+                <i class="fas fa-calendar-check icon"></i>
+                <h3>Year-End Reports</h3>
+                <p>Access annual financial summaries and statements</p>
+            </div>
+        </div>
+    </div>
+</div>
+
    <!-- Use the common alert handler script -->
    <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -432,6 +519,38 @@ $formattedDues = number_format($totalDues, 2);
                 });
             }
         });
+
+        // Get the modal element
+var modal = document.getElementById("reportModal");
+
+// Update the action card to open the modal instead of direct navigation
+document.addEventListener('DOMContentLoaded', function() {
+    var viewReportsCard = document.querySelector('.action-card:nth-child(4)');
+    if (viewReportsCard) {
+        // Remove the existing onclick handler
+        viewReportsCard.removeAttribute('onclick');
+        
+        // Add new event listener
+        viewReportsCard.addEventListener('click', function() {
+            modal.style.display = "block";
+        });
+    }
+    
+    // Get the <span> element that closes the modal
+    var span = document.getElementsByClassName("close")[0];
+    
+    // When the user clicks on <span> (x), close the modal
+    span.onclick = function() {
+        modal.style.display = "none";
+    }
+    
+    // When the user clicks anywhere outside of the modal, close it
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+    }
+});
    </script>
 </body>
 </html>

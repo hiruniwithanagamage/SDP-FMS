@@ -168,8 +168,8 @@ function formatCurrency($amount) {
 function getAmountColor($amount) {
     if ($amount == 0) {
         return '';
-    } else if ($amount > 0) {
-        return 'text-red-500'; // For positive values (red in the example)
+    } else if ($amount < 0) {
+        return 'text-red-500'; // For negative values (red in the example)
     }
     return '';
 }
@@ -189,13 +189,20 @@ function getAmountColor($amount) {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: 'Poppins', sans-serif;
+            /* font-family: 'Poppins', sans-serif; */
+            font-family: Arial, sans-serif;
         }
         
         body {
             background-color: #f5f7fa;
             color: #333;
             line-height: 1.6;
+        }
+
+        .home-container {
+           min-height: 100vh;
+           background: #f5f7fa;
+           padding: 2rem;
         }
         
         .container {
@@ -340,7 +347,7 @@ function getAmountColor($amount) {
             font-weight: 700;
         }
         
-        .box-value.revenue {
+        .box-value.expenses {
             color: #dc3545; /* Red */
         }
         
@@ -525,7 +532,8 @@ function getAmountColor($amount) {
     </style>
 </head>
 <body>
-    <!-- <?php include '../views/templates/navbar-member.php'; ?> -->
+    <div class="home-container">
+    <?php include '../views/templates/navbar-member.php'; ?>
 
     <div class="container">
         <div class="report-header">
@@ -621,7 +629,7 @@ function getAmountColor($amount) {
             
             <div class="summary-box">
                 <div class="box-title">Total Expenses:</div>
-                <div class="box-value"><?php echo formatCurrency($report['total_expenses']); ?></div>
+                <div class="box-value expenses"><?php echo formatCurrency($report['total_expenses']); ?></div>
             </div>
             
             <div class="summary-box" style="background-color: #d0e1f9;">
@@ -726,6 +734,7 @@ function getAmountColor($amount) {
         </div>
         
         <?php endif; ?>
+    </div>
     </div>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
