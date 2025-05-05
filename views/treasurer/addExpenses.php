@@ -184,6 +184,7 @@ if(isset($_GET['cancel'])) {
     <title>Add Expense</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="../../assets/css/adminDetails.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -207,14 +208,23 @@ if(isset($_GET['cancel'])) {
         }
 
         .form-group {
-            margin-bottom: 1.5rem;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
         }
 
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            color: #333;
-            font-weight: bold;
+        .form-group label {
+            width: 150px;
+            text-align: right;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            flex: 1;
         }
 
         input[type="text"],
@@ -241,8 +251,11 @@ if(isset($_GET['cancel'])) {
 
         .button-group {
             display: flex;
+            justify-content: flex-end;
             gap: 1rem;
             margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #eee;
         }
 
         .btn {
@@ -261,17 +274,6 @@ if(isset($_GET['cancel'])) {
 
         .btn-add:hover {
             background-color: #0d1757;
-        }
-
-        .btn-cancel {
-            background-color: white;
-            color: #1a237e;
-            border: 2px solid #1a237e;
-            text-decoration: none;
-        }
-
-        .btn-cancel:hover {
-            background-color: #f5f7fa;
         }
 
         .alert {
@@ -345,7 +347,7 @@ if(isset($_GET['cancel'])) {
 
             <div class="form-group">
                 <label for="description">Description (Optional)</label>
-                <textarea id="description" name="description" rows="3"></textarea>
+                <textarea id="description" name="description" rows="3" style="margin-right:48px;"></textarea>
             </div>
 
             <div class="form-group">
@@ -354,7 +356,7 @@ if(isset($_GET['cancel'])) {
             </div>
 
             <div class="button-group">
-                <a href="?cancel=1" class="btn btn-cancel">Cancel</a>
+                <a href="?cancel=1" class="btn cancel-btn">Cancel</a>
                 <button type="submit" name="add" class="btn btn-add">Add Expense</button>
             </div>
         </form>

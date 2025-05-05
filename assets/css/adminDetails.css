@@ -289,12 +289,14 @@ body {
 }
 
 .cancel-btn {
-    background-color: #e0e0e0;
-    color: #333;
+    background-color: white;
+    color: #1a237e;
+    border: 2px solid #1a237e;
+    text-decoration: none;
 }
 
 .cancel-btn:hover {
-    background:rgba(90, 98, 104, 0.26);
+    background-color: #f5f7fa;
 }
 
 .confirm-delete-btn {

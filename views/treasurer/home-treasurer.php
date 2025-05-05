@@ -421,6 +421,7 @@ $currentTerm = getCurrentTerm();
             color: #155724;
             border: 1px solid #c3e6cb;
             padding: 15px;
+            margin-top: 20px;
             margin-bottom: 15px;
             border-radius: 4px;
             display: flex;
@@ -508,7 +509,6 @@ $currentTerm = getCurrentTerm();
                 </a>
             </div>
 
-            <!-- Action Buttons (Moved from management-buttons) -->
             <div class="action-buttons">
                 <button class="action-btn" onclick="window.location.href='addFine.php'">
                     <i class="fas fa-plus icon"></i>

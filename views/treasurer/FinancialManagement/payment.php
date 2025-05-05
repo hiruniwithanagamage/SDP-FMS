@@ -94,6 +94,29 @@ function getAllMembers() {
     return search($sql);
 }
 
+// Function to check if financial report for a specific term is approved
+function isReportApproved($year) {
+    $conn = getConnection();
+    $stmt = $conn->prepare("
+        SELECT Status 
+        FROM FinancialReportVersions 
+        WHERE Term = ? 
+        ORDER BY Date DESC 
+        LIMIT 1
+    ");
+    
+    $stmt->bind_param("i", $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return ($row['Status'] === 'approved');
+    }
+    
+    return false; // If no report exists, it's not approved
+}
+
 // Handle current filter selections
 $currentTerm = getCurrentTerm();
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
@@ -111,6 +134,7 @@ $paymentSummary = getPaymentSummary($selectedYear, $selectedMonth, $selectedMemb
 $monthlyStats = getMonthlyPaymentStats($selectedYear);
 $allMembers = getAllMembers();
 $allTerms = getAllTerms();
+$isReportApproved = isReportApproved($selectedYear);
 
 $months = [
     0 => 'All Months',
@@ -138,6 +162,7 @@ $methodTypes = [
 // Handle Delete Payment
 if(isset($_POST['delete_payment'])) {
     $paymentId = $_POST['payment_id'];
+    $currentYear = isset($_GET['year']) ? $_GET['year'] : (isset($_POST['year']) ? $_POST['year'] : getCurrentTerm());
     
     try {
         $conn = getConnection();
@@ -170,6 +195,38 @@ if(isset($_POST['delete_payment'])) {
             $stmt->execute();
         }
         
+        // Check if this payment is linked to any fines
+        $checkFineQuery = "SELECT * FROM FinePayment WHERE PaymentID = ?";
+        $stmt = $conn->prepare($checkFineQuery);
+        $stmt->bind_param("s", $paymentId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        // If there are fine links, remove them first
+        if($result->num_rows > 0) {
+            // Get all fine IDs linked to this payment
+            $fineIds = [];
+            while($row = $result->fetch_assoc()) {
+                $fineIds[] = $row['FineID'];
+            }
+            
+            // Delete the fine payment links
+            $deleteFinePaymentsQuery = "DELETE FROM FinePayment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($deleteFinePaymentsQuery);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            
+            // Update related fines to unpaid
+            if(!empty($fineIds)) {
+                foreach($fineIds as $fineId) {
+                    $updateFineQuery = "UPDATE Fine SET IsPaid = 'No' WHERE FineID = ?";
+                    $stmt = $conn->prepare($updateFineQuery);
+                    $stmt->bind_param("s", $fineId);
+                    $stmt->execute();
+                }
+            }
+        }
+        
         // Delete the payment
         $deleteQuery = "DELETE FROM Payment WHERE PaymentID = ?";
         $stmt = $conn->prepare($deleteQuery);
@@ -187,7 +244,7 @@ if(isset($_POST['delete_payment'])) {
     }
     
     // Redirect back to payment page
-    header("Location: payment.php?year=" . $selectedYear);
+    header("Location: payment.php?year=" . $currentYear . "&month=" . $selectedMonth);
     exit();
 }
 
@@ -294,37 +351,58 @@ if(isset($_POST['delete_payment'])) {
     }
 
     /* Edit Payment Modal */
-#editPaymentModal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-    overflow: auto;
-}
+    #editPaymentModal, #paymentModal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+        overflow: auto;
+    }
 
-#editPaymentModal .modal-content {
-    background-color: white;
-    margin: 5% auto;
-    padding: 20px;
-    width: 90%;
-    max-width: 900px;
-    height: 80%;
-    border-radius: 8px;
-    position: relative;
-}
+    #editPaymentModal .modal-content, #paymentModal .modal-content {
+        background-color: white;
+        margin: 5% auto;
+        padding: 20px;
+        width: 90%;
+        max-width: 900px;
+        height: 80%;
+        border-radius: 8px;
+        position: relative;
+    }
 
-#editPaymentModal .close {
-    position: absolute;
-    right: 20px;
-    top: 10px;
-    font-size: 28px;
-    font-weight: bold;
-    cursor: pointer;
-}
+    #editPaymentModal .close, #paymentModal .close {
+        position: absolute;
+        right: 20px;
+        top: 10px;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+    }
+
+    .modal-iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+    }
+
+    .alert-info {
+        background-color: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+    }
+
+    .status-yes {
+        background-color: #c2f1cd;
+        color: rgb(25, 151, 10);
+    }
+    .status-no {
+        background-color: #e2bcc0;
+        color: rgb(234, 59, 59);
+    }
 </style>
 </head>
 <body>
@@ -440,15 +518,24 @@ if(isset($_POST['delete_payment'])) {
                             <td>Rs. <?php echo number_format($row['Amount'], 2); ?></td>
                             <td><?php echo date('Y-m-d', strtotime($row['Date'])); ?></td>
                             <td class="actions">
-                            <button onclick="printPaymentReceipt('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
-                                <i class="fas fa-print"></i>
-                            </button>
-                                <button onclick="editPayment('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
-                                    <i class="fas fa-edit"></i>
+                                <button onclick="viewPayment('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
+                                    <i class="fas fa-eye"></i>
                                 </button>
-                                <button onclick="openDeleteModal('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
-                                    <i class="fas fa-trash"></i>
-                                </button>
+                                <button onclick="printPaymentReceipt('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
+                                        <i class="fas fa-print"></i>
+                                    </button>
+                                <?php if (!$isReportApproved): ?>
+                                    <button onclick="editPayment('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button onclick="openDeleteModal('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                <?php else: ?>
+                                    <button onclick="showReportMessage()" class="action-btn small info-btn" title="Report approved">
+                                        <i class="fas fa-info-circle"></i>
+                                    </button>
+                                <?php endif; ?>
                             </td>
                         </tr>
                         <?php endwhile; ?>
@@ -466,7 +553,7 @@ if(isset($_POST['delete_payment'])) {
                             <th>Payment Count</th>
                             <th>Total Amount</th>
                             <th>Unique Members</th>
-                            <th>Actions</th>
+                            <!-- <th>Actions</th> -->
                         </tr>
                     </thead>
                     <tbody>
@@ -476,14 +563,14 @@ if(isset($_POST['delete_payment'])) {
                             <td><?php echo $row['payment_count']; ?></td>
                             <td>Rs. <?php echo number_format($row['total_amount'], 2); ?></td>
                             <td><?php echo $row['unique_members']; ?></td>
-                            <td class="actions">
+                            <!-- <td class="actions">
                                 <button onclick="viewMonthDetails(<?php echo $row['month']; ?>)" class="action-btn small">
                                     <i class="fas fa-eye"></i> View
                                 </button>
                                 <button onclick="exportMonthReport(<?php echo $row['month']; ?>)" class="action-btn small">
                                     <i class="fas fa-download"></i> Export
                                 </button>
-                            </td>
+                            </td> -->
                         </tr>
                         <?php endwhile; ?>
                     </tbody>
@@ -497,9 +584,8 @@ if(isset($_POST['delete_payment'])) {
     <!-- Payment Details Modal -->
     <div id="paymentModal" class="modal">
         <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2>Payment Details</h2>
-            <div id="paymentDetails"></div>
+            <span class="close" onclick="closePaymentModal()">&times;</span>
+            <iframe id="paymentFrame" class="modal-iframe"></iframe>
         </div>
     </div>
 
@@ -511,6 +597,8 @@ if(isset($_POST['delete_payment'])) {
             <p>Are you sure you want to delete this payment record? This action cannot be undone.</p>
             <form method="POST">
                 <input type="hidden" id="delete_payment_id" name="payment_id">
+                <input type="hidden" name="year" value="<?php echo $selectedYear; ?>">
+                <input type="hidden" name="month" value="<?php echo $selectedMonth; ?>">
                 <div class="delete-modal-buttons">
                     <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>
                     <button type="submit" name="delete_payment" class="confirm-delete-btn">Delete</button>
@@ -520,15 +608,15 @@ if(isset($_POST['delete_payment'])) {
     </div>
 
     <!-- Edit Payment Modal -->
-<div id="editPaymentModal" class="modal">
-    <div class="modal-content" style="max-width: 90%; height: 90%;">
-        <span class="close" onclick="closeEditModal()">&times;</span>
-        <iframe id="editPaymentFrame" style="width: 100%; height: 90%; border: none;"></iframe>
+    <div id="editPaymentModal" class="modal">
+        <div class="modal-content" style="max-width: 90%; height: 90%;">
+            <span class="close" onclick="closeEditModal()">&times;</span>
+            <iframe id="editPaymentFrame" style="width: 100%; height: 90%; border: none;"></iframe>
+        </div>
     </div>
-</div>
 
     <script>
-        // Update filters using AJAX like in membership_fee.php
+        // Update filters using AJAX
         function updateFilters() {
             const year = document.getElementById('yearSelect').value;
             const month = document.getElementById('monthSelect').value;
@@ -568,33 +656,7 @@ if(isset($_POST['delete_payment'])) {
             }
         }
 
-        // Filter payment list based on type and method
-        function filterPaymentList() {
-            const paymentType = document.getElementById('paymentTypeFilter').value;
-            const method = document.getElementById('methodFilter').value;
-            const tableRows = document.querySelectorAll('#paymentsTable tbody tr');
-            let hasResults = false;
-
-            tableRows.forEach(row => {
-                const rowPaymentType = row.getAttribute('data-payment-type');
-                const rowMethod = row.getAttribute('data-method');
-                
-                const typeMatch = paymentType === '' || rowPaymentType === paymentType;
-                const methodMatch = method === '' || rowMethod === method;
-                
-                if (typeMatch && methodMatch) {
-                    row.style.display = '';
-                    hasResults = true;
-                } else {
-                    row.style.display = 'none';
-                }
-            });
-
-            // Show/hide no results message
-            updateNoResultsMessage(hasResults);
-        }
-
-        // Search functionality, updated to match membership_fee.php
+        // Search functionality
         document.addEventListener('DOMContentLoaded', function() {
             const searchInput = document.getElementById('searchInput');
             searchInput.addEventListener('input', performSearch);
@@ -606,7 +668,6 @@ if(isset($_POST['delete_payment'])) {
             let hasResults = false;
 
             tableRows.forEach(row => {
-
                 const paymentID = row.cells[0].textContent.toLowerCase();
                 const memberID = row.cells[1].textContent.toLowerCase();
                 const name = row.cells[2].textContent.toLowerCase();
@@ -652,31 +713,33 @@ if(isset($_POST['delete_payment'])) {
             window.location.href = `../payments/payment_receipt.php?payment_id=${paymentID}`;
         }
 
-        // Modal handling
-        const modal = document.getElementById('paymentModal');
-        const closeBtn = document.querySelector('.close');
-
-        closeBtn.onclick = function() {
-            modal.style.display = "none";
+        // View payment details with modal
+        function viewPayment(paymentID) {
+            // Set the iframe source to your viewPayment.php page
+            document.getElementById('paymentFrame').src = `viewPayment.php?id=${paymentID}&popup=true`;
+            
+            // Show the modal
+            document.getElementById('paymentModal').style.display = 'block';
         }
 
-        window.onclick = function(event) {
-            if (event.target == modal) {
-                modal.style.display = "none";
-            }
+        function closePaymentModal() {
+            document.getElementById('paymentModal').style.display = 'none';
         }
 
-        // View payment details
-        function viewPaymentDetails(paymentID) {
-            document.getElementById('paymentDetails').innerHTML = paymentDetails;
-            modal.style.display = "block";
-        }
-
-        // Edit payment
+        // Edit payment with modal
         function editPayment(paymentID) {
-            // Redirect to edit page
+            // Set the iframe source to your editPayment.php page
             document.getElementById('editPaymentFrame').src = `editPayment.php?id=${paymentID}&popup=true`;
+            
+            // Show the modal
             document.getElementById('editPaymentModal').style.display = 'block';
+        }
+
+        function closeEditModal() {
+            document.getElementById('editPaymentModal').style.display = 'none';
+            
+            // After closing, refresh the payment list to see any changes
+            updateFilters();
         }
 
         function openDeleteModal(id) {
@@ -687,20 +750,6 @@ if(isset($_POST['delete_payment'])) {
         function closeDeleteModal() {
             document.getElementById('deleteModal').style.display = 'none';
         }
-
-        // Update window.onclick to handle delete modal too
-        window.onclick = function(event) {
-            const modal = document.getElementById('paymentModal');
-            const deleteModal = document.getElementById('deleteModal');
-            
-            if (event.target == modal) {
-                modal.style.display = "none";
-            }
-            
-            if (event.target == deleteModal) {
-                closeDeleteModal();
-            }
-        };
 
         // View month details
         function viewMonthDetails(month) {
@@ -714,83 +763,72 @@ if(isset($_POST['delete_payment'])) {
             window.location.href = `exportPaymentReport.php?year=${year}&month=${month}`;
         }
 
-        // Edit Payment Modal Functions
-function editPayment(paymentID) {
-    // Set the iframe source to your editPayment.php page
-    document.getElementById('editPaymentFrame').src = `editPayment.php?id=${paymentID}&popup=true`;
-    
-    // Show the modal
-    document.getElementById('editPaymentModal').style.display = 'block';
-}
+        // Update window onclick handler to work with all modals
+        window.onclick = function(event) {
+            const paymentModal = document.getElementById('paymentModal');
+            const deleteModal = document.getElementById('deleteModal');
+            const editModal = document.getElementById('editPaymentModal');
+            
+            if (event.target == paymentModal) {
+                closePaymentModal();
+            }
+            
+            if (event.target == deleteModal) {
+                closeDeleteModal();
+            }
+            
+            if (event.target == editModal) {
+                closeEditModal();
+            }
+        };
 
-function closeEditModal() {
-    document.getElementById('editPaymentModal').style.display = 'none';
-    
-    // After closing, refresh the payment list to see any changes
-    updateFilters();
-}
+        // Function to create and show alerts programmatically
+        function showAlert(type, message) {
+            const alertsContainer = document.querySelector('.alerts-container');
+            
+            // Create alert element
+            const alertDiv = document.createElement('div');
+            alertDiv.className = type === 'success' ? 'alert alert-success'  : 
+                                type === 'info' ? 'alert alert-info' : 'alert alert-danger';
+            alertDiv.textContent = message;
+            
+            // Clear previous alerts
+            alertsContainer.innerHTML = '';
+            
+            // Add new alert
+            alertsContainer.appendChild(alertDiv);
+            
+            // Scroll to top to see the alert
+            window.scrollTo(0, 0);
+            
+            // Manually trigger the alert handler for this new alert
+            const closeBtn = document.createElement('span');
+            closeBtn.innerHTML = '&times;';
+            closeBtn.className = 'alert-close';
+            closeBtn.style.float = 'right';
+            closeBtn.style.cursor = 'pointer';
+            closeBtn.style.fontWeight = 'bold';
+            closeBtn.style.fontSize = '20px';
+            closeBtn.style.marginLeft = '15px';
+            
+            closeBtn.addEventListener('click', function() {
+                alertDiv.style.display = 'none';
+            });
+            
+            alertDiv.insertBefore(closeBtn, alertDiv.firstChild);
+            
+            // Auto-hide alerts after 5 seconds
+            setTimeout(function() {
+                alertDiv.style.opacity = '0';
+                setTimeout(function() {
+                    alertDiv.style.display = 'none';
+                }, 500);
+            }, 5000);
+        }
 
-// Add edit modal to window onclick handler
-window.onclick = function(event) {
-    const modal = document.getElementById('paymentModal');
-    const deleteModal = document.getElementById('deleteModal');
-    const editModal = document.getElementById('editPaymentModal');
-    
-    if (event.target == modal) {
-        modal.style.display = "none";
-    }
-    
-    if (event.target == deleteModal) {
-        closeDeleteModal();
-    }
-    
-    if (event.target == editModal) {
-        closeEditModal();
-    }
-};
-
-// Add this function to handle displaying alerts from the iframe
-function showAlert(type, message) {
-    const alertsContainer = document.querySelector('.alerts-container');
-    
-    // Create alert element
-    const alertDiv = document.createElement('div');
-    alertDiv.className = type === 'success' ? 'alert alert-success' : 'alert alert-danger';
-    alertDiv.textContent = message;
-    
-    // Clear previous alerts
-    alertsContainer.innerHTML = '';
-    
-    // Add new alert
-    alertsContainer.appendChild(alertDiv);
-    
-    // Scroll to top to see the alert
-    window.scrollTo(0, 0);
-    
-    // Manually trigger the alert handler for this new alert
-    const closeBtn = document.createElement('span');
-    closeBtn.innerHTML = '&times;';
-    closeBtn.className = 'alert-close';
-    closeBtn.style.float = 'right';
-    closeBtn.style.cursor = 'pointer';
-    closeBtn.style.fontWeight = 'bold';
-    closeBtn.style.fontSize = '20px';
-    closeBtn.style.marginLeft = '15px';
-    
-    closeBtn.addEventListener('click', function() {
-        alertDiv.style.display = 'none';
-    });
-    
-    alertDiv.insertBefore(closeBtn, alertDiv.firstChild);
-    
-    // Auto-hide alerts after 5 seconds
-    setTimeout(function() {
-        alertDiv.style.opacity = '0';
-        setTimeout(function() {
-            alertDiv.style.display = 'none';
-        }, 500);
-    }, 5000);
-}
+        function showReportMessage() {
+            showAlert('info', 'This record cannot be modified as the financial report for this term has already been approved.');
+        }
     </script>
 </body>
 </html>

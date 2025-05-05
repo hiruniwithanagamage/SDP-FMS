@@ -31,7 +31,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 }
 
 // Get current term
-$termQuery = "SELECT * FROM Static ORDER BY year DESC LIMIT 1";
+$termQuery = "SELECT * FROM Static WHERE status = 'active'";
 $termResult = search($termQuery);
 $termData = $termResult->fetch_assoc();
 
@@ -175,6 +175,7 @@ if ($membersResult->num_rows == 0) {
         /* Ensure Select2 container aligns properly */
         .form-group .select2-container {
             flex: 1;
+            margin-right: 50px;
         }
     </style>
 </head>
@@ -258,7 +259,7 @@ if ($membersResult->num_rows == 0) {
                     </div>
 
                     <div class="form-footer">
-                        <a href="fineDetails.php" class="cancel-btn">Cancel</a>
+                        <a href="home-treasurer.php" class="cancel-btn">Cancel</a>
                         <button type="submit" class="save-btn">Add Fine</button>
                     </div>
                 </form>
@@ -273,6 +274,7 @@ if ($membersResult->num_rows == 0) {
                 placeholder: 'Select or search for a member...',
                 allowClear: true,
                 width: '100%'
+                // margin-right: '0px'
             });
             
             // Update Member ID field when a member is selected
