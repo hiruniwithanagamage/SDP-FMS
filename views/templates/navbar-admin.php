@@ -246,7 +246,7 @@
            
            <div class="profile-dropdown" id="dropdownMenu">
                <a href="profile.php"><i class="fas fa-user"></i> Profile</a>
-               <a href="reports.php"><i class="fas fa-file-alt"></i> Reports</a>
+               <!-- <a href="reports.php"><i class="fas fa-file-alt"></i> Reports</a> -->
                <a href="../../logout.php" class="logout">
                    <i class="fas fa-sign-out-alt"></i> Logout
                </a>

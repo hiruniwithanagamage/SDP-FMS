@@ -23,6 +23,38 @@ function generateNewUserId($conn) {
     return "user1";
 }
 
+// Generate a secure default password
+function generateDefaultPassword() {
+    // Generate a password with at least one uppercase, one lowercase, one number
+    $uppercase = chr(rand(65, 90)); // A-Z
+    $lowercase = chr(rand(97, 122)); // a-z
+    $number = chr(rand(48, 57)); // 0-9
+    
+    // Generate 5 more random characters (can be any of uppercase, lowercase, or numbers)
+    $random = '';
+    for ($i = 0; $i < 5; $i++) {
+        $charType = rand(1, 3);
+        switch ($charType) {
+            case 1:
+                $random .= chr(rand(65, 90)); // uppercase
+                break;
+            case 2:
+                $random .= chr(rand(97, 122)); // lowercase
+                break;
+            case 3:
+                $random .= chr(rand(48, 57)); // number
+                break;
+        }
+    }
+    
+    // Combine all parts and shuffle to ensure randomness
+    $password = $uppercase . $lowercase . $number . $random;
+    $passwordArray = str_split($password);
+    shuffle($passwordArray);
+    
+    return implode('', $passwordArray);
+}
+
 // Function to check for existing username or email
 function checkExistingUser($conn, $username, $email) {
     $query = "SELECT UserId FROM User WHERE Username = ? OR Email = ?";
@@ -81,6 +113,10 @@ $adminResult = fetchRoleOptions($conn, "Admin", "AdminID", "Name");
 $auditorResult = fetchRoleOptions($conn, "Auditor", "AuditorID", "Name");
 $treasurerResult = fetchRoleOptions($conn, "Treasurer", "TreasurerID", "Name");
 $memberResult = fetchRoleOptions($conn, "Member", "MemberID", "Name");
+
+// Default password for newly created user
+$defaultPassword = generateDefaultPassword();
+$passwordMessage = "";
 
 // Check if form is submitted
 if(isset($_POST['add'])) {
@@ -151,9 +187,6 @@ if(isset($_POST['add'])) {
             $treasurerId = ($role === 'treasurer') ? $roleId : null;
             $memberId = ($role === 'member') ? $roleId : null;
             
-            // Get current timestamp for updated_at
-            $currentTimestamp = date('Y-m-d H:i:s');
-            
             // Update the query to include the additional fields from your updated schema
             $query = "INSERT INTO User (UserId, Username, Email, Password, 
                             Admin_AdminID, Auditor_AuditorID, 
@@ -177,17 +210,43 @@ if(isset($_POST['add'])) {
             // Execute the statement
             $stmt->execute();
             
+            // Save password for display
+            $passwordMessage = $password;
+            
             $_SESSION['success_message'] = "User added successfully";
+            $_SESSION['user_created'] = true;
+            $_SESSION['created_username'] = $username;
+            $_SESSION['created_password'] = $password;
+            $_SESSION['created_userid'] = $newUserId;
+            
             header("Location: userDetails.php");
             exit();
         } catch(Exception $e) {
             $error = "Error adding user: " . $e->getMessage();
             // Generate a new user ID in case we need to retry
             $newUserId = generateNewUserId($conn);
+            $defaultPassword = generateDefaultPassword();
         }
     } else {
         $error = implode("<br>", $errors);
     }
+}
+
+function generateUsername($name, $role, $memberId) {
+    // Extract first 5 characters of name (or less if name is shorter)
+    $namePrefix = substr(strtolower($name), 0, 5);
+    
+    // Extract first 4 characters of role (or less if role is shorter)
+    $rolePrefix = substr(strtolower($role), 0, 4);
+    
+    // Extract all digits from the end of memberID
+    preg_match('/\d+$/', $memberId, $matches);
+    $memberDigits = !empty($matches) ? $matches[0] : '';
+    
+    // Combine to form the username
+    $username = $namePrefix . '-' . $rolePrefix . $memberDigits;
+    
+    return $username;
 }
 ?>
 
@@ -198,6 +257,10 @@ if(isset($_POST['add'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Add User</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Add Select2 CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="../../assets/css/adminDetails.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -221,15 +284,17 @@ if(isset($_POST['add'])) {
         }
 
         .form-group {
-            margin-bottom: 1.5rem;
-            margin-right: 2rem;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
         }
-
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            color: #333;
-            font-weight: bold;
+        
+        .form-group label {
+            width: 150px;
+            text-align: right;
+            font-weight: 500;
         }
 
         input[type="text"],
@@ -243,6 +308,7 @@ if(isset($_POST['add'])) {
             border-radius: 4px;
             font-size: 1rem;
             transition: border-color 0.3s ease;
+            flex: 1;
         }
 
         input[type="text"]:focus,
@@ -256,13 +322,13 @@ if(isset($_POST['add'])) {
 
         .password-container {
             position: relative;
-            width: 100%;
+            width:500px;
         }
 
         .password-toggle {
             position: absolute;
-            right: 10px;
-            top: 50%;
+            right: 0px;
+            top: 35%;
             transform: translateY(-50%);
             cursor: pointer;
             color: #888;
@@ -282,6 +348,9 @@ if(isset($_POST['add'])) {
             display: flex;
             gap: 1rem;
             margin-top: 2rem;
+            justify-content: flex-end;
+            padding-top: 1rem;
+            border-top: 1px solid #eee;
         }
 
         .btn {
@@ -300,16 +369,6 @@ if(isset($_POST['add'])) {
 
         .btn-add:hover {
             background-color: #0d1757;
-        }
-
-        .btn-cancel {
-            background-color: white;
-            color: #1a237e;
-            border: 2px solid #1a237e;
-        }
-
-        .btn-cancel:hover {
-            background-color: #f5f7fa;
         }
 
         .alert {
@@ -335,7 +394,91 @@ if(isset($_POST['add'])) {
             background: #f5f7fa;
             padding: 2rem;
         }
+        
+        .form-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .form-title {
+            font-size: 1.5rem;
+            color: #1a237e;
+            margin: 0;
+        }
+        
+        .password-info {
+            padding: 0.8rem;
+            background-color: #e3f2fd;
+            color: #0d47a1;
+            border-radius: 4px;
+            margin-bottom: 1.5rem;
+            border: 1px solid #bbdefb;
+        }
+        
+        .password-copy-btn {
+            background: none;
+            border: none;
+            color: #1a237e;
+            cursor: pointer;
+            margin-left: 0.5rem;
+        }
+        
+        .password-copy-btn:hover {
+            color: #0d1757;
+        }
+        
+        /* Style for auto-filled fields */
+        input[readonly], 
+        input[disabled],
+        select[readonly], 
+        select[disabled] {
+            background-color: #f2f2f2;
+            cursor: not-allowed;
+        }
+
+        .select2-container{
+            flex: 1;
+            margin-right: 50px;
+        }
+        
+        /* Select2 custom styling */
+        .select2-container--default .select2-selection--single {
+            height: 45px;
+            padding: 8px 4px;
+            border: 2px solid #e0e0e0;
+            border-radius: 4px;
+        }
+        
+        .select2-container--default .select2-selection--single .select2-selection__arrow {
+            height: 43px;
+        }
+        
+        .select2-container--default .select2-selection--single .select2-selection__rendered {
+            line-height: 28px;
+            color: #333;
+        }
+        
+        .select2-container--default .select2-results__option--highlighted[aria-selected] {
+            background-color: #1a237e;
+        }
+        
+        .select2-dropdown {
+            border: 2px solid #e0e0e0;
+        }
+        
+        .select2-search--dropdown .select2-search__field {
+            padding: 8px;
+            border: 1px solid #ddd;
+        }
     </style>    
+    
+    <!-- Add jQuery (required for Select2) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <!-- Add Select2 JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
+    
     <script>
         // Role-specific options
         const roleOptions = {
@@ -369,22 +512,48 @@ if(isset($_POST['add'])) {
             ]
         };
 
+        // Initialize Select2 and update role options
+        $(document).ready(function() {
+            // Initialize Select2 for role_id dropdown
+            $('#role_id').select2({
+                placeholder: "Select Associated Name",
+                allowClear: true,
+                width: '100%'
+            });
+            
+            // Handle role change
+            $('#role').on('change', function() {
+                updateRoleOptions();
+            });
+            
+            // Initialize options if a role is already selected (e.g., on form submit with errors)
+            if ($('#role').val()) {
+                updateRoleOptions();
+            }
+        });
+
         function updateRoleOptions() {
             const role = document.getElementById('role').value;
             const roleIdSelect = document.getElementById('role_id');
             
             // Clear existing options
-            roleIdSelect.innerHTML = '<option value="">Select Associated Name</option>';
+            $('#role_id').empty().append('<option value=""></option>');
             
             if (role) {
                 // Populate with new options
                 roleOptions[role].forEach(option => {
-                    const optionElement = document.createElement('option');
-                    optionElement.value = option.id;
-                    optionElement.textContent = option.name;
-                    roleIdSelect.appendChild(optionElement);
+                    const optionElement = new Option(option.name, option.id, false, false);
+                    $('#role_id').append(optionElement);
                 });
             }
+            
+            // Refresh Select2 to reflect new options
+            $('#role_id').trigger('change');
+            
+            <?php if(isset($role) && isset($roleId)): ?>
+            // Set the previously selected value if form was submitted with errors
+            $('#role_id').val("<?php echo htmlspecialchars($roleId); ?>").trigger('change');
+            <?php endif; ?>
         }
 
         // Password visibility toggle
@@ -402,6 +571,64 @@ if(isset($_POST['add'])) {
                 toggleIcon.classList.add('fa-eye');
             }
         }
+        
+        // Copy password to clipboard
+        function copyPassword() {
+            const passwordInput = document.getElementById('password');
+            passwordInput.select();
+            document.execCommand('copy');
+            
+            // Show feedback
+            const copyBtn = document.getElementById('copy-password-btn');
+            const originalText = copyBtn.innerHTML;
+            copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+            
+            setTimeout(() => {
+                copyBtn.innerHTML = originalText;
+            }, 2000);
+        }
+
+        // Username generation when role and role_id are selected
+        $(document).ready(function() {
+            // Setup event handlers for role and role_id changes
+            $('#role, #role_id').on('change', function() {
+                updateUsernameField();
+            });
+            
+            function updateUsernameField() {
+                const role = $('#role').val();
+                const roleId = $('#role_id').val();
+                
+                if (role && roleId) {
+                    // Find the name associated with the selected roleId
+                    const selectedOption = roleOptions[role].find(option => option.id === roleId);
+                    
+                    if (selectedOption) {
+                        // Get the name from the selected option
+                        const name = selectedOption.name;
+                        
+                        // Generate username on client side following the format
+                        // 5prefix of name + "-" + 4prefix of role + all digits from memberID
+                        const namePrefix = name.toLowerCase().substring(0, 5);
+                        const rolePrefix = role.toLowerCase().substring(0, 4);
+                        
+                        // Extract digits from roleId
+                        const digitMatches = roleId.match(/\d+$/);
+                        const memberDigits = digitMatches ? digitMatches[0] : '';
+                        
+                        // Combine to form username
+                        const generatedUsername = namePrefix + '-' + rolePrefix + memberDigits;
+                        
+                        // Set the username field
+                        $('#username').val(generatedUsername);
+                        
+                        // Make the username field readonly as it's generated
+                        $('#username').attr('readonly', true);
+                        $('#username').addClass('generated-field');
+                    }
+                }
+            }
+        });
     </script>
 </head>
 <body>
@@ -409,7 +636,9 @@ if(isset($_POST['add'])) {
         <?php include '../templates/navbar-admin.php'; ?>
         
         <div class="container">
-            <h1>Add New User</h1>
+            <div class="form-header">
+                <h1 class="form-title">Add New User</h1>
+            </div>
             
             <?php if(isset($error)): ?>
                 <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
@@ -417,33 +646,13 @@ if(isset($_POST['add'])) {
             
             <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
                 <div class="form-group">
-                    <label for="username">Username</label>
-                    <input type="text" id="username" name="username" required value="<?php echo isset($username) ? htmlspecialchars($username) : ''; ?>">
-                </div>
-
-                <div class="form-group">
-                    <label for="email">Email</label>
-                    <input type="email" id="email" name="email" value="<?php echo isset($email) ? htmlspecialchars($email) : ''; ?>">
-                </div>
-
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <div class="password-container">
-                        <input type="password" id="password" name="password" required>
-                        <span class="password-toggle" onclick="togglePasswordVisibility()">
-                            <i class="fas fa-eye" id="password-toggle-icon"></i>
-                        </span>
-                    </div>
-                </div>
-
-                <div class="form-group">
                     <label for="user_id">User ID</label>
                     <input type="text" id="user_id" name="user_id" value="<?php echo htmlspecialchars($newUserId); ?>" disabled>
                 </div>
 
                 <div class="form-group">
                     <label for="role">Role</label>
-                    <select id="role" name="role" required onchange="updateRoleOptions()">
+                    <select id="role" name="role" required>
                         <option value="">Select Role</option>
                         <option value="admin" <?php echo (isset($role) && $role === 'admin') ? 'selected' : ''; ?>>Admin</option>
                         <option value="auditor" <?php echo (isset($role) && $role === 'auditor') ? 'selected' : ''; ?>>Auditor</option>
@@ -455,22 +664,40 @@ if(isset($_POST['add'])) {
                 <div class="form-group">
                     <label for="role_id">Associated Name</label>
                     <select id="role_id" name="role_id" required>
-                        <option value="">Select Associated Name</option>
-                        <?php if(isset($role) && isset($roleId)): ?>
-                            <script>
-                                // Re-populate the options if form was submitted with errors
-                                document.addEventListener('DOMContentLoaded', function() {
-                                    updateRoleOptions();
-                                    document.getElementById('role_id').value = "<?php echo htmlspecialchars($roleId); ?>";
-                                });
-                            </script>
-                        <?php endif; ?>
+                        <option value=""></option>
                     </select>
                 </div>
 
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required value="<?php echo isset($username) ? htmlspecialchars($username) : ''; ?>">
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" value="<?php echo isset($email) ? htmlspecialchars($email) : ''; ?>">
+                </div>
+
+                <div class="password-info">
+                    <strong>Auto-generated Password:</strong> User can use this secure password until create a own.
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <div class="password-container">
+                        <input type="password" id="password" name="password" required value="<?php echo htmlspecialchars($defaultPassword); ?>">
+                        <span class="password-toggle" onclick="togglePasswordVisibility()">
+                            <i class="fas fa-eye" id="password-toggle-icon"></i>
+                        </span>
+                        <button type="button" id="copy-password-btn" class="password-copy-btn" onclick="copyPassword()">
+                            <i class="fas fa-copy"></i> Copy
+                        </button>
+                    </div>
+                </div>
+
                 <div class="button-group">
+                    <button type="button" onclick="window.location.href='userDetails.php'" class="btn cancel-btn">Cancel</button>
                     <button type="submit" name="add" class="btn btn-add">Add User</button>
-                    <button type="button" onclick="window.location.href='userDetails.php'" class="btn btn-cancel">Cancel</button>
                 </div>
             </form>
         </div>
