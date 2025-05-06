@@ -1,17 +1,118 @@
 <?php
-// Password reset functionality
+session_start();
+
+date_default_timezone_set('Asia/Colombo');
+
+// Clear all reset session variables if "start over" is requested
+if (isset($_GET['reset']) && $_GET['reset'] == 'true') {
+    unset($_SESSION['reset_requested']);
+    unset($_SESSION['code_verified']);
+    unset($_SESSION['reset_token']);
+    // Redirect to the same page without parameters
+    header("Location: " . strtok($_SERVER["REQUEST_URI"], '?'));
+    exit();
+}
+
+require_once "config/database.php";
 
 // Function to generate secure password reset token
 function generatePasswordResetToken() {
     return bin2hex(random_bytes(32));
 }
 
-// Function to initiate password reset
-function initiatePasswordReset($email) {
-    // Check if email exists
-    $query = "SELECT UserId, Username FROM User WHERE Email = ?";
+// Function to simulate SMS sending (same as in your death welfare application)
+function sendEmailToSMS($phone, $message) {
+    // Clean the phone number
+    $phone = preg_replace('/[^0-9]/', '', $phone);
+    
+    // Ensure it's a 10-digit number
+    if (strlen($phone) === 10 && $phone[0] === '0') {
+        // Valid Sri Lankan number
+    } elseif (strlen($phone) === 9) {
+        // Add 0 prefix if missing
+        $phone = '0' . $phone;
+    } else {
+        // Invalid number format
+        return false;
+    }
+    
+    // Determine carrier based on phone number prefix
+    $prefix = substr($phone, 0, 3);
+    $carrier = '';
+    $email_domain = '';
+    
+    if(in_array($prefix, ['071', '077'])) {
+        $carrier = 'Dialog';
+        $email_domain = '@sms.dialog.lk';
+    } elseif(in_array($prefix, ['072', '070'])) {
+        $carrier = 'Mobitel';
+        $email_domain = '@sms.mobitel.lk';
+    } elseif(in_array($prefix, ['075', '078'])) {
+        $carrier = 'Etisalat';
+        $email_domain = '@sms.etisalat.lk';
+    } elseif(in_array($prefix, ['076'])) {
+        $carrier = 'Hutch';
+        $email_domain = '@sms.hutch.lk';
+    } else {
+        $carrier = 'Unknown';
+    }
+    
+    // Create log directory if it doesn't exist
+    $logDir = __DIR__ . '/sms_logs';
+    
+    // Debug: Log directory creation attempt
+    error_log("Attempting to create directory: " . $logDir);
+    
+    if (!file_exists($logDir)) {
+        if(!mkdir($logDir, 0777, true)) {
+            error_log("Failed to create directory: " . $logDir);
+            // Fallback to current directory if mkdir fails
+            $logDir = __DIR__;
+        } else {
+            error_log("Successfully created directory: " . $logDir);
+        }
+    } else {
+        error_log("Directory already exists: " . $logDir);
+    }
+    
+    // Log file path
+    $logFile = $logDir . '/sms_log_' . date('Y-m-d') . '.txt';
+    
+    // Prepare log message
+    $logMessage = str_repeat("-", 50) . "\n";
+    $logMessage .= "Time: " . date('Y-m-d H:i:s') . "\n";
+    $logMessage .= "Phone: " . $phone . " (" . $carrier . ")\n";
+    $logMessage .= "Email: " . $phone . $email_domain . "\n";
+    $logMessage .= "Message: " . $message . "\n";
+    $logMessage .= str_repeat("-", 50) . "\n\n";
+    
+    // Write to log file
+    if(file_put_contents($logFile, $logMessage, FILE_APPEND) === false) {
+        error_log("Failed to write to log file: " . $logFile);
+    } else {
+        error_log("Successfully wrote to log file: " . $logFile);
+    }
+    
+    // Show in browser for debugging
+    // if(isset($_SESSION['debug_mode']) && $_SESSION['debug_mode'] === true) {
+    //     echo "<div style='background: #e8f5e9; border: 1px solid #4caf50; padding: 15px; margin: 10px; border-radius: 5px;'>";
+    //     echo "<h4 style='margin: 0 0 10px 0; color: #2e7d32;'>SMS Simulation</h4>";
+    //     echo "<strong>To:</strong> " . $phone . " (" . $carrier . ")<br>";
+    //     echo "<strong>Gateway:</strong> " . $email_domain . "<br>";
+    //     echo "<strong>Message:</strong><br>" . nl2br(htmlspecialchars($message)) . "<br>";
+    //     echo "<small style='color: #666;'>This message would be sent when hosted on a real server.</small>";
+    //     echo "</div>";
+    // }
+    
+    return true;
+}
+
+// Modified function to initiate password reset via SMS directly with username
+function initiatePasswordReset($username) {
+    // Check if username exists
+    $query = "SELECT UserId, Username, Member_MemberID FROM User WHERE Username = ?";
     $stmt = prepare($query);
-    $stmt->bind_param("s", $email);
+    $stmt->bind_param("s", $username);
     $stmt->execute();
     $result = $stmt->get_result();
     
@@ -20,32 +121,62 @@ function initiatePasswordReset($email) {
         $token = generatePasswordResetToken();
         $expiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
         
-        // Store token and expiry
-        $updateQuery = "UPDATE User SET reset_token = ?, reset_expires = ? WHERE UserId = ?";
-        $updateStmt = prepare($updateQuery);
-        $updateStmt->bind_param("sss", $token, $expiry, $user['UserId']);
+        // Get member's phone number
+        $phoneQuery = "SELECT Mobile_Number FROM Member WHERE MemberID = ?";
+        $phoneStmt = prepare($phoneQuery);
+        $phoneStmt->bind_param("s", $user['Member_MemberID']);
+        $phoneStmt->execute();
+        $phoneResult = $phoneStmt->get_result();
         
-        if ($updateStmt->execute()) {
-            // Here you would send an email with the reset link
-            // For now, we'll return the token and details
-            return [
-                'status' => 'success',
-                'username' => $user['Username'],
-                'token' => $token,
-                'reset_link' => "reset_password.php?token=$token"
-            ];
+        if ($phoneResult->num_rows == 1) {
+            $memberData = $phoneResult->fetch_assoc();
+            $phone = $memberData['Mobile_Number'];
+            
+            if (!empty($phone)) {
+                // Store token and expiry
+                $updateQuery = "UPDATE User SET reset_token = ?, reset_expires = ? WHERE UserId = ?";
+                $updateStmt = prepare($updateQuery);
+                $updateStmt->bind_param("sss", $token, $expiry, $user['UserId']);
+                
+                if ($updateStmt->execute()) {
+                    // Enable debug mode for testing
+                    $_SESSION['debug_mode'] = true;
+                    
+                    // Create SMS message with token
+                    $smsMessage = "Password Reset Request\n";
+                    $smsMessage .= "Username: " . $user['Username'] . "\n";
+                    $smsMessage .= "Reset Code: " . substr($token, 0, 8) . "\n";
+                    $smsMessage .= "Valid for: 1 hour\n";
+                    $smsMessage .= "From: Society Management System";
+                    
+                    // Send SMS
+                    if (sendEmailToSMS($phone, $smsMessage)) {
+                        return [
+                            'status' => 'success',
+                            'message' => 'Password reset code sent to your mobile number'
+                        ];
+                    } else {
+                        return ['status' => 'error', 'message' => 'Failed to send SMS. Please try again.'];
+                    }
+                }
+            } else {
+                return ['status' => 'error', 'message' => 'No phone number found for this account'];
+            }
+        } else {
+            return ['status' => 'error', 'message' => 'Member information not found'];
         }
     }
     
-    return ['status' => 'error', 'message' => 'Email not found'];
+    return ['status' => 'error', 'message' => 'Username not found or invalid'];
 }
 
 // Function to reset password with token
 function resetPassword($token, $newPassword) {
     // Validate token
-    $query = "SELECT UserId, reset_expires FROM User WHERE reset_token = ?";
+    $query = "SELECT UserId, reset_expires FROM User WHERE reset_token = ? OR reset_token LIKE ?";
+    $tokenPattern = substr($token, 0, 8) . '%';
     $stmt = prepare($query);
-    $stmt->bind_param("s", $token);
+    $stmt->bind_param("ss", $token, $tokenPattern);
     $stmt->execute();
     $result = $stmt->get_result();
     
@@ -73,6 +204,88 @@ function resetPassword($token, $newPassword) {
     }
     
     return ['status' => 'error', 'message' => 'Invalid reset token'];
+}
+
+// Process the form submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Process form
+    if (isset($_POST['reset-submit'])) {
+        // Get username
+        $username = isset($_POST['username']) ? $_POST['username'] : '';
+        if (empty($username)) {
+            $error = "Please enter your username";
+        } else {
+            // Enable debug mode for testing
+            $_SESSION['debug_mode'] = true;
+            
+            // Send SMS code
+            $result = initiatePasswordReset($username);
+            if ($result['status'] === 'success') {
+                $_SESSION['reset_requested'] = true;
+                $_SESSION['reset_message'] = $result['message'];
+            } else {
+                $error = $result['message'];
+            }
+        }
+    } 
+    // Process verification code
+    else if (isset($_POST['verify-submit'])) {
+        $code = '';
+        for ($i = 0; $i < 8; $i++) {
+            $code .= isset($_POST["code-$i"]) ? $_POST["code-$i"] : '';
+        }
+        
+        if (strlen($code) !== 8) {
+            $verify_error = "Please enter all 8 digits of the verification code";
+        } else {
+            // Find the token in the database that starts with this code
+            $query = "SELECT reset_token FROM User WHERE reset_token LIKE ? AND reset_expires > NOW()";
+            $param = $code . '%';
+            $stmt = prepare($query);
+            $stmt->bind_param("s", $param);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                $token_row = $result->fetch_assoc();
+                $_SESSION['reset_token'] = $token_row['reset_token'];
+                $_SESSION['code_verified'] = true;
+            } else {
+                $verify_error = "Invalid or expired verification code";
+            }
+        }
+    }
+    // Process password reset
+    else if (isset($_POST['password-submit'])) {
+        $password = isset($_POST['new-password']) ? $_POST['new-password'] : '';
+        $confirm = isset($_POST['confirm-password']) ? $_POST['confirm-password'] : '';
+        
+        if (empty($password) || empty($confirm)) {
+            $password_error = "Please fill in all fields";
+        } else if ($password !== $confirm) {
+            $password_error = "Passwords do not match";
+        } else if (strlen($password) < 5) {
+            $password_error = "Password must be at least 5 characters long";
+        } else if (isset($_SESSION['reset_token'])) {
+            $result = resetPassword($_SESSION['reset_token'], $password);
+            if ($result['status'] === 'success') {
+                $_SESSION['password_reset'] = true;
+                $_SESSION['reset_message'] = $result['message'];
+                
+                // Clean up session
+                unset($_SESSION['reset_token']);
+                unset($_SESSION['code_verified']);
+                unset($_SESSION['reset_requested']);
+                
+                // Redirect to login after a delay
+                header("Refresh: 2; URL=index.php");
+            } else {
+                $password_error = $result['message'];
+            }
+        } else {
+            $password_error = "Invalid reset process. Please start over.";
+        }
+    }
 }
 ?>
 
@@ -165,19 +378,16 @@ function resetPassword($token, $newPassword) {
             margin: 1rem 0;
             padding: 0.8rem;
             border-radius: 5px;
-            display: none;
         }
 
         .message.error {
             background-color: #f8d7da;
             color: #721c24;
-            display: block;
         }
 
         .message.success {
             background-color: #d4edda;
             color: #155724;
-            display: block;
         }
 
         .back-link {
@@ -199,140 +409,125 @@ function resetPassword($token, $newPassword) {
         .password-container {
             position: relative;
         }
+        
+        .token-form {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .token-input {
+            width: 40px !important;
+            text-align: center;
+            font-size: 1.2rem;
+            padding: 0.5rem;
+        }
     </style>
 </head>
 <body>
     <div class="container animate__animated animate__fadeIn">
-        <!-- Reset Request Form -->
-        <div id="resetRequestForm">
-            <h2>Reset Password</h2>
-            <div class="form-group">
-                <label for="email">Enter your email</label>
-                <input type="email" id="email" required>
+        <?php if (isset($_SESSION['password_reset']) && $_SESSION['password_reset']): ?>
+            <!-- Success message -->
+            <div class="message success">
+                <?= htmlspecialchars($_SESSION['reset_message'] ?? 'Password reset successful!') ?>
+                <p>Redirecting to login page...</p>
             </div>
-            <div id="resetMessage" class="message"></div>
-            <button onclick="requestReset()">Send Reset Link</button>
             <a href="index.php" class="back-link">Back to Login</a>
-        </div>
-
-        <!-- Password Reset Form (hidden initially) -->
-        <div id="resetPasswordForm" style="display: none;">
-            <h2>New Password</h2>
-            <div class="form-group">
-                <label for="newPassword">New Password</label>
-                <div class="password-container">
-                    <input type="password" id="newPassword" required>
-                    <span class="password-toggle" onclick="togglePassword('newPassword', this)">
-                        <i class="fas fa-eye"></i>
-                    </span>
+        
+        <?php elseif (isset($_SESSION['code_verified']) && $_SESSION['code_verified']): ?>
+            <!-- Password Reset Form -->
+            <h2>Set New Password</h2>
+            <?php if (isset($password_error)): ?>
+                <div class="message error"><?= htmlspecialchars($password_error) ?></div>
+            <?php endif; ?>
+            
+            <form method="POST" action="">
+                <div class="form-group">
+                    <label for="new-password">New Password</label>
+                    <div class="password-container">
+                        <input type="password" id="new-password" name="new-password" required>
+                        <span class="password-toggle" onclick="togglePassword('new-password', this)">
+                            <i class="fas fa-eye"></i>
+                        </span>
+                    </div>
                 </div>
-            </div>
-            <div class="form-group">
-                <label for="confirmPassword">Confirm Password</label>
-                <div class="password-container">
-                    <input type="password" id="confirmPassword" required>
-                    <span class="password-toggle" onclick="togglePassword('confirmPassword', this)">
-                        <i class="fas fa-eye"></i>
-                    </span>
+                <div class="form-group">
+                    <label for="confirm-password">Confirm Password</label>
+                    <div class="password-container">
+                        <input type="password" id="confirm-password" name="confirm-password" required>
+                        <span class="password-toggle" onclick="togglePassword('confirm-password', this)">
+                            <i class="fas fa-eye"></i>
+                        </span>
+                    </div>
                 </div>
-            </div>
-            <div id="passwordMessage" class="message"></div>
-            <button onclick="resetPassword()">Reset Password</button>
-        </div>
+                <button type="submit" name="password-submit">Reset Password</button>
+            </form>
+            <a href="?reset=true" class="back-link">Start Over</a>
+        
+        <?php elseif (isset($_SESSION['reset_requested']) && $_SESSION['reset_requested']): ?>
+            <!-- Verification Code Form -->
+            <h2>Enter Verification Code</h2>
+            <p>We've sent a verification code to your mobile number</p>
+            
+            <?php if (isset($verify_error)): ?>
+                <div class="message error"><?= htmlspecialchars($verify_error) ?></div>
+            <?php endif; ?>
+            
+            <form method="POST" action="">
+                <div class="form-group">
+                    <label>Verification Code</label>
+                    <div class="token-form">
+                        <?php for ($i = 0; $i < 8; $i++): ?>
+                            <input type="text" class="token-input" maxlength="1" name="code-<?= $i ?>" 
+                                   data-index="<?= $i ?>" onkeyup="moveToNext(this)" required>
+                        <?php endfor; ?>
+                    </div>
+                </div>
+                <button type="submit" name="verify-submit">Verify Code</button>
+            </form>
+            <a href="?reset=true" class="back-link">Start Over</a>
+        
+        <?php else: ?>
+            <!-- Initial Reset Form -->
+            <h2>Reset Password</h2>
+            <?php if (isset($error)): ?>
+                <div class="message error"><?= htmlspecialchars($error) ?></div>
+            <?php endif; ?>
+            
+            <form method="POST" action="">
+                <div class="form-group">
+                    <label for="username">Enter your username</label>
+                    <input type="text" id="username" name="username" required>
+                    <small>We'll send a reset code to your registered mobile number</small>
+                </div>
+                <button type="submit" name="reset-submit">Send Reset Code</button>
+            </form>
+            <a href="index.php" class="back-link">Back to Login</a>
+        <?php endif; ?>
     </div>
 
     <script>
-        // Check if we have a token in the URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const token = urlParams.get('token');
-
-        if (token) {
-            document.getElementById('resetRequestForm').style.display = 'none';
-            document.getElementById('resetPasswordForm').style.display = 'block';
+        function moveToNext(input) {
+            const index = parseInt(input.getAttribute('data-index'));
+            const maxIndex = 7; // 8 digits - 1 (zero-indexed)
+            
+            const evt = window.event || event; // Ensure event is defined
+            
+            // If backspace is pressed, move to previous input
+            if (evt.keyCode === 8 && index > 0) {
+                const prevInput = document.querySelector(`.token-input[data-index="${index - 1}"]`);
+                prevInput.focus();
+                return;
+            }
+            
+            // Move to next input if current has value and we're not at the end
+            if (input.value && index < maxIndex) {
+                const nextInput = document.querySelector(`.token-input[data-index="${index + 1}"]`);
+                nextInput.focus();
+            }
         }
-
-        function requestReset() {
-            const email = document.getElementById('email').value;
-            const messageDiv = document.getElementById('resetMessage');
-
-            if (!email) {
-                messageDiv.className = 'message error';
-                messageDiv.textContent = 'Please enter your email';
-                return;
-            }
-
-            fetch('process_reset_request.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: `email=${encodeURIComponent(email)}`
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    messageDiv.className = 'message success';
-                    messageDiv.textContent = 'Password reset link sent to your email';
-                } else {
-                    messageDiv.className = 'message error';
-                    messageDiv.textContent = data.message;
-                }
-            })
-            .catch(error => {
-                messageDiv.className = 'message error';
-                messageDiv.textContent = 'An error occurred. Please try again.';
-            });
-        }
-
-        function resetPassword() {
-            const newPassword = document.getElementById('newPassword').value;
-            const confirmPassword = document.getElementById('confirmPassword').value;
-            const messageDiv = document.getElementById('passwordMessage');
-
-            if (!newPassword || !confirmPassword) {
-                messageDiv.className = 'message error';
-                messageDiv.textContent = 'Please fill in all fields';
-                return;
-            }
-
-            if (newPassword !== confirmPassword) {
-                messageDiv.className = 'message error';
-                messageDiv.textContent = 'Passwords do not match';
-                return;
-            }
-
-            if (newPassword.length < 5) {
-                messageDiv.className = 'message error';
-                messageDiv.textContent = 'Password must be at least 5 characters long';
-                return;
-            }
-
-            fetch('process_password_reset.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: `token=${encodeURIComponent(token)}&password=${encodeURIComponent(newPassword)}`
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    messageDiv.className = 'message success';
-                    messageDiv.textContent = 'Password reset successful! Redirecting...';
-                    setTimeout(() => {
-                        window.location.href = 'login.php';
-                    }, 2000);
-                } else {
-                    messageDiv.className = 'message error';
-                    messageDiv.textContent = data.message;
-                }
-            })
-            .catch(error => {
-                messageDiv.className = 'message error';
-                messageDiv.textContent = 'An error occurred. Please try again.';
-            });
-        }
-
+        
         function togglePassword(inputId, icon) {
             const input = document.getElementById(inputId);
             const iconElement = icon.querySelector('i');

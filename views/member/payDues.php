@@ -67,17 +67,51 @@ if (isset($_SESSION['u'])) {
                 $registrationDue = max(0, $registrationFee - $paidRegistration);
                 
                 // Calculate unpaid monthly fees
-                $membershipQuery = "SELECT 
-                                  COALESCE(SUM(mf.Amount), 0) as total_membership_fees,
-                                  COALESCE(SUM(CASE WHEN mf.IsPaid = 'Yes' THEN mf.Amount ELSE 0 END), 0) as paid_membership_fees
-                                  FROM MembershipFee mf
-                                  WHERE mf.Member_MemberID = ?";
-                $membershipStmt = $conn->prepare($membershipQuery);
-                $membershipStmt->bind_param("s", $memberID);
-                $membershipStmt->execute();
-                $membershipResult = $membershipStmt->get_result();
-                $membershipData = $membershipResult->fetch_assoc();
-                $membershipDue = $membershipData['total_membership_fees'] - $membershipData['paid_membership_fees'];
+                $currentDate = new DateTime(); // Get current date
+                $monthlyFee = $feeData['monthly_fee']; // Get the monthly fee amount from Static table
+
+                // Find the last paid month for this member
+                $lastPaidQuery = "SELECT MAX(Date) as last_paid_date 
+                                FROM MembershipFee mf 
+                                WHERE mf.Member_MemberID = ? AND mf.IsPaid = 'Yes'";
+                $lastPaidStmt = $conn->prepare($lastPaidQuery);
+                $lastPaidStmt->bind_param("s", $memberID);
+                $lastPaidStmt->execute();
+                $lastPaidResult = $lastPaidStmt->get_result();
+                $lastPaidData = $lastPaidResult->fetch_assoc();
+
+                if ($lastPaidData['last_paid_date']) {
+                    // If they have paid before, calculate from the last paid month
+                    $lastPaidDate = new DateTime($lastPaidData['last_paid_date']);
+                    
+                    // Get difference in months
+                    $interval = $currentDate->diff($lastPaidDate);
+                    $monthsDiff = ($interval->y * 12) + $interval->m;
+                    
+                    // If we're in a new month since last payment
+                    if ($monthsDiff > 0) {
+                        $membershipDue = $monthsDiff * $monthlyFee;
+                    } else {
+                        $membershipDue = 0; // No dues if current month is paid
+                    }
+                } else {
+                    // If they have never paid, calculate from join date
+                    $joinedDate = new DateTime($memberData['Joined_Date']);
+                    
+                    // Get difference in months
+                    $interval = $currentDate->diff($joinedDate);
+                    $monthsDiff = ($interval->y * 12) + $interval->m;
+                    
+                    // Include current month if we're past the day of the month they joined
+                    if ($currentDate->format('d') > $joinedDate->format('d')) {
+                        $monthsDiff += 1;
+                    }
+                    
+                    $membershipDue = $monthsDiff * $monthlyFee;
+                }
+
+                // Format the dues for display
+                $formattedMembershipDue = number_format($membershipDue, 2);
                 
                 // Calculate unpaid fines
                 $fineQuery = "SELECT COALESCE(SUM(Amount), 0) as unpaid_fines 
