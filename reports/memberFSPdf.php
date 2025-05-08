@@ -2,6 +2,8 @@
 session_start();
 require_once "../config/database.php";
 
+date_default_timezone_set('Asia/Colombo');
+
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
     header("Location: ../loginProcess.php");
@@ -79,8 +81,8 @@ function getDeathWelfareStatus($memberID) {
 }
 
 // Function to get membership status
-function getMembershipStatus($memberID) {
-    // Member is active if their status is 'active'
+function getMembershipStatus($memberID, $isRegistrationFeePaid) {
+    // Member is active if their status is 'active' AND registration fee is fully paid
     $sql = "SELECT Status FROM Member WHERE MemberID = ?";
     $stmt = prepare($sql);
     $stmt->bind_param("s", $memberID);
@@ -88,35 +90,59 @@ function getMembershipStatus($memberID) {
     $result = $stmt->get_result();
     $row = $result->fetch_assoc();
     
-    return $row['Status'] === 'active' ? 'Active' : 'Inactive';
+    // Member is considered active only if their status is 'active' AND they've paid registration fee
+    $isActive = ($row['Status'] === 'Full Member' && $isRegistrationFeePaid);
+    
+    return $isActive ? 'Full Member' : 'Pending';
 }
 
 // Function to get membership fee payments
 function getMembershipFeePayments($memberID, $year) {
-    $sql = "SELECT mf.Amount as fee_amount, 
-                  COALESCE(SUM(p.Amount), 0) as paid_amount
+    // Get current month number (1-12)
+    $currentMonth = date('n');
+    
+    // Get monthly fee amount from Static table
+    $feeQuery = "SELECT monthly_fee FROM Static ORDER BY year DESC LIMIT 1";
+    $feeResult = search($feeQuery);
+    $feeRow = $feeResult->fetch_assoc();
+    $monthlyFee = $feeRow['monthly_fee'];
+    
+    // Calculate total expected fee for the year up to current month
+    $totalExpectedFee = $currentMonth * $monthlyFee;
+    
+    // Get the total amount paid for membership fees this year
+    $sql = "SELECT COALESCE(SUM(mf.Amount), 0) as paid_amount
            FROM MembershipFee mf
            LEFT JOIN MembershipFeePayment mfp ON mf.FeeID = mfp.FeeID
            LEFT JOIN Payment p ON mfp.PaymentID = p.PaymentID
-           WHERE mf.Member_MemberID = ? AND mf.Term = ?
-           GROUP BY mf.FeeID";
+           WHERE mf.Member_MemberID = ? 
+           AND mf.Term = ? 
+           AND mf.Type = 'monthly'";
     $stmt = prepare($sql);
     $stmt->bind_param("si", $memberID, $year);
     $stmt->execute();
     $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    $totalPaid = $row['paid_amount'];
+
+    // Calculate how many months have been paid
+    // Important: Use division with proper rounding to handle partial payments
+    $paidMonths = round($totalPaid / $monthlyFee);
     
-    $totalFee = 0;
-    $totalPaid = 0;
+    // Calculate remaining months - ensure it doesn't go negative
+    $remainingMonths = max(0, $currentMonth - $paidMonths);
     
-    while ($row = $result->fetch_assoc()) {
-        $totalFee += $row['fee_amount'];
-        $totalPaid += $row['paid_amount'];
-    }
+    // Calculate the due amount
+    $dueAmount = $remainingMonths * $monthlyFee;
     
     return [
-        'total' => $totalFee,
+        'monthlyFee' => $monthlyFee,
+        'currentMonth' => $currentMonth,
+        'paidMonths' => $paidMonths,
+        'remainingMonths' => $remainingMonths,
+        'total' => $totalExpectedFee,
         'paid' => $totalPaid,
-        'due' => $totalFee - $totalPaid
+        'due' => $dueAmount
     ];
 }
 
@@ -205,9 +231,14 @@ function getRegistrationFeeStatus($memberID) {
         $totalPaid += $row['Amount'];
     }
     
+    $dueAmount = $requiredFee - $totalPaid;
+    $dueAmount = $dueAmount > 0 ? $dueAmount : 0;
+    
     return [
         'required' => $requiredFee,
         'paid' => $totalPaid,
+        'due' => $dueAmount,
+        'isFullyPaid' => $totalPaid >= $requiredFee,
         'status' => $totalPaid >= $requiredFee ? 'Fully Paid' : 'Partially Paid'
     ];
 }
@@ -220,16 +251,16 @@ if (!$memberDetails) {
     exit();
 }
 
+$registrationFee = getRegistrationFeeStatus($memberID);
 $loanStatus = getLoanStatus($memberID);
 $deathWelfare = getDeathWelfareStatus($memberID);
-$membershipStatus = getMembershipStatus($memberID);
+$membershipStatus = getMembershipStatus($memberID, $registrationFee['isFullyPaid']);
 $membershipFee = getMembershipFeePayments($memberID, $currentYear);
 $fines = getFinePayments($memberID);
 $loans = getLoanPayments($memberID);
-$registrationFee = getRegistrationFeeStatus($memberID);
 
-// Calculate total outstanding
-$totalOutstanding = $membershipFee['due'] + $fines['due'] + $loans['due'];
+// Calculate total outstanding - now including registration fee due
+$totalOutstanding = $membershipFee['due'] + $fines['due'] + $loans['due'] + $registrationFee['due'];
 ?>
 
 <!DOCTYPE html>
@@ -460,8 +491,8 @@ $totalOutstanding = $membershipFee['due'] + $fines['due'] + $loans['due'];
                 <div class="info-row">
                     <div class="info-label">Status:</div>
                     <div>
-                        <span class="status-badge <?php echo $membershipStatus === 'Active' ? 'status-active' : 'status-inactive'; ?>">
-                            <?php echo $membershipStatus === 'Active' ? 'Full Member' : 'Inactive'; ?>
+                        <span class="status-badge <?php echo $membershipStatus === 'Full Member' ? 'status-active' : 'status-inactive'; ?>">
+                            <?php echo $membershipStatus?>
                         </span>
                     </div>
                 </div>
@@ -474,8 +505,8 @@ $totalOutstanding = $membershipFee['due'] + $fines['due'] + $loans['due'];
                 <div class="info-row">
                     <div class="info-label">Registration Fee:</div>
                     <div>
-                        <span class="status-badge <?php echo $registrationFee['status'] === 'Fully Paid' ? 'status-paid' : 'status-partial'; ?>">
-                            <?php echo $registrationFee['status']; ?>
+                        <span class="status-badge <?php echo $registrationFee['isFullyPaid'] ? 'status-paid' : 'status-partial'; ?>">
+                            <?php echo $registrationFee['isFullyPaid'] ? 'Completed' : 'Rs. ' . number_format($registrationFee['due'], 2) . ' due'; ?>
                         </span>
                     </div>
                 </div>
@@ -483,7 +514,13 @@ $totalOutstanding = $membershipFee['due'] + $fines['due'] + $loans['due'];
                     <div class="info-label">Membership Fees:</div>
                     <div>
                         <span class="status-badge <?php echo $membershipFee['due'] == 0 ? 'status-paid' : 'status-partial'; ?>">
-                            <?php echo $membershipFee['due'] == 0 ? 'Up to date' : 'Pending'; ?>
+                            <?php 
+                            if ($membershipFee['due'] == 0) {
+                                echo 'Up to date';
+                            } else {
+                                echo $membershipFee['remainingMonths'] . ' months pending';
+                            }
+                            ?>
                         </span>
                     </div>
                 </div>
@@ -511,11 +548,26 @@ $totalOutstanding = $membershipFee['due'] + $fines['due'] + $loans['due'];
                 </tr>
             </thead>
             <tbody>
-                <tr>
-                    <td>Membership Fee</td>
-                    <td><?php echo number_format($membershipFee['paid'], 2); ?></td>
-                    <td><?php echo number_format($membershipFee['due'], 2); ?></td>
-                </tr>
+            <?php if (!$registrationFee['isFullyPaid']): ?>
+            <tr>
+            <td>Registration Fee</td>
+            <td><?php echo number_format($registrationFee['paid'], 2); ?></td>
+            <td><?php echo number_format($registrationFee['due'], 2); ?></td>
+            </tr>
+            <?php endif; ?>
+            <tr>
+                <td>Membership Fee (Monthly)</td>
+                <td>
+                    <?php echo number_format($membershipFee['paid'], 2); ?>
+                    <small>(<?php echo $membershipFee['paidMonths']; ?> months paid)</small>
+                </td>
+                <td>
+                    <?php echo number_format($membershipFee['due'], 2); ?>
+                    <?php if ($membershipFee['remainingMonths'] > 0): ?>
+                        <small>(<?php echo $membershipFee['remainingMonths']; ?> months pending)</small>
+                    <?php endif; ?>
+                </td>
+            </tr>
                 <tr>
                     <td>Fine</td>
                     <td><?php echo number_format($fines['paid'], 2); ?></td>
