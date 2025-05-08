@@ -8,6 +8,37 @@
     <link rel="stylesheet" href="../../assets/css/alert.css">
     <link rel="stylesheet" href="../../assets/css/memberSummary.css">
     <script src="../../assets/js/alertHandler.js"></script>
+    <style>
+        .page-header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            /* margin-top: 20px; */
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .page-title {
+            color: #ffffff;
+            margin: 0;
+            font-size: 2rem;
+        }
+        .filter-select {
+            padding: 0.5rem 1rem;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            border-radius: 50px;
+            cursor: pointer;
+        }
+        .filter-select option {
+            background: #1e3c72;
+            color: white;
+        }
+</style>
 </head>
 <body>
     <div id="print-content" class="pdf-document">
@@ -20,12 +51,12 @@
                 <div class="page-header">
                     <h1 class="page-title">Member Financial Summary</h1>
                     
-                    <div class="year-filter">
-                        <label for="year-select">Select Year:</label>
-                        <select id="year-select" onchange="changeYear(this.value)">
+                    <div class="filter">
+                        <!-- <label for="year-select">Select Year:</label> -->
+                        <select class="filter-select" id="year-select" onchange="changeYear(this.value)">
                             <?php foreach ($availableYears as $year): ?>
                                 <option value="<?php echo $year; ?>" <?php echo ($year == $selectedYear) ? 'selected' : ''; ?>>
-                                    <?php echo $year; ?>
+                                    Year <?php echo $year; ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>

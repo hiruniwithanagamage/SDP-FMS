@@ -22,6 +22,37 @@ $selectedYear = isset($_GET['year']) ? $_GET['year'] : date('Y'); // Default to 
 // Get database connection
 $conn = getConnection();
 
+/**
+ * Get all years from the Static table where year is >= member's join year
+ * @param string $memberID The member ID
+ * @return array Array of years in descending order
+ */
+function getAllYears($memberID) {
+    $conn = getConnection();
+    
+    // Get years from Static table where the year is >= the member's join year
+    $sql = "SELECT s.year 
+            FROM Static s
+            WHERE s.year >= (
+                SELECT YEAR(Joined_Date) 
+                FROM Member 
+                WHERE MemberID = ?
+            )
+            ORDER BY s.year DESC";
+    
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("s", $memberID);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $years = [];
+    while ($row = $result->fetch_assoc()) {
+        $years[] = $row['year'];
+    }
+    
+    return $years;
+}
+
 // Check if user is logged in and has user data in session
 if (isset($_SESSION['u'])) {
     $userData = $_SESSION['u'];
@@ -43,25 +74,10 @@ if (isset($_SESSION['u'])) {
                 $memberStatus = $memberData['Status'];
                 $joinedDate = $memberData['Joined_Date'];
                 
-                // Get available years for filter
-                $yearsQuery = "SELECT DISTINCT YEAR(Date) as year FROM Payment WHERE Member_MemberID = ? 
-                              UNION 
-                              SELECT DISTINCT YEAR(Issued_Date) as year FROM Loan WHERE Member_MemberID = ?
-                              UNION
-                              SELECT DISTINCT YEAR(Date) as year FROM MembershipFee WHERE Member_MemberID = ?
-                              UNION
-                              SELECT DISTINCT YEAR(Date) as year FROM Fine WHERE Member_MemberID = ?
-                              ORDER BY year DESC";
-                $yearsStmt = $conn->prepare($yearsQuery);
-                $yearsStmt->bind_param("ssss", $memberID, $memberID, $memberID, $memberID);
-                $yearsStmt->execute();
-                $yearsResult = $yearsStmt->get_result();
+                // Get available years using the simplified function
+                $availableYears = getAllYears($memberID);
                 
-                while ($yearRow = $yearsResult->fetch_assoc()) {
-                    $availableYears[] = $yearRow['year'];
-                }
-                
-                // If no records yet, at least include current year
+                // If no years available (rare edge case), include current year
                 if (empty($availableYears)) {
                     $availableYears[] = date('Y');
                 }

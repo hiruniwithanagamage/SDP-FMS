@@ -4,7 +4,7 @@ require_once "../../config/database.php";
 
 // Debug database connection
 try {
-    setupConnection(); // Changed from setUpConnection() to match your procedural function
+    setupConnection();
     error_log("Database Connection Status: " . ($GLOBALS['db_connection'] ? "Connected" : "Not Connected"));
 } catch (Exception $e) {
     error_log("Database Connection Error: " . $e->getMessage());
@@ -22,8 +22,8 @@ if (!isset($_SESSION["u"])) {
 
 // Check database connection
 try {
-    setupConnection(); // Changed from setUpConnection()
-    if (!$GLOBALS['db_connection']) { // Changed from $connection
+    setupConnection();
+    if (!$GLOBALS['db_connection']) {
         die("Database connection failed");
     }
 } catch (Exception $e) {
@@ -39,36 +39,58 @@ $existingApplicationStatus = "";
 $existingLoanData = null;
 
 if(isset($_SESSION['member_id'])) {
-    $checkQuery = "SELECT Status, Amount, Reason, Issued_Date FROM Loan 
+    // Modified to check if there's an active loan (approved with remaining balance)
+    // or a pending application for the current term
+    $checkQuery = "SELECT Status, Amount, Reason, Issued_Date, Remain_Loan, Remain_Interest FROM Loan 
                   WHERE Member_MemberID = ? 
                   AND Term = ?
                   AND (Status = 'approved' OR Status = 'pending')";
-    $stmt = prepare($checkQuery); // Changed from $connection->prepare()
+    $stmt = prepare($checkQuery);
     $stmt->bind_param("ss", $_SESSION['member_id'], $currentYear);
     $stmt->execute();
     $result = $stmt->get_result();
     
     if($result && $result->num_rows > 0) {
-        $hasExistingApplication = true;
         $existingLoanData = $result->fetch_assoc();
-        $existingApplicationStatus = $existingLoanData['Status'];
+        
+        // Check if loan is fully paid (both principal and interest)
+        if($existingLoanData['Status'] === 'approved' && 
+           $existingLoanData['Remain_Loan'] <= 0 && 
+           $existingLoanData['Remain_Interest'] <= 0) {
+            // Loan is fully paid, allow new application
+            $hasExistingApplication = false;
+        } else {
+            // Loan is still active or pending
+            $hasExistingApplication = true;
+            $existingApplicationStatus = $existingLoanData['Status'];
+        }
     }
 }
 
 // Get member name from database
 $memberQuery = "SELECT Name FROM Member WHERE MemberID = '$memberId'";
-$memberResult = search($memberQuery); // Already using procedural function
+$memberResult = search($memberQuery);
 $userName = 'N/A';
 if ($memberResult && $memberResult->num_rows > 0) {
     $memberData = $memberResult->fetch_assoc();
     $userName = $memberData['Name'];
 }
 
+// Get loan limits and other settings from Static table
+$staticQuery = "SELECT max_loan_limit FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+$staticResult = search($staticQuery);
+$maxLoanLimit = 20000; // Default fallback value
+
+if ($staticResult && $staticResult->num_rows > 0) {
+    $staticData = $staticResult->fetch_assoc();
+    $maxLoanLimit = $staticData['max_loan_limit'];
+}
+
 // Validate member eligibility
 function checkMemberEligibility($memberId) {
     // Check member status
     $statusQuery = "SELECT Status FROM Member WHERE MemberID = '$memberId'";
-    $statusResult = search($statusQuery); // Already using procedural function
+    $statusResult = search($statusQuery);
     
     if ($statusResult && $statusResult->num_rows > 0) {
         $member = $statusResult->fetch_assoc();
@@ -78,17 +100,17 @@ function checkMemberEligibility($memberId) {
     }
 
     // Check existing loans
-    $loanQuery = "SELECT Status, Remain_Loan FROM Loan 
+    $loanQuery = "SELECT Status, Remain_Loan, Remain_Interest FROM Loan 
                   WHERE Member_MemberID = '$memberId' 
                   AND (Status = 'pending' OR Status = 'approved')";
-    $loanResult = search($loanQuery); // Already using procedural function
+    $loanResult = search($loanQuery);
     
     if ($loanResult && $loanResult->num_rows > 0) {
         $loan = $loanResult->fetch_assoc();
         if ($loan['Status'] === 'pending') {
             return "You already have a pending loan application";
         }
-        if ($loan['Status'] === 'approved' && $loan['Remain_Loan'] > 0) {
+        if ($loan['Status'] === 'approved' && ($loan['Remain_Loan'] > 0 || $loan['Remain_Interest'] > 0)) {
             return "You have an existing loan that needs to be paid off";
         }
     }
@@ -97,26 +119,37 @@ function checkMemberEligibility($memberId) {
 }
 
 // Generate new Loan ID (loan + Year + 3 digits)
-$query = "SELECT LoanID FROM Loan WHERE LoanID LIKE 'loan" . $currentYear . "%' ORDER BY LoanID DESC LIMIT 1";
+$query = "SELECT LoanID FROM Loan WHERE LoanID LIKE 'LN" . $currentYear . "%' ORDER BY LoanID DESC LIMIT 1";
 $result = search($query);
 
-if ($result->num_rows > 0) {
+if ($result && $result->num_rows > 0) {
     $lastId = $result->fetch_assoc()['LoanID'];
-    // Extract the numeric part after 'loan' + year
+    // Extract the numeric part after 'LN' + year
     $yearPart = $currentYear;
-    $remainingPart = substr($lastId, strlen('loan' . $yearPart));
+    $prefix = 'LN' . $yearPart;
+    $remainingPart = substr($lastId, strlen($prefix));
     $numericPart = intval($remainingPart);
-    $newLoanId = "LN" . $yearPart . sprintf('%0d', $numericPart + 1);
+    $newLoanId = $prefix . sprintf('%02d', $numericPart + 1); // Format with leading zero if needed
 } else {
     // First loan of the year
-    $newLoanId = "LN" . $currentYear . "001";
+    $newLoanId = "LN" . $currentYear . "01"; // Start with 01
 }
 
-// Fetch all eligible members for guarantor selection
-$eligibleMembersQuery = "SELECT MemberID, Name FROM Member 
-                        WHERE MemberID != '$memberId'
-                        ORDER BY Name";
-$eligibleMembersResult = search($eligibleMembersQuery); // Already using procedural function
+// Fetch eligible members for guarantor selection (with guaranteed_count < 1)
+$eligibleMembersQuery = "SELECT DISTINCT m.MemberID, m.Name 
+                        FROM Member m
+                        WHERE m.MemberID != '$memberId' 
+                        -- AND m.Status = 'Full Member'
+                        AND m.MemberID NOT IN (
+                            -- Subquery to find members who are guarantors for active loans
+                            SELECT g.MemberID
+                            FROM Guarantor g
+                            JOIN Loan l ON g.Loan_LoanID = l.LoanID
+                            -- WHERE l.Status = 'approved' 
+                            WHERE (l.Remain_Loan > 0 OR l.Remain_Interest > 0)
+                        )
+                        ORDER BY m.Name";
+$eligibleMembersResult = search($eligibleMembersQuery);
 $eligibleMembers = [];
 
 if ($eligibleMembersResult && $eligibleMembersResult->num_rows > 0) {
@@ -139,35 +172,25 @@ if (isset($_POST['apply'])) {
     $reason = trim($_POST['reason']);
     $term = $currentYear;
 
-    $guarantor1Name = trim($_POST['guarantor1_name']);
-    $guarantor1Id = trim($_POST['guarantor1_member_id']);
-    $guarantor1Status = $_POST['guarantor1_loan_status'];
-    $guarantor1Count = intval($_POST['guarantor1_guaranteed_count']);
-
-    $guarantor2Name = trim($_POST['guarantor2_name']);
-    $guarantor2Id = trim($_POST['guarantor2_member_id']);
-    $guarantor2Status = $_POST['guarantor2_loan_status'];
-    $guarantor2Count = intval($_POST['guarantor2_guaranteed_count']);
+    $guarantorName = trim($_POST['guarantor_name']);
+    $guarantorId = trim($_POST['guarantor_member_id']);
+    $guarantorCount = intval($_POST['guarantor_guaranteed_count']);
 
     // Validation checks
-    if ($amount <= 0) {
-        $errors['amount'] = "Please enter a valid amount";
+    if ($amount < 500) {
+        $errors['amount'] = "Loan amount must be at least Rs. 500";
+    }
+    
+    if ($amount > $maxLoanLimit) {
+        $errors['amount'] = "Loan amount cannot exceed Rs. " . number_format($maxLoanLimit, 2);
     }
     
     if (empty($reason)) {
         $errors['reason'] = "Please provide a reason for the loan";
     }
     
-    if (empty($guarantor1Name) || empty($guarantor1Id)) {
-        $errors['guarantor1'] = "First guarantor details are required";
-    }
-    
-    if (empty($guarantor2Name) || empty($guarantor2Id)) {
-        $errors['guarantor2'] = "Second guarantor details are required";
-    }
-    
-    if ($guarantor1Id === $guarantor2Id) {
-        $errors['guarantors'] = "Guarantors must be different members";
+    if (empty($guarantorName) || empty($guarantorId)) {
+        $errors['guarantor'] = "Guarantor details are required";
     }
 
     // Check eligibility
@@ -221,41 +244,23 @@ if (isset($_POST['apply'])) {
             
             iud($loanQuery); // Already using procedural function
 
-            // Insert guarantor records
-            $guarantors = [
-                [
-                    'id' => $guarantor1Id,
-                    'name' => $guarantor1Name,
-                    'status' => $guarantor1Status,
-                    'count' => $guarantor1Count,
-                    'prefix' => 'G1'
-                ],
-                [
-                    'id' => $guarantor2Id,
-                    'name' => $guarantor2Name,
-                    'status' => $guarantor2Status,
-                    'count' => $guarantor2Count,
-                    'prefix' => 'G2'
-                ]
-            ];
-
-            foreach ($guarantors as $g) {
-                $guarantorQuery = "INSERT INTO Guarantor (GuarantorID, Name, MemberID, Loan_Status, 
-                                 Guaranteed_Count, Loan_LoanID) 
-                                 VALUES (
-                                     '{$g['prefix']}$newLoanId',
-                                     '" . $conn->real_escape_string($g['name']) . "',
-                                     '" . $g['id'] . "',
-                                     {$g['status']},
-                                     {$g['count']},
-                                     '$newLoanId'
-                                 )";
-                
-                // Debug: Print query
-                error_log("Guarantor Query: " . $guarantorQuery);
-                
-                iud($guarantorQuery); // Already using procedural function
-            }
+            // Insert guarantor record - ONLY ONE GUARANTOR NOW
+            $guarantorPrefix = 'GT'; // Keep as G1 for the single guarantor
+            $guarantorId = $guarantorId;
+            
+            $guarantorQuery = "INSERT INTO Guarantor (GuarantorID, Name, MemberID, Guaranteed_Count, Loan_LoanID) 
+                             VALUES (
+                                 '{$guarantorPrefix}$newLoanId',
+                                 '" . $conn->real_escape_string($guarantorName) . "',
+                                 '$guarantorId',
+                                 1,
+                                 '$newLoanId'
+                             )";
+            
+            // Debug: Print query
+            error_log("Guarantor Query: " . $guarantorQuery);
+            
+            iud($guarantorQuery);
 
             $conn->commit();
             
@@ -264,7 +269,7 @@ if (isset($_POST['apply'])) {
             exit();
 
         } catch (Exception $e) {
-            $conn = getConnection(); // Get the connection using our procedural function
+            $conn = getConnection();
             $conn->rollback();
             $errors['db'] = "Error submitting loan application: " . $e->getMessage();
             error_log("Database Error: " . $e->getMessage());
@@ -356,12 +361,14 @@ if (isset($_POST['apply'])) {
                     <div class="form-group">
                         <label for="loan_amount">Amount</label>
                         <input type="number" id="loan_amount" name="amount" 
-                            min="0" step="0.01" required 
+                            min="500" step="0.01" required 
+                            max="<?php echo $maxLoanLimit; ?>"
                             class="<?php echo isset($errors['amount']) ? 'error' : ''; ?>"
                             autocomplete="off">
                         <?php if (isset($errors['amount'])): ?>
                             <span class="error-message"><?php echo $errors['amount']; ?></span>
                         <?php endif; ?>
+                        <span class="hint-text">Minimum Rs. 500, Maximum Rs. <?php echo number_format($maxLoanLimit, 2); ?></span>
                         <span class="hint-text">3% monthly decreasing interest rate will be applied</span>
                     </div>
                 </div>
@@ -378,78 +385,34 @@ if (isset($_POST['apply'])) {
                     </div>
                 </div>
 
-                <!-- Guarantor 1 Section -->
-                <h2>Guarantor Details (1)</h2>
+                <!-- Single Guarantor Section -->
+                <h2>Guarantor Details</h2>
                 <div class="guarantor-section">
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="guarantor1_name_select">Name</label>
-                            <select id="guarantor1_name_select" class="guarantor-select" required>
+                            <label for="guarantor_name_select">Name</label>
+                            <select id="guarantor_name_select" class="guarantor-select" required>
                                 <option value="">Select or search for a member...</option>
                                 <?php foreach ($eligibleMembers as $member): ?>
                                     <option value="<?php echo $member['id']; ?>"><?php echo $member['text']; ?></option>
                                 <?php endforeach; ?>
                             </select>
-                            <input type="hidden" id="guarantor1_name" name="guarantor1_name">
+                            <input type="hidden" id="guarantor_name" name="guarantor_name">
                         </div>
                         <div class="form-group">
-                            <label for="guarantor1_member_id">Member ID</label>
-                            <input type="text" id="guarantor1_member_id" name="guarantor1_member_id" 
+                            <label for="guarantor_member_id">Member ID</label>
+                            <input type="text" id="guarantor_member_id" name="guarantor_member_id" 
                                 readonly required autocomplete="off">
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="guarantor1_loan_status">Loan Status</label>
-                            <select id="guarantor1_loan_status" name="guarantor1_loan_status" required>
-                                <option value="1">Active</option>
-                                <option value="0">Inactive</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="guarantor1_guaranteed_count">Guaranteed Count</label>
-                            <input type="number" id="guarantor1_guaranteed_count" 
-                                name="guarantor1_guaranteed_count" 
-                                min="0" value="0" required autocomplete="off">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Guarantor 2 Section -->
-                <h2>Guarantor Details (2)</h2>
-                <div class="guarantor-section">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="guarantor2_name_select">Name</label>
-                            <select id="guarantor2_name_select" class="guarantor-select" required>
-                                <option value="">Select or search for a member...</option>
-                                <?php foreach ($eligibleMembers as $member): ?>
-                                    <option value="<?php echo $member['id']; ?>"><?php echo $member['text']; ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                            <input type="hidden" id="guarantor2_name" name="guarantor2_name">
-                        </div>
-                        <div class="form-group">
-                            <label for="guarantor2_member_id">Member ID</label>
-                            <input type="text" id="guarantor2_member_id" name="guarantor2_member_id" 
-                                readonly required autocomplete="off">
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="guarantor2_loan_status">Loan Status</label>
-                            <select id="guarantor2_loan_status" name="guarantor2_loan_status" required>
-                                <option value="1">Active</option>
-                                <option value="0">Inactive</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="guarantor2_guaranteed_count">Guaranteed Count</label>
-                            <input type="number" id="guarantor2_guaranteed_count" 
-                                name="guarantor2_guaranteed_count" 
-                                min="0" value="0" required autocomplete="off">
+                            <label for="guarantor_guaranteed_count">Guaranteed Count</label>
+                            <input type="number" id="guarantor_guaranteed_count" 
+                                name="guarantor_guaranteed_count" 
+                                value="0" readonly required autocomplete="off">
+                            <span class="hint-text">Members can only guarantee one loan at a time</span>
                         </div>
                     </div>
                 </div>
@@ -501,7 +464,7 @@ if (isset($_POST['apply'])) {
             }, 3000);
         }
 
-        // Initialize Select2 for both guarantor selects
+        // Initialize Select2 for guarantor select
         $('.guarantor-select').select2({
             placeholder: 'Select or search for a member...',
             allowClear: true,
@@ -529,62 +492,52 @@ if (isset($_POST['apply'])) {
             }
         });
 
-        // Handle guarantor 1 selection
-        $('#guarantor1_name_select').on('select2:select', function(e) {
+        // Handle guarantor selection
+        $('#guarantor_name_select').on('select2:select', function(e) {
             const data = e.params.data;
             const name = data.text;
             const memberId = data.id;
             
-            $('#guarantor1_name').val(name);
-            $('#guarantor1_member_id').val(memberId);
-        });
-
-        // Handle guarantor 2 selection
-        $('#guarantor2_name_select').on('select2:select', function(e) {
-            const data = e.params.data;
-            const name = data.text;
-            const memberId = data.id;
-            
-            $('#guarantor2_name').val(name);
-            $('#guarantor2_member_id').val(memberId);
+            $('#guarantor_name').val(name);
+            $('#guarantor_member_id').val(memberId);
+            // Set guaranteed count to 1 as this will be the first guarantee
+            $('#guarantor_guaranteed_count').val(1);
         });
 
         // Clear member ID when selection is cleared
         $('.guarantor-select').on('select2:clear', function(e) {
-            const index = $(this).attr('id').charAt(9);
-            $(`#guarantor${index}_name`).val('');
-            $(`#guarantor${index}_member_id`).val('');
-        });
-
-        // Validate guarantors are different
-        $('.guarantor-select').on('select2:select', function(e) {
-            const guarantor1Id = $('#guarantor1_member_id').val();
-            const guarantor2Id = $('#guarantor2_member_id').val();
-
-            if (guarantor1Id && guarantor2Id && guarantor1Id === guarantor2Id) {
-                showAlert('Guarantors must be different members');
-                $(this).val(null).trigger('change');
-                const index = $(this).attr('id').charAt(9);
-                $(`#guarantor${index}_name`).val('');
-                $(`#guarantor${index}_member_id`).val('');
-            }
+            $('#guarantor_name').val('');
+            $('#guarantor_member_id').val('');
+            $('#guarantor_guaranteed_count').val(0);
         });
 
         // Form validation
         $('form').on('submit', function(e) {
-            const terms = document.getElementById('terms');
+            const terms = document.getElementById('terms_agreement');
             if (!terms.checked) {
                 e.preventDefault();
                 showAlert('Please accept the Terms & Conditions');
             }
 
-            // Validate guarantor selections
-            const guarantor1 = $('#guarantor1_name_select').val();
-            const guarantor2 = $('#guarantor2_name_select').val();
+            // Validate guarantor selection
+            const guarantor = $('#guarantor_name_select').val();
             
-            if (!guarantor1 || !guarantor2) {
+            if (!guarantor) {
                 e.preventDefault();
-                showAlert('Please select both guarantors');
+                showAlert('Please select a guarantor');
+            }
+            
+            // Validate loan amount
+            const amount = parseFloat($('#loan_amount').val());
+            if (amount < 500) {
+                e.preventDefault();
+                showAlert('Loan amount must be at least Rs. 500');
+            }
+            
+            const maxLimit = <?php echo $maxLoanLimit; ?>;
+            if (amount > maxLimit) {
+                e.preventDefault();
+                showAlert('Loan amount cannot exceed Rs. ' + maxLimit.toLocaleString());
             }
         });
 
@@ -600,20 +553,21 @@ if (isset($_POST['apply'])) {
         });
 
         // Additional validation for amount
-        $('#amount').on('input', function() {
-            const amount = parseFloat($(this).val());
-            if (amount <= 0) {
-                showAlert('Amount must be greater than 0');
-            }
-        });
-
-        // Prevent negative values in guaranteed count
-        $('.guarantor-section input[type="number"]').on('input', function() {
-            if (parseInt($(this).val()) < 0) {
-                $(this).val(0);
-                showAlert('Guaranteed count cannot be negative');
-            }
-        });
+        // $('#loan_amount').on('input', function() {
+        //     const amount = parseFloat($(this).val());
+        //     const min = 500;
+        //     const max = <?php echo $maxLoanLimit; ?>;
+            
+        //     if (amount < min) {
+        //         $(this).addClass('error');
+        //         showAlert('Amount must be at least Rs. 500');
+        //     } else if (amount > max) {
+        //         $(this).addClass('error');
+        //         showAlert('Amount cannot exceed Rs. ' + max.toLocaleString());
+        //     } else {
+        //         $(this).removeClass('error');
+        //     }
+        // });
     });
     </script>
 </body>
