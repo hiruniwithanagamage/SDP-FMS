@@ -2,18 +2,27 @@
 session_start();
 require_once "../../config/database.php";
 
-// Check if user is logged in and has treasurer role
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'treasurer') {
+date_default_timezone_set('Asia/Colombo');
+
+// Check if user is logged in and has treasurer OR auditor role
+if (!isset($_SESSION['user_id']) || ($_SESSION['role'] !== 'treasurer' && $_SESSION['role'] !== 'auditor')) {
     header("Location: ../login.php");
     exit();
 }
 
+// Determine if user is an auditor (for UI adjustments)
+$isAuditor = ($_SESSION['role'] === 'auditor');
+
 // Function to get total balance
-function getTotalBalance() {
+function getTotalBalance($year) {
     $sql = "SELECT 
-        (SELECT COALESCE(SUM(Amount), 0) FROM Payment) - 
-        (SELECT COALESCE(SUM(Amount), 0) FROM Expenses) as total_balance";
-    $result = search($sql);
+        (SELECT COALESCE(SUM(Amount), 0) FROM Payment WHERE Term = ?) - 
+        (SELECT COALESCE(SUM(Amount), 0) FROM Expenses WHERE Term = ?) as total_balance";
+    
+    $stmt = prepare($sql);
+    $stmt->bind_param("ii", $year, $year);
+    $stmt->execute();
+    $result = $stmt->get_result();
     $row = $result->fetch_assoc();
     return $row['total_balance'] ?? 0;
 }
@@ -27,7 +36,7 @@ function getIncomeVsExpensesByMonth($year) {
                 MONTH(Date) as month,
                 SUM(Amount) as amount
             FROM Payment
-            WHERE YEAR(Date) = ?
+            WHERE Term = ?
             GROUP BY MONTH(Date)
             ORDER BY MONTH(Date)";
     
@@ -51,7 +60,7 @@ function getIncomeVsExpensesByMonth($year) {
                 MONTH(Date) as month,
                 SUM(Amount) as amount
             FROM Expenses
-            WHERE YEAR(Date) = ?
+            WHERE Term = ?
             GROUP BY MONTH(Date)
             ORDER BY MONTH(Date)";
     
@@ -67,32 +76,69 @@ function getIncomeVsExpensesByMonth($year) {
     return $data;
 }
 
-// Function to get membership fee statistics
+// Function to get membership fee statistics for monthly fees based on the current term
 function getMembershipFeeStats($year) {
+    // Get the current month (1-12)
+    $currentMonth = (int)date('m');
+    
+    // Get the monthly fee amount from the static table for the current term
+    $feeAmountSql = "SELECT monthly_fee FROM Static WHERE year = ? AND status = 'active'";
+    $feeStmt = prepare($feeAmountSql);
+    $feeStmt->bind_param("i", $year);
+    $feeStmt->execute();
+    $feeResult = $feeStmt->get_result();
+    $feeRow = $feeResult->fetch_assoc();
+    $monthlyFeeAmount = $feeRow ? $feeRow['monthly_fee'] : 100.00; // Default if not found
+    
+    // SQL to get all members with their monthly fee payments for the current term
     $sql = "SELECT 
-                COUNT(*) as total_fees,
-                SUM(CASE WHEN IsPaid = 'Yes' THEN 1 ELSE 0 END) as paid_fees,
-                SUM(CASE WHEN IsPaid = 'No' THEN 1 ELSE 0 END) as unpaid_fees,
-                SUM(CASE WHEN IsPaid = 'Yes' THEN Amount ELSE 0 END) as collected_amount,
-                SUM(CASE WHEN IsPaid = 'No' THEN Amount ELSE 0 END) as outstanding_amount
-            FROM MembershipFee
-            WHERE Term = ?";
+                m.MemberID,
+                m.Name,
+                m.Status,
+                COUNT(DISTINCT mf.FeeID) as paid_months
+            FROM 
+                Member m
+            LEFT JOIN 
+                MembershipFee mf ON m.MemberID = mf.Member_MemberID 
+                AND mf.Type = 'Monthly' 
+                AND mf.IsPaid = 'Yes'
+                AND mf.Term = ?
+            GROUP BY 
+                m.MemberID";
     
     $stmt = prepare($sql);
     $stmt->bind_param("i", $year);
     $stmt->execute();
     $result = $stmt->get_result();
     
-    if ($row = $result->fetch_assoc()) {
-        return $row;
+    // Initialize stats counters
+    $total_members = 0;
+    $paid_fees = 0;
+    $unpaid_fees = 0;
+    $collected_amount = 0;
+    $outstanding_amount = 0;
+    
+    while ($row = $result->fetch_assoc()) {
+        $total_members++;
+        
+        // A member is fully paid if they've paid for all months up to the current month
+        if ($row['paid_months'] >= $currentMonth) {
+            $paid_fees++;
+            $collected_amount += $monthlyFeeAmount * $row['paid_months'];
+        } else {
+            // This member has missed some payments
+            $unpaid_fees++;
+            $collected_amount += $monthlyFeeAmount * $row['paid_months'];
+            $outstanding_amount += $monthlyFeeAmount * ($currentMonth - $row['paid_months']);
+        }
     }
     
     return [
-        'total_fees' => 0,
-        'paid_fees' => 0,
-        'unpaid_fees' => 0,
-        'collected_amount' => 0,
-        'outstanding_amount' => 0
+        'total_fees' => $total_members,
+        'paid_fees' => $paid_fees,
+        'unpaid_fees' => $unpaid_fees,
+        'collected_amount' => $collected_amount,
+        'outstanding_amount' => $outstanding_amount
     ];
 }
 
@@ -139,7 +185,7 @@ function getExpenseCategories($year) {
                 Category,
                 SUM(Amount) as amount
             FROM Expenses
-            WHERE YEAR(Date) = ?
+            WHERE Term = ?
             GROUP BY Category
             ORDER BY amount DESC";
     
@@ -155,7 +201,7 @@ function getPaymentMethods($year) {
                 Method as method,
                 SUM(Amount) as amount
             FROM Payment
-            WHERE YEAR(Date) = ?
+            WHERE Term = ?
             GROUP BY Method
             ORDER BY amount DESC";
     
@@ -169,8 +215,8 @@ function getPaymentMethods($year) {
 function getMemberStats() {
     $sql = "SELECT 
                 COUNT(*) as total_members,
-                SUM(CASE WHEN Status = 'active' THEN 1 ELSE 0 END) as active_members,
-                SUM(CASE WHEN Status != 'active' THEN 1 ELSE 0 END) as inactive_members,
+                SUM(CASE WHEN Status = 'Full Member' THEN 1 ELSE 0 END) as active_members,
+                SUM(CASE WHEN Status != 'Full Member' THEN 1 ELSE 0 END) as inactive_members,
                 AVG(TIMESTAMPDIFF(YEAR, Joined_Date, CURDATE())) as avg_membership_years
             FROM Member";
     
@@ -200,7 +246,7 @@ function getCurrentTerm() {
 $selectedYear = isset($_GET['year']) ? (int)$_GET['year'] : getCurrentTerm();
 
 // Get data for all charts
-$totalBalance = getTotalBalance();
+$totalBalance = getTotalBalance($selectedYear);
 $monthlyData = getIncomeVsExpensesByMonth($selectedYear);
 $membershipStats = getMembershipFeeStats($selectedYear);
 $loanStats = getLoanStats($selectedYear);
@@ -415,6 +461,11 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
         .chart-action:hover {
             background: #e0ebff;
         }
+        
+        .chart-action:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
 
         .chart-container {
             height: 300px;
@@ -505,14 +556,36 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
         .refresh-button:hover {
             text-decoration: underline;
         }
+        
+        /* Badge for auditor view */
+        .role-badge {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-left: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="dashboard-container">
-        <?php include '../templates/navbar-treasurer.php'; ?>
+        <?php 
+        // Include appropriate navbar based on role
+        if ($isAuditor) {
+            include '../templates/navbar-auditor.php';
+        } else {
+            include '../templates/navbar-treasurer.php';
+        }
+        ?>
         <div class="content">
             <div class="page-header">
-                <h1>Financial Analytics Dashboard</h1>
+                <h1>
+                    Financial Analytics Dashboard
+                    <?php if ($isAuditor): ?>
+                    <span class="role-badge">Audit View</span>
+                    <?php endif; ?>
+                </h1>
                 <form action="" method="GET" class="year-selector">
                     <span>Year:</span>
                     <select name="year" onchange="this.form.submit()">
@@ -594,9 +667,15 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
                     <div class="chart-header">
                         <div class="chart-title">Income vs Expenses (<?php echo $selectedYear; ?>)</div>
                         <div class="chart-actions">
+                            <?php if (!$isAuditor): ?>
                             <button class="chart-action" onclick="downloadChart('incomeExpensesChart', 'Income_vs_Expenses')">
                                 <i class="fas fa-download"></i> Download
                             </button>
+                            <?php else: ?>
+                            <button class="chart-action" disabled title="Auditors can view but not download reports">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -609,9 +688,15 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
                     <div class="chart-header">
                         <div class="chart-title">Membership Fee Status (<?php echo $selectedYear; ?>)</div>
                         <div class="chart-actions">
+                            <?php if (!$isAuditor): ?>
                             <button class="chart-action" onclick="downloadChart('membershipChart', 'Membership_Fee_Status')">
                                 <i class="fas fa-download"></i> Download
                             </button>
+                            <?php else: ?>
+                            <button class="chart-action" disabled title="Auditors can view but not download reports">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -636,9 +721,15 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
                     <div class="chart-header">
                         <div class="chart-title">Expense Categories (<?php echo $selectedYear; ?>)</div>
                         <div class="chart-actions">
+                            <?php if (!$isAuditor): ?>
                             <button class="chart-action" onclick="downloadChart('expenseCategoriesChart', 'Expense_Categories')">
                                 <i class="fas fa-download"></i> Download
                             </button>
+                            <?php else: ?>
+                            <button class="chart-action" disabled title="Auditors can view but not download reports">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -667,9 +758,15 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
                     <div class="chart-header">
                         <div class="chart-title">Loan Status (<?php echo $selectedYear; ?>)</div>
                         <div class="chart-actions">
+                            <?php if (!$isAuditor): ?>
                             <button class="chart-action" onclick="downloadChart('loanStatusChart', 'Loan_Status')">
                                 <i class="fas fa-download"></i> Download
                             </button>
+                            <?php else: ?>
+                            <button class="chart-action" disabled title="Auditors can view but not download reports">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -694,9 +791,15 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
                     <div class="chart-header">
                         <div class="chart-title">Payment Methods (<?php echo $selectedYear; ?>)</div>
                         <div class="chart-actions">
+                            <?php if (!$isAuditor): ?>
                             <button class="chart-action" onclick="downloadChart('paymentMethodsChart', 'Payment_Methods')">
                                 <i class="fas fa-download"></i> Download
                             </button>
+                            <?php else: ?>
+                            <button class="chart-action" disabled title="Auditors can view but not download reports">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -709,9 +812,15 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
                     <div class="chart-header">
                         <div class="chart-title">Member Statistics</div>
                         <div class="chart-actions">
+                            <?php if (!$isAuditor): ?>
                             <button class="chart-action" onclick="downloadChart('memberStatsChart', 'Member_Statistics')">
                                 <i class="fas fa-download"></i> Download
                             </button>
+                            <?php else: ?>
+                            <button class="chart-action" disabled title="Auditors can view but not download reports">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -743,9 +852,11 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
                 <div>Report generated for financial year <?php echo $selectedYear; ?></div>
                 <div class="refresh-info">
                     Last refreshed: <?php echo date('M d, Y H:i'); ?>
+                    <?php if (!$isAuditor): ?>
                     <button class="refresh-button" onclick="window.location.reload()">
                         <i class="fas fa-sync-alt"></i> Refresh
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -753,379 +864,387 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
     </div>
 
     <script>
-        // Chart.js configuration
-        Chart.defaults.font.family = "'Segoe UI', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif";
-        Chart.defaults.font.size = 12;
-        Chart.defaults.color = '#666';
-        
-        // Chart colors
-        const colors = {
-            blue: '#1e3c72',
-            lightBlue: '#2a5298',
-            green: '#28a745',
-            red: '#dc3545',
-            yellow: '#ffc107',
-            purple: '#6f42c1',
-            orange: '#fd7e14',
-            cyan: '#17a2b8',
-            gray: '#6c757d'
-        };
+    // Chart.js configuration
+    Chart.defaults.font.family = "'Segoe UI', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif";
+    Chart.defaults.font.size = 12;
+    Chart.defaults.color = '#666';
+    
+    // Chart colors
+    const colors = {
+        blue: '#1e3c72',
+        lightBlue: '#2a5298',
+        green: '#28a745',
+        red: '#dc3545',
+        yellow: '#ffc107',
+        purple: '#6f42c1',
+        orange: '#fd7e14',
+        cyan: '#17a2b8',
+        gray: '#6c757d'
+    };
 
-        // Monthly labels
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    // Monthly labels
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    // Initialize charts when the page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        createIncomeExpensesChart();
+        createMembershipChart();
+        createExpenseCategoriesChart();
+        createLoanStatusChart();
+        createPaymentMethodsChart();
+        createMemberStatsChart();
+    });
+    
+    // Create Income vs Expenses Chart
+    function createIncomeExpensesChart() {
+        const ctx = document.getElementById('incomeExpensesChart').getContext('2d');
         
-        // Initialize charts when the page loads
-        document.addEventListener('DOMContentLoaded', function() {
-            createIncomeExpensesChart();
-            createMembershipChart();
-            createExpenseCategoriesChart();
-            createLoanStatusChart();
-            createPaymentMethodsChart();
-            createMemberStatsChart();
+        // Get data from PHP
+        const incomeData = <?php echo json_encode(array_values($monthlyData['income'])); ?>;
+        const expensesData = <?php echo json_encode(array_values($monthlyData['expenses'])); ?>;
+        
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: months,
+                datasets: [
+                    {
+                        label: 'Income',
+                        data: incomeData,
+                        backgroundColor: colors.green,
+                        borderColor: colors.green,
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Expenses',
+                        data: expensesData,
+                        backgroundColor: colors.red,
+                        borderColor: colors.red,
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Amount (Rs.)'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': Rs.' + context.raw.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
         });
+    }
+    
+    // Create Membership Fee Status Chart
+    function createMembershipChart() {
+        const ctx = document.getElementById('membershipChart').getContext('2d');
         
-        // Create Income vs Expenses Chart
-        function createIncomeExpensesChart() {
-            const ctx = document.getElementById('incomeExpensesChart').getContext('2d');
-            
-            // Get data from PHP
-            const incomeData = <?php echo json_encode(array_values($monthlyData['income'])); ?>;
-            const expensesData = <?php echo json_encode(array_values($monthlyData['expenses'])); ?>;
-            
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: months,
-                    datasets: [
-                        {
-                            label: 'Income',
-                            data: incomeData,
-                            backgroundColor: colors.green,
-                            borderColor: colors.green,
-                            borderWidth: 1
-                        },
-                        {
-                            label: 'Expenses',
-                            data: expensesData,
-                            backgroundColor: colors.red,
-                            borderColor: colors.red,
-                            borderWidth: 1
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Amount (Rs.)'
-                            }
-                        }
+        // Get data from PHP
+        const paidFees = <?php echo $membershipStats['paid_fees']; ?>;
+        const unpaidFees = <?php echo $membershipStats['unpaid_fees']; ?>;
+        
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Paid', 'Unpaid'],
+                datasets: [{
+                    data: [paidFees, unpaidFees],
+                    backgroundColor: [colors.green, colors.red],
+                    borderColor: ['#fff', '#fff'],
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '65%',
+                plugins: {
+                    legend: {
+                        position: 'bottom'
                     },
-                    plugins: {
-                        legend: {
-                            position: 'top'
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return context.dataset.label + ': Rs.' + context.raw.toLocaleString();
-                                }
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = paidFees + unpaidFees;
+                                const percentage = Math.round((context.raw / total) * 100);
+                                return context.label + ': ' + context.raw + ' (' + percentage + '%)';
                             }
                         }
                     }
                 }
-            });
-        }
-        
-        // Create Membership Fee Status Chart
-        function createMembershipChart() {
-            const ctx = document.getElementById('membershipChart').getContext('2d');
-            
-            // Get data from PHP
-            const paidFees = <?php echo $membershipStats['paid_fees']; ?>;
-            const unpaidFees = <?php echo $membershipStats['unpaid_fees']; ?>;
-            
-            new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Paid', 'Unpaid'],
-                    datasets: [{
-                        data: [paidFees, unpaidFees],
-                        backgroundColor: [colors.green, colors.red],
-                        borderColor: ['#fff', '#fff'],
-                        borderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    cutout: '65%',
-                    plugins: {
-                        legend: {
-                            position: 'bottom'
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    const total = paidFees + unpaidFees;
-                                    const percentage = Math.round((context.raw / total) * 100);
-                                    return context.label + ': ' + context.raw + ' (' + percentage + '%)';
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-        
-        // Create Expense Categories Chart
-        function createExpenseCategoriesChart() {
-            const ctx = document.getElementById('expenseCategoriesChart').getContext('2d');
-            
-            // Get data from PHP
-            const categories = [];
-            const amounts = [];
-            const backgroundColors = [];
-            
-            <?php
-            // Generate category data for chart
-            $expenseCategories->data_seek(0); // Reset result pointer
-            $colorIndex = 0;
-            while ($category = $expenseCategories->fetch_assoc()) {
-                echo "categories.push('" . addslashes($category['Category']) . "');\n";
-                echo "amounts.push(" . $category['amount'] . ");\n";
-                echo "backgroundColors.push('" . $colors[$colorIndex % count($colors)] . "');\n";
-                $colorIndex++;
             }
-            ?>
-            
-            new Chart(ctx, {
-                type: 'pie',
-                data: {
-                    labels: categories,
-                    datasets: [{
-                        data: amounts,
-                        backgroundColor: backgroundColors,
-                        borderColor: '#fff',
-                        borderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            display: false
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                    const percentage = Math.round((context.raw / total) * 100);
-                                    return context.label + ': Rs.' + context.raw.toLocaleString() + ' (' + percentage + '%)';
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
+        });
+    }
+    
+    // Create Expense Categories Chart
+    function createExpenseCategoriesChart() {
+        const ctx = document.getElementById('expenseCategoriesChart').getContext('2d');
         
-        // Create Loan Status Chart
-        function createLoanStatusChart() {
-            const ctx = document.getElementById('loanStatusChart').getContext('2d');
-            
-            // Get data from PHP
-            const paidAmount = <?php echo $loanStats['paid_amount']; ?>;
-            const remainingAmount = <?php echo $loanStats['remaining_amount']; ?>;
-            const paidInterest = <?php echo $loanStats['paid_interest']; ?>;
-            const remainingInterest = <?php echo $loanStats['remaining_interest']; ?>;
-            
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['Loan Principal', 'Interest'],
-                    datasets: [
-                        {
-                            label: 'Paid',
-                            data: [paidAmount, paidInterest],
-                            backgroundColor: colors.green,
-                            borderColor: colors.green,
-                            borderWidth: 1
-                        },
-                        {
-                            label: 'Remaining',
-                            data: [remainingAmount, remainingInterest],
-                            backgroundColor: colors.orange,
-                            borderColor: colors.orange,
-                            borderWidth: 1
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            stacked: false
-                        },
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Amount (Rs.)'
-                            }
-                        }
+        // Get data from PHP
+        const categories = [];
+        const amounts = [];
+        const backgroundColors = [];
+        
+        <?php
+        // Generate category data for chart
+        $expenseCategories->data_seek(0); // Reset result pointer
+        $colorIndex = 0;
+        while ($category = $expenseCategories->fetch_assoc()) {
+            echo "categories.push('" . addslashes($category['Category']) . "');\n";
+            echo "amounts.push(" . $category['amount'] . ");\n";
+            echo "backgroundColors.push('" . $colors[$colorIndex % count($colors)] . "');\n";
+            $colorIndex++;
+        }
+        ?>
+        
+        new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: categories,
+                datasets: [{
+                    data: amounts,
+                    backgroundColor: backgroundColors,
+                    borderColor: '#fff',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        display: false
                     },
-                    plugins: {
-                        legend: {
-                            position: 'top'
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return context.dataset.label + ': Rs.' + context.raw.toLocaleString();
-                                }
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = Math.round((context.raw / total) * 100);
+                                return context.label + ': Rs.' + context.raw.toLocaleString() + ' (' + percentage + '%)';
                             }
                         }
                     }
                 }
-            });
-        }
-        
-        // Create Payment Methods Chart
-        function createPaymentMethodsChart() {
-            const ctx = document.getElementById('paymentMethodsChart').getContext('2d');
-            
-            // Get data from PHP
-            const methods = [];
-            const amounts = [];
-            const backgroundColors = [colors.blue, colors.purple, colors.cyan, colors.orange];
-            
-            <?php
-            // Generate payment method data for chart
-            $methodIndex = 0;
-            while ($method = $paymentMethods->fetch_assoc()) {
-                echo "methods.push('" . addslashes($method['method']) . "');\n";
-                echo "amounts.push(" . $method['amount'] . ");\n";
-                $methodIndex++;
             }
-            ?>
-            
-            new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: methods,
-                    datasets: [{
-                        data: amounts,
-                        backgroundColor: backgroundColors.slice(0, methods.length),
-                        borderColor: '#fff',
-                        borderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    cutout: '50%',
-                    plugins: {
-                        legend: {
-                            position: 'bottom'
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                    const percentage = Math.round((context.raw / total) * 100);
-                                    return context.label + ': Rs.' + context.raw.toLocaleString() + ' (' + percentage + '%)';
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
+        });
+    }
+    
+    // Create Loan Status Chart
+    function createLoanStatusChart() {
+        const ctx = document.getElementById('loanStatusChart').getContext('2d');
         
-        // Create Member Stats Chart
-        function createMemberStatsChart() {
-            const ctx = document.getElementById('memberStatsChart').getContext('2d');
-            
-            // Get data from PHP
-            const activeMembers = <?php echo $memberStats['active_members']; ?>;
-            const inactiveMembers = <?php echo $memberStats['inactive_members']; ?>;
-            
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['Member Status'],
-                    datasets: [
-                        {
-                            label: 'Active Members',
-                            data: [activeMembers],
-                            backgroundColor: colors.blue,
-                            borderColor: colors.blue,
-                            borderWidth: 1
-                        },
-                        {
-                            label: 'Inactive Members',
-                            data: [inactiveMembers],
-                            backgroundColor: colors.gray,
-                            borderColor: colors.gray,
-                            borderWidth: 1
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            stacked: true
-                        },
-                        y: {
-                            stacked: true,
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Number of Members'
-                            }
-                        }
+        // Get data from PHP
+        const paidAmount = <?php echo $loanStats['paid_amount']; ?>;
+        const remainingAmount = <?php echo $loanStats['remaining_amount']; ?>;
+        const paidInterest = <?php echo $loanStats['paid_interest']; ?>;
+        const remainingInterest = <?php echo $loanStats['remaining_interest']; ?>;
+        
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Loan Principal', 'Interest'],
+                datasets: [
+                    {
+                        label: 'Paid',
+                        data: [paidAmount, paidInterest],
+                        backgroundColor: colors.green,
+                        borderColor: colors.green,
+                        borderWidth: 1
                     },
-                    plugins: {
-                        legend: {
-                            position: 'bottom'
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    const total = activeMembers + inactiveMembers;
-                                    const percentage = Math.round((context.raw / total) * 100);
-                                    return context.dataset.label + ': ' + context.raw + ' (' + percentage + '%)';
-                                }
+                    {
+                        label: 'Remaining',
+                        data: [remainingAmount, remainingInterest],
+                        backgroundColor: colors.orange,
+                        borderColor: colors.orange,
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        stacked: false
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Amount (Rs.)'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': Rs.' + context.raw.toLocaleString();
                             }
                         }
                     }
                 }
-            });
+            }
+        });
+    }
+    
+    // Create Payment Methods Chart
+    function createPaymentMethodsChart() {
+        const ctx = document.getElementById('paymentMethodsChart').getContext('2d');
+        
+        // Get data from PHP
+        const methods = [];
+        const amounts = [];
+        const backgroundColors = [colors.blue, colors.purple, colors.cyan, colors.orange];
+        
+        <?php
+        // Generate payment method data for chart
+        $methodIndex = 0;
+        while ($method = $paymentMethods->fetch_assoc()) {
+            echo "methods.push('" . addslashes($method['method']) . "');\n";
+            echo "amounts.push(" . $method['amount'] . ");\n";
+            $methodIndex++;
+        }
+        ?>
+        
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: methods,
+                datasets: [{
+                    data: amounts,
+                    backgroundColor: backgroundColors.slice(0, methods.length),
+                    borderColor: '#fff',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '50%',
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = Math.round((context.raw / total) * 100);
+                                return context.label + ': Rs.' + context.raw.toLocaleString() + ' (' + percentage + '%)';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Create Member Stats Chart
+    function createMemberStatsChart() {
+        const ctx = document.getElementById('memberStatsChart').getContext('2d');
+        
+        // Get data from PHP
+        const activeMembers = <?php echo $memberStats['active_members']; ?>;
+        const inactiveMembers = <?php echo $memberStats['inactive_members']; ?>;
+        
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Member Status'],
+                datasets: [
+                    {
+                        label: 'Active Members',
+                        data: [activeMembers],
+                        backgroundColor: colors.blue,
+                        borderColor: colors.blue,
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Inactive Members',
+                        data: [inactiveMembers],
+                        backgroundColor: colors.gray,
+                        borderColor: colors.gray,
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        stacked: true
+                    },
+                    y: {
+                        stacked: true,
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Members'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = activeMembers + inactiveMembers;
+                                const percentage = Math.round((context.raw / total) * 100);
+                                return context.dataset.label + ': ' + context.raw + ' (' + percentage + '%)';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Function to download chart as image
+    function downloadChart(chartId, filename) {
+        // Check if user is auditor before allowing download
+        const isAuditor = <?php echo $isAuditor ? 'true' : 'false'; ?>;
+        
+        if (isAuditor) {
+            alert('Auditors do not have permission to download charts.');
+            return;
         }
         
-        // Function to download chart as image
-        function downloadChart(chartId, filename) {
-            const canvas = document.getElementById(chartId);
-            const image = canvas.toDataURL('image/png');
-            
-            // Create temporary link and trigger download
-            const link = document.createElement('a');
-            link.href = image;
-            link.download = filename + '_' + <?php echo $selectedYear; ?> + '.png';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-    </script>
+        const canvas = document.getElementById(chartId);
+        const image = canvas.toDataURL('image/png');
+        
+        // Create temporary link and trigger download
+        const link = document.createElement('a');
+        link.href = image;
+        link.download = filename + '_' + <?php echo $selectedYear; ?> + '.png';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+</script>
 </body>
 </html>
