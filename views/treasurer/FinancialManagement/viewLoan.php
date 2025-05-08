@@ -71,7 +71,7 @@ if ($isMemberView && !isset($_GET['id'])) {
     if (!$loanID) {
         $_SESSION['error_message'] = "No loan found for your account";
         if ($isMemberView) {
-            header("Location: ../member/home-member.php");
+            header("Location: ../../member/home-member.php");
         } else {
             header("Location: loan.php");
         }
@@ -86,7 +86,7 @@ if ($isMemberView && !isset($_GET['id'])) {
 if (!$loanID) {
     $_SESSION['error_message'] = "No loan ID provided";
     if ($isMemberView) {
-        header("Location: ../member/home-member.php");
+        header("Location: ../../member/home-member.php");
     } else {
         header("Location: loan.php");
     }
@@ -122,7 +122,7 @@ $loan = getLoanDetails($loanID);
 if (!$loan) {
     $_SESSION['error_message'] = "Loan not found";
     if ($isMemberView) {
-        header("Location: ../member/home-member.php");
+        header("Location: ../../member/home-member.php");
     } else {
         header("Location: loan.php");
     }

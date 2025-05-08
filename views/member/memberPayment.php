@@ -1,4 +1,3 @@
-//memberPayment.php
 <?php
 session_start();
 require_once "../../config/database.php";
@@ -82,7 +81,7 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
 <body>
     <div class="main-container">
     <?php include '../templates/navbar-member.php'; ?> 
-        <div class="container">
+        <div class="container" style="margin-top: 30px;">
             <h1>Payments</h1>
             
             <?php if(isset($_SESSION['error_message'])): ?>

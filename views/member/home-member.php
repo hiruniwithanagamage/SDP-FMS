@@ -399,9 +399,14 @@ $formattedDues = number_format($totalDues, 2);
                 </div>
             <?php endif; ?>
             
-            <?php if(isset($error)): ?>
-                <div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div>
-            <?php endif; ?>
+            <?php if(isset($_SESSION['error_message'])): ?>
+                    <div class="alert alert-danger">
+                        <?php 
+                            echo $_SESSION['error_message'];
+                            unset($_SESSION['error_message']);
+                        ?>
+                    </div>
+                <?php endif; ?>
 
            <div class="action-cards">
                <div class="action-card" onclick="window.location.href='memberSummary.php'">
