@@ -272,10 +272,10 @@ if (isset($userData['Treasurer_TreasurerID'])) {
             </div>
             
             <div class="profile-dropdown" id="dropdownMenu">
-                <a href="<?php echo $basePath; ?>views/treasurer/profile.php">
+                <a href="<?php echo $basePath; ?>views/treasurer/treasurerProfile.php">
                     <i class="fas fa-user"></i> Profile
                 </a>
-                <a href="<?php echo $basePath; ?>views/treasurer/reports.php">
+                <a href="<?php echo $basePath; ?>reports/yearEndReport.php">
                     <i class="fas fa-file-alt"></i> Reports
                 </a>
                 <a href="<?php echo $basePath; ?>logout.php" class="logout">

@@ -386,9 +386,9 @@
 
            <!-- Main Actions -->
            <div class="statistics-grid">
-               <div class="statistics-card" onclick="window.location.href='reviewDetails.php?term=<?php echo urlencode($currentTerm); ?>'">
+               <div class="statistics-card" onclick="window.location.href='../../reports/yearEndReport.php?term=<?php echo urlencode($currentTerm); ?>'">
                    <i class="fas fa-file-alt icon"></i>
-                   <h3>View Reports</h3>
+                   <h3>View Past Reports</h3>
                </div>
                <div class="statistics-card" onclick="window.location.href='financialDetails.php?term=<?php echo urlencode($currentTerm); ?>'">
                    <i class="fas fa-chart-line icon"></i>

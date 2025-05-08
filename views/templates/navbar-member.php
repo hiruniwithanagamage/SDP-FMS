@@ -10,7 +10,7 @@
       exit();
    }
 
-   function getBasePath() {
+   function getbasePath() {
       // Get the current script path
       $currentPath = $_SERVER['SCRIPT_NAME'];
       
@@ -26,13 +26,13 @@
       }
   }
   
-  $basepath = getBasePath();
+  $basePath = getbasePath();
 
    $userData = $_SESSION["u"];
 
    // Get member details if this is a member user
    $memberName = "Guest";
-   $memberImage = $basepath."assets/images/profile_photo.jpg"; // default image
+   $memberImage = $basePath."assets/images/profile_photo.jpg"; // default image
 
    if (isset($userData['Member_MemberID'])) {
       $memberQuery = "SELECT Name, Image FROM Member WHERE MemberID = '" . $userData['Member_MemberID'] . "'";
@@ -43,7 +43,7 @@
          $memberName = $memberData['Name'];
          // Use member's image if available, otherwise keep default
          if (!empty($memberData['Image'])) {
-               $memberImage = $basepath."uploads/" . $memberData['Image'];
+               $memberImage = $basePath."uploads/" . $memberData['Image'];
          }
       }
    }
@@ -248,7 +248,7 @@
 <nav class="modern-nav">
    <div class="nav-content">
        <div class="nav-brand">
-       <img src="<?php echo $basepath; ?>assets/images/society_logo.png" 
+       <img src="<?php echo $basePath; ?>assets/images/society_logo.png" 
                  alt="Logo" 
                  class="brand-logo"
                  onerror="this.src='<?php echo $defaultProfileImage; ?>'">
@@ -256,12 +256,12 @@
        </div>
 
        <div class="nav-links">
-       <a href="<?php echo $basepath; ?>views/member/home-member.php" class="nav-link">
+       <a href="<?php echo $basePath; ?>views/member/home-member.php" class="nav-link">
            <!-- <a href="home-member.php" class="nav-link"> -->
                <i class="fas fa-home"></i>
                <span>Home</span>
            </a>
-           <a href="<?php echo $basepath; ?>views/member/memberPayment.php" class="nav-link">
+           <a href="<?php echo $basePath; ?>views/member/memberPayment.php" class="nav-link">
            <!-- <a href="memberPayment.php" class="nav-link"> -->
                <i class="fas fa-credit-card"></i>
                <span>Payments</span>
@@ -274,13 +274,24 @@
                <img src="<?php echo htmlspecialchars($memberImage); ?>" alt="Profile">
            </div>
            
-           <div class="profile-dropdown" id="dropdownMenu">
+           <!-- <div class="profile-dropdown" id="dropdownMenu">
                <a href="../member/memberProfile.php"><i class="fas fa-user"></i> Profile</a>
                <a href="../../reports/yearEndReport.php"><i class="fas fa-file-alt"></i> Reports</a>
                <a href="../../logout.php" class="logout">
                    <i class="fas fa-sign-out-alt"></i> Logout
                </a>
-           </div>
+           </div> -->
+           <div class="profile-dropdown" id="dropdownMenu">
+               <a href="<?php echo $basePath; ?>views/member/memberProfile.php">
+                  <i class="fas fa-user"></i> Profile
+               </a>
+               <a href="<?php echo $basePath; ?>reports/yearEndReport.php">
+                  <i class="fas fa-file-alt"></i> Reports
+               </a>
+               <a href="<?php echo $basePath; ?>logout.php" class="logout">
+                  <i class="fas fa-sign-out-alt"></i> Logout
+               </a>
+            </div>
        </div>
    </div>
 </nav>

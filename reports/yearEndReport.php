@@ -12,7 +12,38 @@ if (!isset($_SESSION["u"])) {
 
 require_once "../config/database.php";
 
-// Replace the current referrer tracking code with this
+// Function to get the appropriate navbar based on user role
+function getNavbarTemplate() {
+    if (isset($_SESSION["role"])) {
+        $role = $_SESSION["role"];
+        $navbarPath = "../views/templates/navbar-{$role}.php";
+        
+        // Check if the role-specific navbar exists
+        if (file_exists($navbarPath)) {
+            return $navbarPath;
+        }
+    }
+    
+    // Default fallback navbar
+    return "../views/templates/navbar-member.php";
+}
+
+// Function to get the appropriate back URL
+function getBackUrl() {
+    // If we have a stored referrer, use it
+    if (isset($_SESSION['report_referrer']) && !empty($_SESSION['report_referrer'])) {
+        return $_SESSION['report_referrer'];
+    }
+    
+    // Otherwise, go to role-specific homepage
+    if (isset($_SESSION["role"])) {
+        return "../views/" . $_SESSION["role"] . "/home-" . $_SESSION["role"] . ".php";
+    }
+    
+    // Fallback
+    return "../index.php";
+}
+
 if (!isset($_SESSION['report_referrer']) || 
     (strpos($_SERVER['HTTP_REFERER'] ?? '', 'yearEndReport.php') === false)) {
     $_SESSION['report_referrer'] = $_SERVER['HTTP_REFERER'] ?? '../index.php';
@@ -533,7 +564,7 @@ function getAmountColor($amount) {
 </head>
 <body>
     <div class="home-container">
-    <?php include '../views/templates/navbar-member.php'; ?>
+    <?php include getNavbarTemplate(); ?>
 
     <div class="container">
         <div class="report-header">
@@ -551,7 +582,7 @@ function getAmountColor($amount) {
             <h2 class="no-report-title">No Approved Reports Available</h2>
             <p class="no-report-message">There are currently no approved financial reports available. Reports will appear here once they have been reviewed and approved by the auditor.</p>
             
-            <a href="<?php echo $_SESSION['report_referrer'] ?? '../index.php'; ?>" class="btn btn-back">
+            <a href="<?php echo getBackUrl(); ?>" class="btn btn-back">
                 <i class="fas fa-arrow-left"></i> Back
             </a>
         </div>
@@ -741,12 +772,13 @@ function getAmountColor($amount) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script>
         // Handle back button clicks using browser history
-        document.querySelectorAll('.btn-back').forEach(function(button) {
-        button.addEventListener('click', function(e) {
-            e.preventDefault();
-            window.location.href = "<?php echo $_SESSION['report_referrer']; ?>";
-        });
+        // Handle back button clicks
+document.querySelectorAll('.btn-back').forEach(function(button) {
+    button.addEventListener('click', function(e) {
+        e.preventDefault();
+        window.location.href = "<?php echo getBackUrl(); ?>";
     });
+});
         
         // PDF Download functionality
         <?php if ($report !== null): ?>
