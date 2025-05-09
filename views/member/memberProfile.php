@@ -46,29 +46,22 @@ $successMessage = "";
 $errorMessage = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["update_profile"])) {
-    $name = $_POST["name"];
-    $address = $_POST["address"];
-    $mobile = $_POST["mobile"];
-    $familyMembers = $_POST["family_members"];
-    $otherMembers = $_POST["other_members"];
+    // Only get the editable fields
     $email = $_POST["email"];
+    $mobile = $_POST["mobile"];
     
     // Start transaction
     $conn = getConnection();
     $conn->begin_transaction();
     
     try {
-        // Update Member table
+        // Update only the Mobile_Number in Member table
         $updateMemberQuery = "UPDATE Member SET 
-                            Name = ?, 
-                            Address = ?, 
-                            Mobile_Number = ?, 
-                            No_of_Family_Members = ?, 
-                            Other_Members = ? 
+                            Mobile_Number = ?
                             WHERE MemberID = ?";
         
         $stmt = prepare($updateMemberQuery);
-        $stmt->bind_param("ssiiss", $name, $address, $mobile, $familyMembers, $otherMembers, $memberID);
+        $stmt->bind_param("is", $mobile, $memberID);
         $stmt->execute();
         
         // Update User table (email)
@@ -210,8 +203,14 @@ if (!empty($memberData['Image'])) {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
     <style>
         body {
-            background-color: #f8f9fa;
+            font-family: Arial, sans-serif;
+            background-color:  #f5f7fa;
             color: #333;
+        }
+
+        .home-container{
+            max-width: 1200px;
+            margin: 0 auto;;
         }
         
         .profile-container {
@@ -224,10 +223,17 @@ if (!empty($memberData['Image'])) {
         }
         
         .profile-header {
-            background: linear-gradient(45deg, #1a237e, #3949ab);
+            max-width: 1200px;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
             color: white;
-            padding: 30px;
-            position: relative;
+            padding: 2rem;
+            border-radius: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 30px auto;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
         
         .profile-avatar {
@@ -314,40 +320,121 @@ if (!empty($memberData['Image'])) {
         .alert {
             border-radius: 8px;
         }
+
+        /* Style for read-only fields to visually indicate they are not editable */
+input[readonly], textarea[readonly] {
+    background-color: #f8f9fa;
+    border-color: #dee2e6;
+    color: #6c757d;
+    cursor: not-allowed;
+}
+
+/* Highlight the editable fields */
+#email, #mobile, #profile_image {
+    border-left: 3px solid #1a237e;
+}
+
+/* Add a subtle icon to indicate which fields are editable */
+.editable-field {
+    position: relative;
+}
+
+.editable-field::after {
+    content: "\f044"; /* Font Awesome edit icon */
+    font-family: "Font Awesome 5 Free";
+    font-weight: 900;
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #1a237e;
+    opacity: 0.7;
+}
+
+        /* Add specific styles to differentiate navbar profile image from main profile image */
+        .nav-profile .profile-avatar {
+            width: 42px;
+            height: 42px;
+            gap: 1rem;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 2px solid #1a237e;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: static; /* Override any position: relative from the main profile */
+            margin: 0;
+            /* Override any margin settings from the main profile */
+        }
+
+        .nav-profile .profile-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            vertical-align: middle;
+        }
+
+        /* Ensure the main profile doesn't affect navbar */
+        .profile-sidebar .profile-avatar {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            margin: 0 auto 1.5rem;
+            border: 5px solid #f5f7fa;
+            overflow: hidden;
+            position: relative;
+        }
+        .nav-content {
+            font-family: Arial, sans-serif;
+            height: 60px;
+            padding: 22px;    
+        }
+        .modern-nav {
+            margin: 32px;
+        }
+        .nav-link {
+            color: #333;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.8rem 1.2rem;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
     </style>
 </head>
 <body>
-    <div class="container profile-container">
-        <?php if(!empty($successMessage)): ?>
-            <div class="alert alert-success" role="alert">
-                <?php echo $successMessage; ?>
+    <div class='home-container'>
+    <div class="profile-header">
+        <div class="d-flex flex-column flex-md-row align-items-center">
+            <div class="profile-avatar me-md-4">
+                <img src="<?php echo htmlspecialchars($profileImage); ?>" alt="Profile Image">
             </div>
-        <?php endif; ?>
-        
-        <?php if(!empty($errorMessage)): ?>
-            <div class="alert alert-danger" role="alert">
-                <?php echo $errorMessage; ?>
-            </div>
-        <?php endif; ?>
-        
-        <div class="profile-header">
-            <div class="d-flex flex-column flex-md-row align-items-center">
-                <div class="profile-avatar me-md-4">
-                    <img src="<?php echo htmlspecialchars($profileImage); ?>" alt="Profile Image">
-                </div>
-                <div class="text-center text-md-start">
-                    <h2><?php echo htmlspecialchars($memberData['Name']); ?></h2>
-                    <p class="mb-1"><i class="fas fa-id-card me-2"></i>Member ID: <?php echo htmlspecialchars($memberData['MemberID']); ?></p>
-                    <p class="mb-1"><i class="fas fa-calendar-alt me-2"></i>Joined: <?php echo date("F j, Y", strtotime($memberData['Joined_Date'])); ?></p>
-                    <p><i class="fas fa-circle me-2"></i>Status: 
-                        <span class="badge <?php echo ($memberData['Status'] == 'active') ? 'bg-success' : 'bg-warning'; ?>">
-                            <?php echo ucfirst(htmlspecialchars($memberData['Status'])); ?>
-                        </span>
-                    </p>
-                </div>
+            <div class="text-center text-md-start">
+                <h2><?php echo htmlspecialchars($memberData['Name']); ?></h2>
+                <p class="mb-1"><i class="fas fa-id-card me-2"></i>Member ID: <?php echo htmlspecialchars($memberData['MemberID']); ?></p>
+                <p class="mb-1"><i class="fas fa-calendar-alt me-2"></i>Joined: <?php echo date("F j, Y", strtotime($memberData['Joined_Date'])); ?></p>
+                <p><i class="fas fa-circle me-2"></i>Status: 
+                    <span class="badge <?php echo ($memberData['Status'] == 'Full Member') ? 'bg-success' : 'bg-warning'; ?>">
+                        <?php echo ucfirst(htmlspecialchars($memberData['Status'])); ?>
+                    </span>
+                </p>
             </div>
         </div>
+    </div>
+    <?php if(!empty($successMessage)): ?>
+        <div class="alert alert-success" role="alert">
+            <?php echo $successMessage; ?>
+        </div>
+    <?php endif; ?>
         
+    <?php if(!empty($errorMessage)): ?>
+        <div class="alert alert-danger" role="alert">
+            <?php echo $errorMessage; ?>
+        </div>
+    <?php endif; ?>
+    <div class="container profile-container">
         <div class="tabs-container">
             <ul class="nav nav-tabs" id="profileTabs" role="tablist">
                 <li class="nav-item" role="presentation">
@@ -429,7 +516,7 @@ if (!empty($memberData['Image'])) {
                                 <div class="info-item">
                                     <div class="info-label">Account Status</div>
                                     <div class="info-value">
-                                        <span class="badge <?php echo ($memberData['Status'] == 'active') ? 'bg-success' : 'bg-warning'; ?>">
+                                        <span class="badge <?php echo ($memberData['Status'] == 'Full Member') ? 'bg-success' : 'bg-warning'; ?>">
                                             <?php echo ucfirst(htmlspecialchars($memberData['Status'])); ?>
                                         </span>
                                     </div>
@@ -460,7 +547,8 @@ if (!empty($memberData['Image'])) {
                             <div class="row mb-3">
                                 <div class="col-md-6">
                                     <label for="name" class="form-label">Full Name</label>
-                                    <input type="text" class="form-control" id="name" name="name" value="<?php echo htmlspecialchars($memberData['Name']); ?>" required>
+                                    <input type="text" class="form-control" id="name" name="name" value="<?php echo htmlspecialchars($memberData['Name']); ?>" readonly>
+                                    <div class="form-text text-muted">This field cannot be modified</div>
                                 </div>
                                 
                                 <div class="col-md-6">
@@ -471,7 +559,8 @@ if (!empty($memberData['Image'])) {
                             
                             <div class="mb-3">
                                 <label for="address" class="form-label">Address</label>
-                                <textarea class="form-control" id="address" name="address" rows="2" required><?php echo htmlspecialchars($memberData['Address']); ?></textarea>
+                                <textarea class="form-control" id="address" name="address" rows="2" readonly><?php echo htmlspecialchars($memberData['Address']); ?></textarea>
+                                <div class="form-text text-muted">This field cannot be modified</div>
                             </div>
                             
                             <div class="row mb-3">
@@ -482,12 +571,14 @@ if (!empty($memberData['Image'])) {
                                 
                                 <div class="col-md-4">
                                     <label for="family_members" class="form-label">Family Members</label>
-                                    <input type="number" class="form-control" id="family_members" name="family_members" value="<?php echo htmlspecialchars($memberData['No_of_Family_Members']); ?>">
+                                    <input type="number" class="form-control" id="family_members" name="family_members" value="<?php echo htmlspecialchars($memberData['No_of_Family_Members']); ?>" readonly>
+                                    <div class="form-text text-muted">This field cannot be modified</div>
                                 </div>
                                 
                                 <div class="col-md-4">
                                     <label for="other_members" class="form-label">Other Members</label>
-                                    <input type="number" class="form-control" id="other_members" name="other_members" value="<?php echo htmlspecialchars($memberData['Other_Members']); ?>">
+                                    <input type="number" class="form-control" id="other_members" name="other_members" value="<?php echo htmlspecialchars($memberData['Other_Members']); ?>" readonly>
+                                    <div class="form-text text-muted">This field cannot be modified</div>
                                 </div>
                             </div>
                             
@@ -565,6 +656,7 @@ if (!empty($memberData['Image'])) {
                 </div>
             </div>
         </div>
+    </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
