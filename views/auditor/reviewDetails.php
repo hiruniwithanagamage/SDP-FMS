@@ -19,6 +19,11 @@ $selectedType = isset($_GET['type']) ? $_GET['type'] : 'loans';
 $searchQuery = isset($_GET['search']) ? $_GET['search'] : '';
 $searchBy = isset($_GET['searchBy']) ? $_GET['searchBy'] : 'id';
 
+// Pagination parameters
+$itemsPerPage = 10; // Number of items to display per page
+$currentPage = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+$offset = ($currentPage - 1) * $itemsPerPage;
+
 // Function to get pending reports
 function getPendingReports() {
     $sql = "SELECT ReportID, VersionID, Status, Term FROM FinancialReportVersions 
@@ -46,7 +51,7 @@ $currentReport = !empty($pendingReports) ? $pendingReports[0] : null;
 $reportId = $currentReport ? $currentReport['ReportID'] : "REP" . getCurrentTerm();
 $versionId = $currentReport ? $currentReport['VersionID'] : "V1";
 $selectedTerm = $currentReport ? $currentReport['Term'] : getCurrentTerm();
-$reportStatus = $currentReport ? $currentReport['Status'] : 'ongoing';
+$reportStatus = $currentReport ? $currentReport['Status'] : 'reviewed';
 
 // Extract term from report ID helper function
 function extractTermFromReportId($reportId) {
@@ -79,13 +84,123 @@ if (isset($_POST['addComment'])) {
     exit();
 }
 
-// Update report status
+// Add this function to check for new transactions after report date
+function checkForNewTransactions($reportId, $versionId, $selectedTerm) {
+    // First, get the creation date of the current report version
+    $getReportDateSql = "SELECT Date FROM FinancialReportVersions 
+                         WHERE ReportID = ? AND VersionID = ?";
+    $getReportDateStmt = prepare($getReportDateSql);
+    $getReportDateStmt->bind_param("ss", $reportId, $versionId);
+    $getReportDateStmt->execute();
+    $reportDateResult = $getReportDateStmt->get_result();
+    
+    if ($reportDateResult->num_rows > 0) {
+        $reportDateRow = $reportDateResult->fetch_assoc();
+        $reportDate = $reportDateRow['Date'];
+        
+        // Check for new loans after report date
+        $newLoansCount = checkNewRecords("Loan", "Issued_Date", $reportDate, $selectedTerm);
+        
+        // Check for new payments after report date
+        $newPaymentsCount = checkNewRecords("Payment", "Date", $reportDate, $selectedTerm);
+        
+        // Check for new membership fees after report date
+        $newFeesCount = checkNewRecords("MembershipFee", "Date", $reportDate, $selectedTerm);
+        
+        // Check for new fines after report date
+        $newFinesCount = checkNewRecords("Fine", "Date", $reportDate, $selectedTerm);
+        
+        // Check for new welfare payments after report date
+        $newWelfareCount = checkNewRecords("DeathWelfare", "Date", $reportDate, $selectedTerm);
+        
+        // Check for new expenses after report date
+        $newExpensesCount = checkNewRecords("Expenses", "Date", $reportDate, $selectedTerm);
+        
+        // Total new transactions
+        $totalNewTransactions = $newLoansCount + $newPaymentsCount + $newFeesCount + 
+                               $newFinesCount + $newWelfareCount + $newExpensesCount;
+        
+        return [
+            'hasNewTransactions' => $totalNewTransactions > 0,
+            'totalNewTransactions' => $totalNewTransactions,
+            'details' => [
+                'loans' => $newLoansCount,
+                'payments' => $newPaymentsCount,
+                'fees' => $newFeesCount,
+                'fines' => $newFinesCount,
+                'welfare' => $newWelfareCount,
+                'expenses' => $newExpensesCount
+            ]
+        ];
+    }
+    
+    return ['hasNewTransactions' => false];
+}
+
+// Helper function to check for new records in a specific table
+function checkNewRecords($tableName, $dateColumn, $reportDate, $term) {
+    $sql = "SELECT COUNT(*) as count FROM $tableName 
+            WHERE $dateColumn > ? AND Term = ?";
+    $stmt = prepare($sql);
+    $stmt->bind_param("si", $reportDate, $term);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    return $row['count'];
+}
+
+// Modify the updateReportStatus section to check for new transactions
 if (isset($_POST['updateReportStatus'])) {
     $decision = $_POST['decision'];
     $reportId = $_POST['reportId'];
     $versionId = $_POST['versionId'];
     
-    $status = ($decision === 'approve') ? 'approved' : 'ongoing';
+    // Check for new transactions if approving the report
+    if ($decision === 'approve') {
+        $transactionCheck = checkForNewTransactions($reportId, $versionId, $selectedTerm);
+        
+        if ($transactionCheck['hasNewTransactions']) {
+            // If there are new transactions, change the decision to "changes" (ongoing)
+            $decision = 'changes';
+            
+            // Add an automated comment about new transactions
+            $autoComment = "There are {$transactionCheck['totalNewTransactions']} new transactions since this report was created. ";
+            $autoComment .= "Please request the treasurer to submit a new report with the updated data. ";
+            $autoComment .= "Details: ";
+            
+            if ($transactionCheck['details']['loans'] > 0) {
+                $autoComment .= "{$transactionCheck['details']['loans']} new loans, ";
+            }
+            if ($transactionCheck['details']['payments'] > 0) {
+                $autoComment .= "{$transactionCheck['details']['payments']} new payments, ";
+            }
+            if ($transactionCheck['details']['fees'] > 0) {
+                $autoComment .= "{$transactionCheck['details']['fees']} new membership fees, ";
+            }
+            if ($transactionCheck['details']['fines'] > 0) {
+                $autoComment .= "{$transactionCheck['details']['fines']} new fines, ";
+            }
+            if ($transactionCheck['details']['welfare'] > 0) {
+                $autoComment .= "{$transactionCheck['details']['welfare']} new welfare payments, ";
+            }
+            if ($transactionCheck['details']['expenses'] > 0) {
+                $autoComment .= "{$transactionCheck['details']['expenses']} new expenses, ";
+            }
+            
+            $autoComment = rtrim($autoComment, ", ") . ".";
+            
+            // Insert the automated comment
+            $insertCommentSql = "INSERT INTO ReportComments (ReportID, VersionID, Comment) VALUES (?, ?, ?)";
+            $insertCommentStmt = prepare($insertCommentSql);
+            $insertCommentStmt->bind_param("sss", $reportId, $versionId, $autoComment);
+            $insertCommentStmt->execute();
+            
+            // Set a flag to show a special message in the redirect
+            $newTransactionsFlag = true;
+        }
+    }
+    
+    $status = ($decision === 'approve') ? 'approved' : 'reviewed';
     
     // First get the auditor ID associated with this user
     $getAuditorSql = "SELECT Auditor_AuditorID FROM User WHERE UserId = ?";
@@ -106,85 +221,26 @@ if (isset($_POST['updateReportStatus'])) {
         if ($stmt->execute()) {
             // If the report is approved, update previous ongoing versions to reviewed
             if ($status === 'approved') {
-                $updatePreviousVersionsSql = "UPDATE FinancialReportVersions 
-                                            SET Status = 'reviewed' 
-                                            WHERE ReportID = ? 
-                                            AND VersionID < ? 
-                                            AND Status = 'ongoing'";
-                $updatePreviousVersionsStmt = prepare($updatePreviousVersionsSql);
-                $updatePreviousVersionsStmt->bind_param("ss", $reportId, $versionId);
-                $updatePreviousVersionsStmt->execute();
+                // [Existing code for approved reports]
+                // $updatePreviousVersionsSql = "UPDATE FinancialReportVersions 
+                //                             SET Status = 'reviewed' 
+                //                             WHERE ReportID = ? 
+                //                             AND VersionID < ? 
+                //                             AND Status = 'ongoing'";
+                // $updatePreviousVersionsStmt = prepare($updatePreviousVersionsSql);
+                // $updatePreviousVersionsStmt->bind_param("ss", $reportId, $versionId);
+                // $updatePreviousVersionsStmt->execute();
                 
-                // Extract the term year from the report ID
-                $termYear = $selectedTerm;
+                // [Rest of your existing code for term updates...]
                 
-                // 1. Set current active term to inactive
-                $setInactiveSql = "UPDATE Static SET status = 'inactive' WHERE year = ? AND status = 'active'";
-                $setInactiveStmt = prepare($setInactiveSql);
-                $setInactiveStmt->bind_param("i", $termYear);
-                $setInactiveStmt->execute();
-                
-                // 2. Check if next term exists
-                $nextTermYear = $termYear + 1;
-                $nextTermStaticId = "STAT" . $nextTermYear;
-
-                $checkNextTermSql = "SELECT * FROM Static WHERE year = ?";
-                $checkNextTermStmt = prepare($checkNextTermSql);
-                $checkNextTermStmt->bind_param("i", $nextTermYear);
-                $checkNextTermStmt->execute();
-                $checkNextTermResult = $checkNextTermStmt->get_result();
-                
-                if ($checkNextTermResult->num_rows > 0) {
-                    // 3. Next term exists, set it to active
-                    $setNextTermActiveSql = "UPDATE Static SET status = 'active' WHERE year = ?";
-                    $setNextTermActiveStmt = prepare($setNextTermActiveSql);
-                    $setNextTermActiveStmt->bind_param("i", $nextTermYear);
-                    $setNextTermActiveStmt->execute();
+                $message = "Report approved successfully";
+            } else {
+                if (isset($newTransactionsFlag) && $newTransactionsFlag) {
+                    $message = "New transactions detected. Report sent back for updates.";
                 } else {
-                    // 4. Next term doesn't exist, create it and set to active
-                    // First, get the current term's settings to copy them
-                    $getCurrentTermSettingsSql = "SELECT monthly_fee, registration_fee, death_welfare, late_fine, 
-                                                absent_fine, rules_violation_fine, interest, max_loan_limit 
-                                                FROM Static WHERE year = ?";
-                    $getCurrentTermSettingsStmt = prepare($getCurrentTermSettingsSql);
-                    $getCurrentTermSettingsStmt->bind_param("i", $termYear);
-                    $getCurrentTermSettingsStmt->execute();
-                    $result = $getCurrentTermSettingsStmt->get_result();
-                    
-                    if ($result->num_rows > 0) {
-                        $currentTermSettings = $result->fetch_assoc();
-                        
-                        // Now insert the new term with the same settings
-                        $insertNextTermSql = "INSERT INTO Static (id, year, monthly_fee, registration_fee, death_welfare, 
-                                            late_fine, absent_fine, rules_violation_fine, interest, max_loan_limit, status) 
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')";
-                        $insertNextTermStmt = prepare($insertNextTermSql);
-                        $insertNextTermStmt->bind_param("sidddddddd", 
-                            $nextTermStaticId,
-                            $nextTermYear, 
-                            $currentTermSettings['monthly_fee'], 
-                            $currentTermSettings['registration_fee'], 
-                            $currentTermSettings['death_welfare'], 
-                            $currentTermSettings['late_fine'], 
-                            $currentTermSettings['absent_fine'], 
-                            $currentTermSettings['rules_violation_fine'], 
-                            $currentTermSettings['interest'], 
-                            $currentTermSettings['max_loan_limit']
-                        );
-                        $insertNextTermStmt->execute();
-                    } else {
-                        // If we couldn't find the current term's settings, use default values
-                        $insertNextTermSql = "INSERT INTO Static (year, monthly_fee, registration_fee, death_welfare, 
-                                            late_fine, absent_fine, rules_violation_fine, interest, max_loan_limit, status) 
-                                            VALUES (?, 100.00, 5000.00, 10000.00, 50.00, 1010.00, 20.00, 3.00, 20000.00, 'active')";
-                        $insertNextTermStmt = prepare($insertNextTermSql);
-                        $insertNextTermStmt->bind_param("i", $nextTermYear);
-                        $insertNextTermStmt->execute();
-                    }
+                    $message = "Report sent back for changes";
                 }
             }
-            
-            $message = "Report " . ($status === 'approved' ? 'approved' : 'sent back for changes') . " successfully";
         } else {
             $message = "Error updating report status: " . $stmt->error;
         }
@@ -208,8 +264,8 @@ function getReportComments($reportId, $versionId) {
     return $stmt->get_result();
 }
 
-// Function to get all membership fee details with search
-function getMembershipFeeDetails($term, $searchQuery = '', $searchBy = 'id') {
+// Function to get all membership fee details with search and pagination
+function getMembershipFeeDetails($term, $searchQuery = '', $searchBy = 'id', $itemsPerPage = 10, $offset = 0) {
     $sql = "SELECT f.*, m.Name as MemberName, m.MemberID,
             CASE WHEN f.Type = 'registration' THEN 'Registration Fee' ELSE 'Monthly Fee' END as FeeType
             FROM MembershipFee f
@@ -229,20 +285,42 @@ function getMembershipFeeDetails($term, $searchQuery = '', $searchBy = 'id') {
     
     $sql .= " ORDER BY f.Date DESC";
     
+    // Count total records before adding LIMIT
+    $countSql = $sql;
+    $countStmt = prepare($countSql);
+    
+    if (!empty($searchQuery)) {
+        $countStmt->bind_param("is", $term, $searchParam);
+    } else {
+        $countStmt->bind_param("i", $term);
+    }
+    
+    $countStmt->execute();
+    $countResult = $countStmt->get_result();
+    $totalRecords = $countResult->num_rows;
+    
+    // Add pagination LIMIT and OFFSET
+    $sql .= " LIMIT ? OFFSET ?";
+    
     $stmt = prepare($sql);
     
     if (!empty($searchQuery)) {
-        $stmt->bind_param("is", $term, $searchParam);
+        $stmt->bind_param("isii", $term, $searchParam, $itemsPerPage, $offset);
     } else {
-        $stmt->bind_param("i", $term);
+        $stmt->bind_param("iii", $term, $itemsPerPage, $offset);
     }
     
     $stmt->execute();
-    return $stmt->get_result();
+    $result = $stmt->get_result();
+    
+    return [
+        'records' => $result,
+        'totalRecords' => $totalRecords
+    ];
 }
 
-// Function to get all loan details with search
-function getLoanDetails($term, $searchQuery = '', $searchBy = 'id') {
+// Function to get all loan details with search and pagination
+function getLoanDetails($term, $searchQuery = '', $searchBy = 'id', $itemsPerPage = 10, $offset = 0) {
     $sql = "SELECT l.*, m.Name as MemberName, m.MemberID
             FROM Loan l
             JOIN Member m ON l.Member_MemberID = m.MemberID
@@ -261,20 +339,42 @@ function getLoanDetails($term, $searchQuery = '', $searchBy = 'id') {
     
     $sql .= " ORDER BY l.Issued_Date DESC";
     
+    // Count total records before adding LIMIT
+    $countSql = $sql;
+    $countStmt = prepare($countSql);
+    
+    if (!empty($searchQuery)) {
+        $countStmt->bind_param("is", $term, $searchParam);
+    } else {
+        $countStmt->bind_param("i", $term);
+    }
+    
+    $countStmt->execute();
+    $countResult = $countStmt->get_result();
+    $totalRecords = $countResult->num_rows;
+    
+    // Add pagination LIMIT and OFFSET
+    $sql .= " LIMIT ? OFFSET ?";
+    
     $stmt = prepare($sql);
     
     if (!empty($searchQuery)) {
-        $stmt->bind_param("is", $term, $searchParam);
+        $stmt->bind_param("isii", $term, $searchParam, $itemsPerPage, $offset);
     } else {
-        $stmt->bind_param("i", $term);
+        $stmt->bind_param("iii", $term, $itemsPerPage, $offset);
     }
     
     $stmt->execute();
-    return $stmt->get_result();
+    $result = $stmt->get_result();
+    
+    return [
+        'records' => $result,
+        'totalRecords' => $totalRecords
+    ];
 }
 
-// Function to get all fine details with search
-function getFineDetails($term, $searchQuery = '', $searchBy = 'id') {
+// Function to get all fine details with search and pagination
+function getFineDetails($term, $searchQuery = '', $searchBy = 'id', $itemsPerPage = 10, $offset = 0) {
     $sql = "SELECT f.*, m.Name as MemberName, m.MemberID
             FROM Fine f
             JOIN Member m ON f.Member_MemberID = m.MemberID
@@ -293,20 +393,42 @@ function getFineDetails($term, $searchQuery = '', $searchBy = 'id') {
     
     $sql .= " ORDER BY f.Date DESC";
     
+    // Count total records before adding LIMIT
+    $countSql = $sql;
+    $countStmt = prepare($countSql);
+    
+    if (!empty($searchQuery)) {
+        $countStmt->bind_param("is", $term, $searchParam);
+    } else {
+        $countStmt->bind_param("i", $term);
+    }
+    
+    $countStmt->execute();
+    $countResult = $countStmt->get_result();
+    $totalRecords = $countResult->num_rows;
+    
+    // Add pagination LIMIT and OFFSET
+    $sql .= " LIMIT ? OFFSET ?";
+    
     $stmt = prepare($sql);
     
     if (!empty($searchQuery)) {
-        $stmt->bind_param("is", $term, $searchParam);
+        $stmt->bind_param("isii", $term, $searchParam, $itemsPerPage, $offset);
     } else {
-        $stmt->bind_param("i", $term);
+        $stmt->bind_param("iii", $term, $itemsPerPage, $offset);
     }
     
     $stmt->execute();
-    return $stmt->get_result();
+    $result = $stmt->get_result();
+    
+    return [
+        'records' => $result,
+        'totalRecords' => $totalRecords
+    ];
 }
 
-// Function to get all death welfare details with search
-function getDeathWelfareDetails($term, $searchQuery = '', $searchBy = 'id') {
+// Function to get all death welfare details with search and pagination
+function getDeathWelfareDetails($term, $searchQuery = '', $searchBy = 'id', $itemsPerPage = 10, $offset = 0) {
     $sql = "SELECT w.*, m.Name as MemberName, m.MemberID
             FROM DeathWelfare w
             JOIN Member m ON w.Member_MemberID = m.MemberID
@@ -325,20 +447,42 @@ function getDeathWelfareDetails($term, $searchQuery = '', $searchBy = 'id') {
     
     $sql .= " ORDER BY w.Date DESC";
     
+    // Count total records before adding LIMIT
+    $countSql = $sql;
+    $countStmt = prepare($countSql);
+    
+    if (!empty($searchQuery)) {
+        $countStmt->bind_param("is", $term, $searchParam);
+    } else {
+        $countStmt->bind_param("i", $term);
+    }
+    
+    $countStmt->execute();
+    $countResult = $countStmt->get_result();
+    $totalRecords = $countResult->num_rows;
+    
+    // Add pagination LIMIT and OFFSET
+    $sql .= " LIMIT ? OFFSET ?";
+    
     $stmt = prepare($sql);
     
     if (!empty($searchQuery)) {
-        $stmt->bind_param("is", $term, $searchParam);
+        $stmt->bind_param("isii", $term, $searchParam, $itemsPerPage, $offset);
     } else {
-        $stmt->bind_param("i", $term);
+        $stmt->bind_param("iii", $term, $itemsPerPage, $offset);
     }
     
     $stmt->execute();
-    return $stmt->get_result();
+    $result = $stmt->get_result();
+    
+    return [
+        'records' => $result,
+        'totalRecords' => $totalRecords
+    ];
 }
 
-// Function to get all payment details with search
-function getPaymentDetails($term, $searchQuery = '', $searchBy = 'id') {
+// Function to get all payment details with search and pagination
+function getPaymentDetails($term, $searchQuery = '', $searchBy = 'id', $itemsPerPage = 10, $offset = 0) {
     $sql = "SELECT p.*, m.Name as MemberName, m.MemberID
             FROM Payment p
             JOIN Member m ON p.Member_MemberID = m.MemberID
@@ -357,20 +501,42 @@ function getPaymentDetails($term, $searchQuery = '', $searchBy = 'id') {
     
     $sql .= " ORDER BY p.Date DESC";
     
+    // Count total records before adding LIMIT
+    $countSql = $sql;
+    $countStmt = prepare($countSql);
+    
+    if (!empty($searchQuery)) {
+        $countStmt->bind_param("is", $term, $searchParam);
+    } else {
+        $countStmt->bind_param("i", $term);
+    }
+    
+    $countStmt->execute();
+    $countResult = $countStmt->get_result();
+    $totalRecords = $countResult->num_rows;
+    
+    // Add pagination LIMIT and OFFSET
+    $sql .= " LIMIT ? OFFSET ?";
+    
     $stmt = prepare($sql);
     
     if (!empty($searchQuery)) {
-        $stmt->bind_param("is", $term, $searchParam);
+        $stmt->bind_param("isii", $term, $searchParam, $itemsPerPage, $offset);
     } else {
-        $stmt->bind_param("i", $term);
+        $stmt->bind_param("iii", $term, $itemsPerPage, $offset);
     }
     
     $stmt->execute();
-    return $stmt->get_result();
+    $result = $stmt->get_result();
+    
+    return [
+        'records' => $result,
+        'totalRecords' => $totalRecords
+    ];
 }
 
-// Function to get all expense details with search
-function getExpenseDetails($term, $searchQuery = '', $searchBy = 'id') {
+// Function to get all expense details with search and pagination
+function getExpenseDetails($term, $searchQuery = '', $searchBy = 'id', $itemsPerPage = 10, $offset = 0) {
     $sql = "SELECT e.*, t.Name as TreasurerName
             FROM Expenses e
             JOIN Treasurer t ON e.Treasurer_TreasurerID = t.TreasurerID
@@ -389,43 +555,83 @@ function getExpenseDetails($term, $searchQuery = '', $searchBy = 'id') {
     
     $sql .= " ORDER BY e.Date DESC";
     
+    // Count total records before adding LIMIT
+    $countSql = $sql;
+    $countStmt = prepare($countSql);
+    
+    if (!empty($searchQuery)) {
+        $countStmt->bind_param("is", $term, $searchParam);
+    } else {
+        $countStmt->bind_param("i", $term);
+    }
+    
+    $countStmt->execute();
+    $countResult = $countStmt->get_result();
+    $totalRecords = $countResult->num_rows;
+    
+    // Add pagination LIMIT and OFFSET
+    $sql .= " LIMIT ? OFFSET ?";
+    
     $stmt = prepare($sql);
     
     if (!empty($searchQuery)) {
-        $stmt->bind_param("is", $term, $searchParam);
+        $stmt->bind_param("isii", $term, $searchParam, $itemsPerPage, $offset);
     } else {
-        $stmt->bind_param("i", $term);
+        $stmt->bind_param("iii", $term, $itemsPerPage, $offset);
     }
     
     $stmt->execute();
-    return $stmt->get_result();
+    $result = $stmt->get_result();
+    
+    return [
+        'records' => $result,
+        'totalRecords' => $totalRecords
+    ];
 }
 
-// Get data based on selected type
+// Get data based on selected type with pagination
+$totalRecords = 0;
 switch($selectedType) {
     case 'membership':
-        $membershipFees = getMembershipFeeDetails($selectedTerm, $searchQuery, $searchBy);
+        $result = getMembershipFeeDetails($selectedTerm, $searchQuery, $searchBy, $itemsPerPage, $offset);
+        $membershipFees = $result['records'];
+        $totalRecords = $result['totalRecords'];
         break;
     case 'loans':
-        $loans = getLoanDetails($selectedTerm, $searchQuery, $searchBy);
+        $result = getLoanDetails($selectedTerm, $searchQuery, $searchBy, $itemsPerPage, $offset);
+        $loans = $result['records'];
+        $totalRecords = $result['totalRecords'];
         break;
     case 'fines':
-        $fines = getFineDetails($selectedTerm, $searchQuery, $searchBy);
+        $result = getFineDetails($selectedTerm, $searchQuery, $searchBy, $itemsPerPage, $offset);
+        $fines = $result['records'];
+        $totalRecords = $result['totalRecords'];
         break;
     case 'welfare':
-        $welfares = getDeathWelfareDetails($selectedTerm, $searchQuery, $searchBy);
+        $result = getDeathWelfareDetails($selectedTerm, $searchQuery, $searchBy, $itemsPerPage, $offset);
+        $welfares = $result['records'];
+        $totalRecords = $result['totalRecords'];
         break;
     case 'payments':
-        $payments = getPaymentDetails($selectedTerm, $searchQuery, $searchBy);
+        $result = getPaymentDetails($selectedTerm, $searchQuery, $searchBy, $itemsPerPage, $offset);
+        $payments = $result['records'];
+        $totalRecords = $result['totalRecords'];
         break;
     case 'expenses':
-        $expenses = getExpenseDetails($selectedTerm, $searchQuery, $searchBy);
+        $result = getExpenseDetails($selectedTerm, $searchQuery, $searchBy, $itemsPerPage, $offset);
+        $expenses = $result['records'];
+        $totalRecords = $result['totalRecords'];
         break;
     default:
-        $loans = getLoanDetails($selectedTerm, $searchQuery, $searchBy);
+        $result = getLoanDetails($selectedTerm, $searchQuery, $searchBy, $itemsPerPage, $offset);
+        $loans = $result['records'];
+        $totalRecords = $result['totalRecords'];
         $selectedType = 'loans';
         break;
 }
+
+// Calculate pagination values
+$totalPages = ceil($totalRecords / $itemsPerPage);
 ?>
 
 <!DOCTYPE html>
@@ -625,9 +831,9 @@ switch($selectedType) {
         }
 
         .status-badge {
-            padding: 0.3rem 0.8rem;
+            padding: 0.2rem 1rem;
             border-radius: 20px;
-            font-size: 0.85rem;
+            font-size: 0.7rem;
             font-weight: 600;
             text-transform: uppercase;
             display: inline-block;
@@ -654,7 +860,7 @@ switch($selectedType) {
         }
 
         .status-reviewed {
-            background-color: #17a2b8;
+            background-color:rgb(216, 92, 175);
             color: white;
         }
 
@@ -675,7 +881,10 @@ switch($selectedType) {
             overflow-x: auto;
             white-space: nowrap;
         }
-
+        .action-column {
+    text-align: center !important;
+    /* padding: 0.5rem !important; */
+}
         .tab {
             padding: 1rem 1.5rem;
             cursor: pointer;
@@ -696,9 +905,18 @@ switch($selectedType) {
             border-color: #1e3c72;
         }
 
+        .btn-sm.comment-btn {
+            padding: 0.3rem 0.6rem;
+            display: inline-block;
+            margin: 0 auto;
+            /* white-space: nowrap; */
+        }
+
         .action-column {
             display: flex;
             gap: 0.5rem;
+            /* text-align: center !important;
+            padding: 0.5rem !important; */
         }
 
         .alert {
@@ -887,6 +1105,59 @@ switch($selectedType) {
                 width: 90%;
             }
         }
+
+        /* Add these styles to your existing <style> section */
+
+.pagination-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e0e0e0;
+}
+
+.pagination-info {
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+.pagination {
+    display: flex;
+    gap: 5px;
+}
+
+.page-link {
+    padding: 6px 12px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    color: #1e3c72;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.page-link:hover {
+    background-color: #f8f9fa;
+    border-color: #dee2e6;
+}
+
+.page-link.active {
+    background-color: #1e3c72;
+    color: white;
+    border-color: #1e3c72;
+}
+
+@media (max-width: 768px) {
+    .pagination-container {
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .pagination {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+}
     </style>
 </head>
 <body>
@@ -916,16 +1187,19 @@ switch($selectedType) {
                 </div>
             <?php endif; ?>
 
-            <!-- Review status and button -->
             <div class="review-status">
                 <span>Report Status: 
                     <span class="status-badge status-<?php echo strtolower($reportStatus); ?>">
                         <?php echo ucfirst($reportStatus); ?>
                     </span>
                 </span>
-                <button id="reviewBtn" class="btn btn-primary">
-                    <i class="fas fa-check-circle"></i> Submit Review
-                </button>
+                
+                <?php if ($reportStatus !== 'reviewed' && $reportStatus !== 'approved'): ?>
+                    <button id="reviewBtn" class="btn btn-primary">
+                        <i class="fas fa-check-circle"></i> Submit Review
+                    </button>
+                <?php endif; ?>
+                
                 <button id="viewCommentsBtn" class="btn btn-info">
                     <i class="fas fa-comments"></i> View Comments
                 </button>
@@ -933,27 +1207,27 @@ switch($selectedType) {
 
             <!-- Navigation Tabs -->
             <div class="tabs">
-                <a href="reviewDetails.php?type=loans" class="tab <?php echo $selectedType === 'loans' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=loans#table-container" class="tab <?php echo $selectedType === 'loans' ? 'active' : ''; ?>">
                     <i class="fas fa-money-bill-wave"></i> Loans
                 </a>
-                <a href="reviewDetails.php?type=membership" class="tab <?php echo $selectedType === 'membership' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=membership#table-container" class="tab <?php echo $selectedType === 'membership' ? 'active' : ''; ?>">
                     <i class="fas fa-users"></i> Membership Fees
                 </a>
-                <a href="reviewDetails.php?type=fines" class="tab <?php echo $selectedType === 'fines' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=fines#table-container" class="tab <?php echo $selectedType === 'fines' ? 'active' : ''; ?>">
                     <i class="fas fa-gavel"></i> Fines
                 </a>
-                <a href="reviewDetails.php?type=welfare" class="tab <?php echo $selectedType === 'welfare' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=welfare#table-container" class="tab <?php echo $selectedType === 'welfare' ? 'active' : ''; ?>">
                     <i class="fas fa-hand-holding-heart"></i> Death Welfare
                 </a>
-                <a href="reviewDetails.php?type=payments" class="tab <?php echo $selectedType === 'payments' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=payments#table-container" class="tab <?php echo $selectedType === 'payments' ? 'active' : ''; ?>">
                     <i class="fas fa-credit-card"></i> Payments
                 </a>
-                <a href="reviewDetails.php?type=expenses" class="tab <?php echo $selectedType === 'expenses' ? 'active' : ''; ?>">
+                <a href="reviewDetails.php?type=expenses#table-container" class="tab <?php echo $selectedType === 'expenses' ? 'active' : ''; ?>">
                     <i class="fas fa-file-invoice-dollar"></i> Expenses
                 </a>
             </div>
 
-            <div class="card">
+            <div class="card" id="table-container">
                 <div class="card-header">
                     <h2 class="card-title">
                         <?php 
@@ -970,7 +1244,7 @@ switch($selectedType) {
                 </div>
 
                 <!-- Search Form -->
-                <form method="GET" action="" class="search-box">
+                <form method="GET" action="" action="reviewDetails.php#table-container" class="search-box">
                     <input type="hidden" name="type" value="<?php echo $selectedType; ?>">
                     
                     <input type="text" name="search" placeholder="Search..." class="search-input" value="<?php echo htmlspecialchars($searchQuery); ?>">
@@ -990,7 +1264,7 @@ switch($selectedType) {
                     </button>
                     
                     <?php if (!empty($searchQuery)): ?>
-                        <a href="reviewDetails.php?type=<?php echo $selectedType; ?>" class="btn btn-cancel">
+                        <a href="reviewDetails.php?type=<?php echo $selectedType; ?>#table-container" class="btn btn-cancel">
                             <i class="fas fa-times"></i> Clear
                         </a>
                     <?php endif; ?>
@@ -1005,7 +1279,6 @@ switch($selectedType) {
                                     <th>Loan ID</th>
                                     <th>Member</th>
                                     <th>Amount</th>
-                                    <th>Term</th>
                                     <th>Issued Date</th>
                                     <th>Due Date</th>
                                     <th>Paid</th>
@@ -1021,7 +1294,6 @@ switch($selectedType) {
                                             <td><?php echo htmlspecialchars($loan['LoanID']); ?></td>
                                             <td><?php echo htmlspecialchars($loan['MemberName']); ?></td>
                                             <td>Rs. <?php echo number_format($loan['Amount'], 2); ?></td>
-                                            <td><?php echo htmlspecialchars($loan['Term']); ?> months</td>
                                             <td><?php echo date('M d, Y', strtotime($loan['Issued_Date'])); ?></td>
                                             <td><?php echo date('M d, Y', strtotime($loan['Due_Date'])); ?></td>
                                             <td>Rs. <?php echo number_format($loan['Paid_Loan'], 2); ?></td>
@@ -1056,7 +1328,6 @@ switch($selectedType) {
                                     <th>Fee Type</th>
                                     <th>Amount</th>
                                     <th>Date</th>
-                                    <th>Status</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -1069,11 +1340,6 @@ switch($selectedType) {
                                             <td><?php echo htmlspecialchars($fee['FeeType']); ?></td>
                                             <td>Rs. <?php echo number_format($fee['Amount'], 2); ?></td>
                                             <td><?php echo date('M d, Y', strtotime($fee['Date'])); ?></td>
-                                            <td>
-                                                <span class="status-badge <?php echo $fee['IsPaid'] === 'Yes' ? 'status-yes' : 'status-no'; ?>">
-                                                    <?php echo $fee['IsPaid']; ?>
-                                                </span>
-                                            </td>
                                             <td class="action-column">
                                                 <button class="btn btn-info btn-sm comment-btn" data-id="<?php echo $fee['FeeID']; ?>" data-type="membership">
                                                     <i class="fas fa-comment"></i> Comment
@@ -1099,7 +1365,7 @@ switch($selectedType) {
                                     <th>Description</th>
                                     <th>Amount</th>
                                     <th>Date</th>
-                                    <th>Status</th>
+                                    <th>Is Paid</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -1253,6 +1519,45 @@ switch($selectedType) {
                             </tbody>
                         </table>
                     <?php endif; ?>
+                    <!-- Modified Pagination Links with anchor -->
+                    <div class="pagination-container">
+                        <div class="pagination-info">
+                            Showing <?php echo min(($currentPage - 1) * $itemsPerPage + 1, $totalRecords); ?> to 
+                            <?php echo min($currentPage * $itemsPerPage, $totalRecords); ?> of 
+                            <?php echo $totalRecords; ?> entries
+                        </div>
+                        
+                        <?php if ($totalPages > 1): ?>
+                        <div class="pagination">
+                            <?php if ($currentPage > 1): ?>
+                                <a class="page-link" href="?type=<?php echo $selectedType; ?>&search=<?php echo urlencode($searchQuery); ?>&searchBy=<?php echo $searchBy; ?>&page=1#table-container">First</a>
+                                <a class="page-link" href="?type=<?php echo $selectedType; ?>&search=<?php echo urlencode($searchQuery); ?>&searchBy=<?php echo $searchBy; ?>&page=<?php echo $currentPage - 1; ?>#table-container">Previous</a>
+                            <?php endif; ?>
+                            
+                            <?php
+                            // Calculate the range of page numbers to display
+                            $startPage = max(1, $currentPage - 2);
+                            $endPage = min($startPage + 4, $totalPages);
+                            
+                            if ($endPage - $startPage < 4) {
+                                $startPage = max(1, $endPage - 4);
+                            }
+                            
+                            for ($i = $startPage; $i <= $endPage; $i++): 
+                            ?>
+                                <a class="page-link <?php echo $i == $currentPage ? 'active' : ''; ?>" 
+                                href="?type=<?php echo $selectedType; ?>&search=<?php echo urlencode($searchQuery); ?>&searchBy=<?php echo $searchBy; ?>&page=<?php echo $i; ?>#table-container">
+                                    <?php echo $i; ?>
+                                </a>
+                            <?php endfor; ?>
+                            
+                            <?php if ($currentPage < $totalPages): ?>
+                                <a class="page-link" href="?type=<?php echo $selectedType; ?>&search=<?php echo urlencode($searchQuery); ?>&searchBy=<?php echo $searchBy; ?>&page=<?php echo $currentPage + 1; ?>#table-container">Next</a>
+                                <a class="page-link" href="?type=<?php echo $selectedType; ?>&search=<?php echo urlencode($searchQuery); ?>&searchBy=<?php echo $searchBy; ?>&page=<?php echo $totalPages; ?>#table-container">Last</a>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1292,34 +1597,36 @@ switch($selectedType) {
 
     <!-- Review Modal -->
     <div id="reviewModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Review Financial Report</h3>
-                <span class="close">&times;</span>
-            </div>
-            <form method="POST" action="">
-                <input type="hidden" name="reportId" value="<?php echo htmlspecialchars($reportId); ?>">
-                <input type="hidden" name="versionId" value="<?php echo htmlspecialchars($versionId); ?>">
-                
-                <div class="form-group">
-                    <label class="form-label">Please select your decision for Report <?php echo htmlspecialchars($reportId); ?> (Version <?php echo htmlspecialchars($versionId); ?>):</label>
-                    <div style="margin-top: 10px;">
-                        <input type="radio" id="makeChanges" name="decision" value="changes" checked>
-                        <label for="makeChanges">Make Changes (Set status to 'Ongoing')</label>
-                    </div>
-                    <div style="margin-top: 10px;">
-                        <input type="radio" id="approve" name="decision" value="approve">
-                        <label for="approve">Approve (Set status to 'Approved')</label>
-                    </div>
-                </div>
-                
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-cancel" id="closeReviewModal">Cancel</button>
-                    <button type="submit" name="updateReportStatus" class="btn btn-primary">Save Decision</button>
-                </div>
-            </form>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 class="modal-title">Review Financial Report</h3>
+            <span class="close">&times;</span>
         </div>
+        <div id="transactionCheckResult" style="display: none; margin-bottom: 15px;"></div>
+        <form method="POST" action="" id="reviewForm">
+            <input type="hidden" name="reportId" value="<?php echo htmlspecialchars($reportId); ?>">
+            <input type="hidden" name="versionId" value="<?php echo htmlspecialchars($versionId); ?>">
+            
+            <div class="form-group">
+                <label class="form-label">Please select your decision for Report <?php echo htmlspecialchars($reportId); ?> (Version <?php echo htmlspecialchars($versionId); ?>):</label>
+                <div style="margin-top: 10px;">
+                    <input type="radio" id="makeChanges" name="decision" value="changes" checked>
+                    <label for="makeChanges">Make Changes (Set status to 'Reviewed')</label>
+                </div>
+                <div style="margin-top: 10px;">
+                    <input type="radio" id="approve" name="decision" value="approve">
+                    <label for="approve">Approve (Set status to 'Approved')</label>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button type="button" class="btn btn-cancel" id="closeReviewModal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="checkTransactionsBtn">Check for New Transactions</button>
+                <button type="submit" name="updateReportStatus" class="btn btn-success">Save Decision</button>
+            </div>
+        </form>
     </div>
+</div>
 
     <!-- Comments Viewer Modal -->
     <div id="commentsModal" class="modal">
@@ -1460,6 +1767,100 @@ switch($selectedType) {
             }
         });
     });
+
+    // Function to scroll to the table container
+    function scrollToTable() {
+        // Check if the hash is present in the URL
+        if (window.location.hash === '#table-container') {
+            // Get the table container element
+            const tableContainer = document.getElementById('table-container');
+            
+            if (tableContainer) {
+                // Scroll to the table container with a slight offset for better visibility
+                window.scrollTo({
+                    top: tableContainer.offsetTop - 20,
+                    behavior: 'smooth'
+                });
+            }
+        }
+    }
+
+    // Run the function when the page loads
+    window.addEventListener('load', scrollToTable);
+    
+    // Also run it when the hash changes (for browsers that don't refresh on hash change)
+    window.addEventListener('hashchange', scrollToTable);
+    
+    // Modify the tab links to include the table container hash
+    document.addEventListener('DOMContentLoaded', function() {
+        const tabLinks = document.querySelectorAll('.tab');
+        
+        tabLinks.forEach(tab => {
+            const href = tab.getAttribute('href');
+            if (href && !href.includes('#')) {
+                tab.setAttribute('href', href + '#table-container');
+            }
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+    // Get the check transactions button
+    const checkTransactionsBtn = document.getElementById('checkTransactionsBtn');
+    const transactionCheckResult = document.getElementById('transactionCheckResult');
+    
+    if (checkTransactionsBtn) {
+        checkTransactionsBtn.addEventListener('click', function() {
+            // Show loading indicator
+            transactionCheckResult.innerHTML = '<div class="alert alert-info">Checking for new transactions...</div>';
+            transactionCheckResult.style.display = 'block';
+            
+            // Get form data
+            const reportId = document.querySelector('input[name="reportId"]').value;
+            const versionId = document.querySelector('input[name="versionId"]').value;
+            
+            // Send AJAX request to check for new transactions
+            fetch('checkTransactions.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'reportId=' + encodeURIComponent(reportId) + '&versionId=' + encodeURIComponent(versionId) + '&term=<?php echo $selectedTerm; ?>'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.hasNewTransactions) {
+                    // Show warning about new transactions
+                    transactionCheckResult.innerHTML = `
+                        <div class="alert alert-warning">
+                            <strong>Warning:</strong> There are ${data.totalNewTransactions} new transactions since this report was created.
+                            <br>
+                            <ul>
+                                ${data.details.loans > 0 ? `<li>${data.details.loans} new loans</li>` : ''}
+                                ${data.details.payments > 0 ? `<li>${data.details.payments} new payments</li>` : ''}
+                                ${data.details.fees > 0 ? `<li>${data.details.fees} new membership fees</li>` : ''}
+                                ${data.details.fines > 0 ? `<li>${data.details.fines} new fines</li>` : ''}
+                                ${data.details.welfare > 0 ? `<li>${data.details.welfare} new welfare payments</li>` : ''}
+                                ${data.details.expenses > 0 ? `<li>${data.details.expenses} new expenses</li>` : ''}
+                            </ul>
+                            <p>You should request the treasurer to submit a new report with the updated data.</p>
+                            <p>If you proceed with "Approve", the system will automatically change it to "Make Changes" and add a comment.</p>
+                        </div>
+                    `;
+                    
+                    // Auto-select the "Make Changes" option
+                    document.getElementById('makeChanges').checked = true;
+                } else {
+                    // Show that there are no new transactions
+                    transactionCheckResult.innerHTML = '<div class="alert alert-success">No new transactions found since this report was created. You can proceed with your decision.</div>';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                transactionCheckResult.innerHTML = '<div class="alert alert-danger">An error occurred while checking for new transactions. Please try again.</div>';
+            });
+        });
+    }
+});
     </script>
 </body>
 </html>

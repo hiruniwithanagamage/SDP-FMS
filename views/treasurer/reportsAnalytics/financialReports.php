@@ -743,7 +743,7 @@
                             <button class="btn btn-secondary" disabled>
                                 Report Pending Approval (Submitted on <?php echo date('M d, Y', strtotime($existingReport['Date'])); ?>)
                             </button>
-                        <?php elseif ($existingReport && $existingReport['Status'] === 'ongoing'): ?>
+                        <?php elseif ($existingReport && $existingReport['Status'] === 'reviewed'): ?>
                             <form method="post">
                                 <input type="hidden" name="term" value="<?php echo $selectedYear; ?>">
                                 <button type="submit" name="generate_report" class="btn btn-primary">
