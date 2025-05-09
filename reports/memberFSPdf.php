@@ -605,7 +605,7 @@ $totalOutstanding = $membershipFee['due'] + $fines['due'] + $loans['due'] + $reg
         </button>
         <?php if ($_SESSION['role'] === 'member'): ?>
                 <a href="../views/member/memberSummary.php" class="btn btn-secondary">
-                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                    <i class="fas fa-arrow-left"></i> Back to Summary
                 </a>
             <?php else: ?>
                 <a href="../views/treasurer/reportsAnalytics/memberFinancialSummary.php" class="btn btn-secondary">
