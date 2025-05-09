@@ -24,7 +24,7 @@
       } else {
           return "../../";     // Direct in treasurer folder
       }
-  }
+   }
   
   $basePath = getbasePath();
 
@@ -45,16 +45,6 @@
          if (!empty($memberData['Image'])) {
                $memberImage = $basePath."uploads/" . $memberData['Image'];
          }
-      }
-   }
-
-   if (isset($userData['Treasurer_TreasurerID'])) {
-      $treasurerQuery = "SELECT Name FROM Treasurer WHERE TreasurerID = '" . $userData['Treasurer_TreasurerID'] . "'";
-      $treasurerResult = search($treasurerQuery);
-      
-      if ($treasurerResult && $treasurerResult->num_rows > 0) {
-         $treasurerData = $treasurerResult->fetch_assoc();
-         $memberName = $treasurerData['Name'];
       }
    }
 ?>

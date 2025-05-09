@@ -32,22 +32,14 @@ if (!isset($_SESSION["u"])) {
 $userData = $_SESSION["u"];
 
 // Get member details if this is a member user
-$memberName = "Guest";
+$treasurerName = "Guest";
 $defaultProfileImage = $basePath . "assets/images/profile_photo.jpg";
-$memberImage = $defaultProfileImage; // default image
+$treasurerImage = $defaultProfileImage; // default image
 
-if (isset($userData['Member_MemberID'])) {
-    $memberQuery = "SELECT Name, Image FROM Member WHERE MemberID = '" . $userData['Member_MemberID'] . "'";
-    $memberResult = search($memberQuery);
-    
-    if ($memberResult && $memberResult->num_rows > 0) {
-        $memberData = $memberResult->fetch_assoc();
-        $memberName = $memberData['Name'];
-        if (!empty($memberData['Image'])) {
-            $memberImage = $basePath . "uploads/" . $memberData['Image'];
-        }
-    }
-}
+$memberQuery = "SELECT Image FROM Member WHERE MemberID = 
+                (SELECT MemberID FROM Treasurer WHERE TreasurerID = '" . $userData['Treasurer_TreasurerID'] . "')";
+$memberResult = search($memberQuery);
+$memberData = $memberResult->fetch_assoc();
 
 if (isset($userData['Treasurer_TreasurerID'])) {
     $treasurerQuery = "SELECT Name FROM Treasurer WHERE TreasurerID = '" . $userData['Treasurer_TreasurerID'] . "'";
@@ -55,7 +47,10 @@ if (isset($userData['Treasurer_TreasurerID'])) {
     
     if ($treasurerResult && $treasurerResult->num_rows > 0) {
         $treasurerData = $treasurerResult->fetch_assoc();
-        $memberName = $treasurerData['Name'];
+        $treasurerName = $treasurerData['Name'];
+        if (!empty($memberData['Image'])) {
+            $treasurerImage = $basePath . "uploads/" . $memberData['Image'];
+        }
     }
 }
 ?>
@@ -73,6 +68,7 @@ if (isset($userData['Treasurer_TreasurerID'])) {
 }
 
 .nav-content {
+    font-family: Arial, sans-serif;
     max-width: 1400px;
     margin: 0 auto;
     display: flex;
@@ -264,9 +260,9 @@ if (isset($userData['Treasurer_TreasurerID'])) {
         </div>
 
         <div class="nav-profile" id="profileDropdown">
-            <span class="profile-name"><?php echo htmlspecialchars($memberName); ?></span>
+            <span class="profile-name"><?php echo htmlspecialchars($treasurerName); ?></span>
             <div class="profile-avatar">
-                <img src="<?php echo htmlspecialchars($memberImage); ?>" 
+                <img src="<?php echo htmlspecialchars($treasurerImage); ?>" 
                      alt="Profile" 
                      onerror="this.src='<?php echo $defaultProfileImage; ?>'">
             </div>
