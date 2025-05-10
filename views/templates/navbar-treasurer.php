@@ -39,7 +39,7 @@ $treasurerImage = $defaultProfileImage; // default image
 $memberQuery = "SELECT Image FROM Member WHERE MemberID = 
                 (SELECT MemberID FROM Treasurer WHERE TreasurerID = '" . $userData['Treasurer_TreasurerID'] . "')";
 $memberResult = search($memberQuery);
-$memberData = $memberResult->fetch_assoc();
+$memberDataImg = $memberResult->fetch_assoc();
 
 if (isset($userData['Treasurer_TreasurerID'])) {
     $treasurerQuery = "SELECT Name FROM Treasurer WHERE TreasurerID = '" . $userData['Treasurer_TreasurerID'] . "'";
@@ -48,8 +48,8 @@ if (isset($userData['Treasurer_TreasurerID'])) {
     if ($treasurerResult && $treasurerResult->num_rows > 0) {
         $treasurerData = $treasurerResult->fetch_assoc();
         $treasurerName = $treasurerData['Name'];
-        if (!empty($memberData['Image'])) {
-            $treasurerImage = $basePath . "uploads/" . $memberData['Image'];
+        if (!empty($memberDataImg['Image'])) {
+            $treasurerImage = $basePath . "uploads/" . $memberDataImg['Image'];
         }
     }
 }

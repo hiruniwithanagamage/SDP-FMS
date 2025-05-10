@@ -84,18 +84,22 @@ if(isset($_POST['add'])) {
     // File upload validation
     $imagePath = null;
     if (isset($_FILES['receipt']) && $_FILES['receipt']['error'] == 0) {
-        $uploadDir = '../uploads/expenses/';
+        $uploadDir = '../../uploads/expenses/';
         
         // Create directory if it doesn't exist
         if (!file_exists($uploadDir)) {
             mkdir($uploadDir, 0777, true);
         }
         
-        $fileName = time() . '_' . basename($_FILES['receipt']['name']);
-        $targetFilePath = $uploadDir . $fileName;
-        
         // Get file extension
         $fileExtension = strtolower(pathinfo($_FILES['receipt']['name'], PATHINFO_EXTENSION));
+        
+        // Create sanitized category name
+        $sanitizedCategory = preg_replace('/[^A-Za-z0-9]/', '', $category); // Remove special chars
+        
+        // Create filename with extension
+        $fileName = $expenseId . '_' . $sanitizedCategory . '_' . date('Ymd') . '.' . $fileExtension;
+        $targetFilePath = $uploadDir . $fileName;
         
         // Check if file is an actual image
         $check = getimagesize($_FILES['receipt']['tmp_name']);
@@ -116,10 +120,20 @@ if(isset($_POST['add'])) {
         
         // If all file validations pass, upload the file
         if(empty($errors)) {
-            if(move_uploaded_file($_FILES['receipt']['tmp_name'], $targetFilePath)) {
+            // Use absolute path for troubleshooting permission issues
+            $absoluteUploadDir = $_SERVER['DOCUMENT_ROOT'] . '/SDP/uploads/expenses/';
+            
+            // Ensure directory exists
+            if (!file_exists($absoluteUploadDir)) {
+                mkdir($absoluteUploadDir, 0777, true);
+            }
+            
+            $absoluteTargetPath = $absoluteUploadDir . $fileName;
+            
+            if(move_uploaded_file($_FILES['receipt']['tmp_name'], $absoluteTargetPath)) {
                 $imagePath = 'uploads/expenses/' . $fileName;
             } else {
-                $errors[] = "Error uploading file. Please try again.";
+                $errors[] = "Error uploading file. Permission denied. Please check folder permissions. Error: " . error_get_last()['message'];
             }
         }
     }
@@ -293,6 +307,41 @@ if(isset($_GET['cancel'])) {
             color: #2e7d32;
             border: 1px solid #c8e6c9;
         }
+        /* Responsive styles */
+        @media (max-width: 992px) {
+           .statistics-grid {
+                flex-wrap: wrap;
+           }
+           
+           .action-buttons {
+               grid-template-columns: repeat(2, 1fr);
+           }
+       }
+
+       @media (max-width: 768px) {
+           .action-buttons {
+               grid-template-columns: 1fr;
+           }
+           
+           .info-grid {
+               grid-template-columns: 1fr;
+           }
+           
+           .welcome-card {
+               flex-direction: column;
+               text-align: center;
+               gap: 1rem;
+           }
+           
+           .status-cards {
+               flex-direction: column;
+           }
+           
+           .term-button {
+                width: 100%;
+                justify-content: center;
+            }
+       }
     </style>
 </head>
 <body>
