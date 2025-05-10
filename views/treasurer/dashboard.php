@@ -242,6 +242,19 @@ function getCurrentTerm() {
     return $row['year'] ?? date('Y');
 }
 
+// Function to get all available years from the static table
+function getAllYears() {
+    $sql = "SELECT year FROM Static ORDER BY year DESC";
+    $result = search($sql);
+    
+    $years = array();
+    while ($row = $result->fetch_assoc()) {
+        $years[] = $row['year'];
+    }
+    
+    return $years;
+}
+
 // Get selected year from URL parameter, or use current term
 $selectedYear = isset($_GET['year']) ? (int)$_GET['year'] : getCurrentTerm();
 
@@ -331,6 +344,25 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
         .year-selector select option {
             background: #2a5298;
             color: white;
+        }
+
+        .year-dropdown {
+            max-height: 200px; /* This will limit the height */
+            overflow-y: auto;  /* This enables vertical scrolling */
+        }
+
+        /* Custom scrollbar for the dropdown */
+        select.year-dropdown::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        select.year-dropdown::-webkit-scrollbar-track {
+            background: #1e3c72;
+        }
+        
+        select.year-dropdown::-webkit-scrollbar-thumb {
+            background-color: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
         }
 
         .dashboard-stats {
@@ -583,13 +615,23 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
                     <?php endif; ?>
                 </h1>
                 <form action="" method="GET" class="year-selector">
-                    <span>Year:</span>
-                    <select name="year" onchange="this.form.submit()">
+                    <span>Term:</span>
+                    <select name="year" onchange="this.form.submit()" class="year-dropdown">
                         <?php
-                        // Generate options for the last 5 years
-                        $currentYear = (int)date('Y');
-                        for ($i = 0; $i < 5; $i++) {
-                            $year = $currentYear - $i;
+                        // Get all years from the static table
+                        $availableYears = getAllYears();
+                        
+                        // If no years found, fall back to showing last 5 years
+                        if (empty($availableYears)) {
+                            $currentYear = (int)date('Y');
+                            for ($i = 0; $i < 5; $i++) {
+                                $year = $currentYear - $i;
+                                $availableYears[] = $year;
+                            }
+                        }
+                        
+                        // Generate options for all available years
+                        foreach ($availableYears as $year) {
                             $selected = ($year == $selectedYear) ? 'selected' : '';
                             echo "<option value=\"$year\" $selected>$year</option>";
                         }

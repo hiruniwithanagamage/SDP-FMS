@@ -216,7 +216,6 @@ function getAmountColor($amount) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
-        
         * {
             margin: 0;
             padding: 0;
@@ -523,51 +522,98 @@ function getAmountColor($amount) {
             font-size: 16px;
             text-align: center;
         }
+
+        .info-panel {
+            max-width: 980px;
+            margin: 0 auto;
+            margin-top: 30px;
+            margin-bottom: -30px;
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --hover-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .info-panel p {
+            margin-bottom: 0.5rem;
+        }
+
         
         @media print {
-            .action-buttons, 
-            .modern-nav,
-            .year-selector,
-            .no-report-container .btn {
-                display: none;
-            }
-            
-            body {
-                background: white;
-            }
-            
-            .container {
-                max-width: 100%;
-                padding: 0;
-            }
-            
-            .report-header {
-                background-color: #f0f7ff !important;
-                -webkit-print-color-adjust: exact;
-            }
-            
-            .year-badge {
-                background-color: #d0e1f9 !important;
-                -webkit-print-color-adjust: exact;
-            }
-            
-            .table-section {
-                background-color: #f0f7ff !important;
-                -webkit-print-color-adjust: exact;
-            }
-            
-            .table-title {
-                background-color: #e0ecf9 !important;
-                -webkit-print-color-adjust: exact;
-            }
+        /* Hide everything by default */
+        body * {
+            visibility: hidden;
         }
+        
+        /* Only show the report container and its children */
+        #report-container, #report-container * {
+            visibility: visible;
+        }
+        
+        /* Position the report at the top of the page */
+        #report-container {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+        }
+        
+        /* Hide specific elements we never want to print */
+        .action-buttons, 
+        .modern-nav,
+        .year-selector,
+        .info-panel,
+        .no-report-container .btn {
+            display: none !important;
+        }
+        
+        /* Reset backgrounds to white */
+        body, .home-container {
+            background: white;
+            padding: 0;
+            margin: 0;
+        }
+        
+        /* Make container fill page */
+        .container {
+            max-width: 100%;
+            padding: 0;
+            margin: 0;
+        }
+        
+        /* Ensure colors print properly */
+        .report-header {
+            background-color: #f0f7ff !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        
+        .table-section {
+            background-color: #f0f7ff !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        
+        .table-title {
+            background-color: #e0ecf9 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+    }
     </style>
 </head>
 <body>
     <div class="home-container">
     <?php include getNavbarTemplate(); ?>
 
-    <div class="container">
+    <div class="info-panel">
+        <h2 style="color: #1e3c72;">Historical Financial Reports</h2>
+        <p>Browse through previous years' financial statements by selecting a different year from the dropdown menu below.</p>
+    </div>
+
+    <div class="container" id="report-container">
         <div class="report-header">
             <img src="../assets/images/society_logo.png" alt="Society Logo" class="logo">
             <div class="society-name">එක්සත් මරණාධාර සමිතිය</div>
@@ -791,13 +837,16 @@ document.querySelectorAll('.btn-back').forEach(function(button) {
             const buttons = document.querySelector('.action-buttons');
             const navbar = document.querySelector('.modern-nav');
             const yearSelector = document.querySelector('.year-selector');
+            const infoPanel = document.querySelector('.info-panel'); 
             
             if (buttons) buttons.style.display = 'none';
             if (navbar) navbar.style.display = 'none';
             if (yearSelector) yearSelector.style.display = 'none';
+            if (infoPanel) infoPanel.style.display = 'none';
+            if (infoPanel) infoPanel.style.display = 'block';
             
             // Capture the page
-            html2canvas(document.body, {
+            html2canvas(document.getElementById('report-container'), {
                 scale: 2,
                 useCORS: true,
                 logging: true
