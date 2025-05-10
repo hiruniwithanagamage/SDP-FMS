@@ -316,7 +316,7 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
         .year-selector {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 5px;
             background: rgba(255, 255, 255, 0.2);
             padding: 8px 15px;
             border-radius: 50px;
@@ -325,11 +325,7 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
 
         .year-selector select {
             background: transparent;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            padding: 5px 10px;
-            border-radius: 5px;
             color: white;
-            outline: none;
         }
 
         .year-selector select option {
