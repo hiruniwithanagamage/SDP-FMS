@@ -107,10 +107,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $imagePath = $expense['Image']; // Default to existing image path
     
     if (!empty($_FILES['receipt']['name'])) {
-        $targetDir = "../../uploads/receipts/";
-        $fileName = basename($_FILES["receipt"]["name"]);
-        $targetFilePath = $targetDir . uniqid() . '_' . $fileName;
-        $fileType = pathinfo($targetFilePath, PATHINFO_EXTENSION);
+        // Use the same relative path structure as in add expense
+        $uploadDir = "uploads/expenses/";
+        
+        // Create sanitized category name
+        $sanitizedCategory = preg_replace('/[^A-Za-z0-9]/', '', $category);
+        
+        // Create filename with extension
+        $fileExtension = strtolower(pathinfo($_FILES['receipt']['name'], PATHINFO_EXTENSION));
+        $fileName = $expenseID . '_' . $sanitizedCategory . '_' . date('Ymd') . '.' . $fileExtension;
+        
+        // Store physical file with correct absolute path
+        $absoluteUploadDir = $_SERVER['DOCUMENT_ROOT'] . '/SDP/uploads/expenses/';
+        
+        // Ensure directory exists
+        if (!file_exists($absoluteUploadDir)) {
+            mkdir($absoluteUploadDir, 0777, true);
+        }
+        
+        $absoluteTargetPath = $absoluteUploadDir . $fileName;
         
         // Check if file is a valid image
         $allowedTypes = array('jpg', 'jpeg', 'png', 'pdf');
@@ -123,6 +138,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
         } else {
             $_SESSION['error_message'] = "Only JPG, JPEG, PNG, and PDF files are allowed.";
+        }
+
+        if (move_uploaded_file($_FILES["receipt"]["tmp_name"], $absoluteTargetPath)) {
+            // Store relative path in database
+            $imagePath = $uploadDir . $fileName;
+        } else {
+            $_SESSION['error_message'] = "Error uploading file.";
         }
     }
     
@@ -630,7 +652,14 @@ if ($isPopup): ?>
                             <?php if (!empty($expense['Image'])): ?>
                             <div>
                                 <p>Current Receipt:</p>
-                                <img src="../../<?php echo $expense['Image']; ?>" alt="Receipt" class="receipt-preview">
+                                <?php 
+                                    // Check if the path already includes "../../../" to avoid duplicating it
+                                    $imgPath = $expense['Image'];
+                                    if (strpos($imgPath, '../../../') === 0) {
+                                        $imgPath = substr($imgPath, 9); // Remove "../../../" if it's already there
+                                    }
+                                ?>
+                                <img src="../../../<?php echo $expense['Image']; ?>" alt="Receipt" class="receipt-preview">
                             </div>
                             <?php endif; ?>
                         </div>

@@ -345,7 +345,7 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
 
                 <div class="button-group">
                     <button type="submit" class="btn-submit">Submit Payment</button>
-                    <button type="button" class="btn-cancel" onclick="window.location.href='dashboard.php'">Cancel</button>
+                    <button type="button" class="btn-cancel" onclick="window.location.href='home-member.php'">Cancel</button>
                 </div>
             </form>
         </div>

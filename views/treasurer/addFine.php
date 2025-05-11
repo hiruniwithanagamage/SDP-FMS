@@ -4,26 +4,122 @@ require_once "../../config/database.php";
 
 // Handle form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Generate sequential Fine ID (Fine001, Fine002, etc.)
-    $countQuery = "SELECT COUNT(*) as count FROM Fine";
-    $countResult = search($countQuery);
-    $fineCount = $countResult->fetch_assoc()['count'] + 1;
-    $fineID = "Fine" . str_pad($fineCount, 3, "0", STR_PAD_LEFT);
-    
     $amount = $_POST['amount'];
     $date = $_POST['date'];
     $term = $_POST['term'];
     $description = $_POST['description'];
     $memberID = $_POST['memberID'];
-    $isPaid = $_POST['isPaid'];
+    // Set IsPaid to 'No' by default
+    $isPaid = 'No';
 
-    $insertQuery = "INSERT INTO Fine (FineID, Amount, Date, Term, Description, Member_MemberID, IsPaid) 
-                    VALUES ('$fineID', '$amount', '$date', '$term', '$description', '$memberID', '$isPaid')";
+    // Generate sequential Fine ID (Fine001, Fine002, etc.)
+    $countStmt = prepare("SELECT COUNT(*) as count FROM Fine");
+    $countStmt->execute();
+    $countResult = $countStmt->get_result();
+    $fineCount = $countResult->fetch_assoc()['count'] + 1;
+    $countStmt->close();
+
+    // Format the ID based on count (add leading zero for single digits)
+    if ($fineCount < 10) {
+        $sequentialNumber = "0" . $fineCount;
+    } else {
+        $sequentialNumber = $fineCount;
+    }
+
+    $fineID = "FN" . $term . $sequentialNumber;
+
+    // Check if this ID already exists (in case of concurrent operations)
+    $checkIdStmt = prepare("SELECT COUNT(*) as exists_count FROM Fine WHERE FineID = ?");
+    $checkIdStmt->bind_param("s", $fineID);
+    $checkIdStmt->execute();
+    $checkIdResult = $checkIdStmt->get_result();
+    $idExists = $checkIdResult->fetch_assoc()['exists_count'] > 0;
+    $checkIdStmt->close();
+
+    // If ID already exists, find the next available ID
+    if ($idExists) {
+        // Get the maximum sequential number used for this term
+        $maxIdStmt = prepare("SELECT MAX(SUBSTRING(FineID, LENGTH('FN" . $term . "')+1)) as max_seq 
+                            FROM Fine 
+                            WHERE FineID LIKE 'FN" . $term . "%'");
+        $maxIdStmt->execute();
+        $maxIdResult = $maxIdStmt->get_result();
+        $maxSeq = (int)$maxIdResult->fetch_assoc()['max_seq'];
+        $maxIdStmt->close();
+        
+        // Use the next number
+        $nextSeq = $maxSeq + 1;
+        
+        // Format with leading zero if needed
+        if ($nextSeq < 10) {
+            $sequentialNumber = "0" . $nextSeq;
+        } else {
+            $sequentialNumber = $nextSeq;
+        }
+        
+        $fineID = "FN" . $term . $sequentialNumber;
+    }
+
+    // Check if a fine of the same type already exists for this member in the current month and term
+if ($description == 'late' || $description == 'absent') {
+    $dateMonth = date('m', strtotime($date));
+    $dateYear = date('Y', strtotime($date));
+    
+    $checkDuplicateStmt = prepare("SELECT COUNT(*) as count FROM Fine 
+                                  WHERE Member_MemberID = ? 
+                                  AND Description = ? 
+                                  AND Term = ? 
+                                  AND MONTH(Date) = ? 
+                                  AND YEAR(Date) = ?");
+    $checkDuplicateStmt->bind_param("ssiss", 
+    $memberID, 
+    $description, 
+    $term, 
+    $dateMonth, 
+    $dateYear
+    );
+
+    $checkDuplicateStmt->execute();
+    $duplicateResult = $checkDuplicateStmt->get_result();
+    $duplicateCount = $duplicateResult->fetch_assoc()['count'];
+    $checkDuplicateStmt->close();
+    
+    if ($duplicateCount > 0) {
+        $_SESSION['error_message'] = "This member already has a $fineTypeText fine for this month in the selected term.";
+        header("Location: addFine.php");
+        exit();
+    }
+}
+
+    $stmt = prepare("INSERT INTO Fine (FineID, Amount, Date, Term, Description, Member_MemberID, IsPaid) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?)");
+                
+    // Bind parameters
+    $stmt->bind_param("sdsisss", 
+        $fineID, 
+        $amount, 
+        $date, 
+        $term, 
+        $description, 
+        $memberID, 
+        $isPaid
+    ); 
     
     try {
-        iud($insertQuery);
+        // Execute statement
+        $stmt->execute();
+        $stmt->close();
+        
+        // Store for the confirmation modal
+        $_SESSION['fine_success'] = true;
+        $_SESSION['fine_id'] = $fineID;
+        $_SESSION['fine_member_id'] = $memberID;
+        $_SESSION['fine_amount'] = $amount;
+        $_SESSION['fine_description'] = $description;
+        
         $_SESSION['success_message'] = "Fine added successfully!";
-        header("Location: home-treasurer.php");
+        // Redirect back to this page to show the modal
+        header("Location: addFine.php");
         exit();
     } catch(Exception $e) {
         $_SESSION['error_message'] = "Error adding fine: " . $e->getMessage();
@@ -31,9 +127,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 }
 
 // Get current term
-$termQuery = "SELECT * FROM Static WHERE status = 'active'";
-$termResult = search($termQuery);
+$termStmt = prepare("SELECT * FROM Static WHERE status = ?");
+$activeStatus = 'active';
+$termStmt->bind_param("s", $activeStatus);
+$termStmt->execute();
+$termResult = $termStmt->get_result();
 $termData = $termResult->fetch_assoc();
+$termStmt->close();
 
 // Check if term data exists
 if (!$termData) {
@@ -41,12 +141,31 @@ if (!$termData) {
 }
 
 // Get all members for dropdown
-$membersQuery = "SELECT MemberID, Name FROM Member";
-$membersResult = search($membersQuery);
+$membersStmt = prepare("SELECT MemberID, Name FROM Member ORDER BY Name");
+$membersStmt->execute();
+$membersResult = $membersStmt->get_result();
+$membersStmt->close();
 
 // Check if we have members
 if ($membersResult->num_rows == 0) {
     $_SESSION['error_message'] = "No active members found in the system.";
+}
+
+// Check if we need to show the confirmation modal
+$showModal = false;
+if (isset($_SESSION['fine_success']) && $_SESSION['fine_success']) {
+    $showModal = true;
+    $fineID = $_SESSION['fine_id'];
+    $memberID = $_SESSION['fine_member_id'];
+    $amount = $_SESSION['fine_amount'];
+    $description = $_SESSION['fine_description'];
+    
+    // Clear the session variables
+    unset($_SESSION['fine_success']);
+    unset($_SESSION['fine_id']);
+    unset($_SESSION['fine_member_id']);
+    unset($_SESSION['fine_amount']);
+    unset($_SESSION['fine_description']);
 }
 ?>
 
@@ -62,6 +181,8 @@ if ($membersResult->num_rows == 0) {
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="../../assets/js/alertHandler.js"></script>
     <style>
         .select2-container {
             width: 100% !important;
@@ -177,6 +298,59 @@ if ($membersResult->num_rows == 0) {
             flex: 1;
             margin-right: 50px;
         }
+        
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.4);
+        }
+        
+        .modal-content {
+            background-color: #fff;
+            margin: 10% auto;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 500px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .success-icon {
+            color: #28a745;
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+        
+        .modal-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .modal-btn {
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+        }
+        
+        .btn-primary {
+            background-color: #1e3c72;
+            color: white;
+        }
+        
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -189,6 +363,15 @@ if ($membersResult->num_rows == 0) {
                     <?php 
                         echo $_SESSION['error_message'];
                         unset($_SESSION['error_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
+            
+            <?php if(isset($_SESSION['success_message'])): ?>
+                <div class="alert alert-success">
+                    <?php 
+                        echo $_SESSION['success_message'];
+                        unset($_SESSION['success_message']);
                     ?>
                 </div>
             <?php endif; ?>
@@ -250,19 +433,25 @@ if ($membersResult->num_rows == 0) {
                         <input type="number" id="amount" name="amount" required step="0.01" readonly>
                     </div>
 
-                    <div class="form-group">
-                        <label for="isPaid">Payment Status</label>
-                        <select id="isPaid" name="isPaid" required>
-                            <option value="No" selected>Unpaid</option>
-                            <option value="Yes">Paid</option>
-                        </select>
-                    </div>
-
                     <div class="form-footer">
                         <a href="home-treasurer.php" class="cancel-btn">Cancel</a>
                         <button type="submit" class="save-btn">Add Fine</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Success Modal -->
+    <div id="successModal" class="modal" <?php echo $showModal ? 'style="display:block"' : ''; ?>>
+        <div class="modal-content">
+            <i class="fas fa-check-circle success-icon"></i>
+            <h2>Fine Added Successfully</h2>
+            <p>Would you like to process the payment for this fine now?</p>
+            
+            <div class="modal-buttons">
+                <button id="payNowBtn" class="modal-btn btn-primary">Yes, Process Payment Now</button>
+                <button id="payLaterBtn" class="modal-btn btn-secondary">No, I'll Do It Later</button>
             </div>
         </div>
     </div>
@@ -274,7 +463,6 @@ if ($membersResult->num_rows == 0) {
                 placeholder: 'Select or search for a member...',
                 allowClear: true,
                 width: '100%'
-                // margin-right: '0px'
             });
             
             // Update Member ID field when a member is selected
@@ -321,6 +509,18 @@ if ($membersResult->num_rows == 0) {
                     e.preventDefault();
                     alert('Please select a member.');
                 }
+            });
+            
+            // Modal buttons
+            $('#payNowBtn').on('click', function() {
+                <?php if(isset($memberID)): ?>
+                window.location.href = 'treasurerPayment.php?member_id=<?php echo $memberID; ?>';
+                <?php endif; ?>
+            });
+            
+            $('#payLaterBtn').on('click', function() {
+                $('#successModal').hide();
+                window.location.href = 'home-treasurer.php';
             });
         });
     </script>

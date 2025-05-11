@@ -170,6 +170,14 @@ $formattedTotalDues = number_format($totalDues, 2);
             margin: 0 auto;
             padding: 2rem;
         }
+
+        .header-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            padding: 10px 0;
+        }
         
         .page-title {
             color: #1e3c72;
@@ -312,8 +320,14 @@ $formattedTotalDues = number_format($totalDues, 2);
         <?php include '../templates/navbar-member.php'; ?>
         
         <div class="container">
+            <div class="header-container">
+
             <h1 class="page-title">Payment Dues</h1>
-            
+
+            <a href="index.php" class="back-link">
+                            <i class="fas fa-arrow-left"></i> Back to Dashboard
+                        </a>
+    </div>
             <?php if (isset($_SESSION['success_message'])): ?>
                 <div class="alert alert-success">
                     <?php 

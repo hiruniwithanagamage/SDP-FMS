@@ -298,13 +298,18 @@ $isReportApproved = isReportApproved($selectedYear);
         }
         
         .cancel-btn {
-            background-color: #f1f1f1;
-            color: #333;
+            padding: 0.8rem 1.8rem;
             border: none;
-            padding: 8px 16px;
-            margin-right: 10px;
+            border-radius: 6px;
+            font-size: 1rem;
             cursor: pointer;
-            border-radius: 4px;
+            background-color: #e0e0e0;
+            color: #333;
+            transition: background-color 0.3s;
+        }
+
+        .cancel-btn:hover {
+            background-color: #d0d0d0;
         }
         
         .confirm-delete-btn {
@@ -511,7 +516,7 @@ $isReportApproved = isReportApproved($selectedYear);
                         <td><?php echo htmlspecialchars($row['TreasurerName']); ?></td>
                         <td>
                             <?php if (!empty($row['Image'])): ?>
-                                <img src="../../<?php echo $row['Image']; ?>" alt="Receipt" class="receipt-preview" onclick="showReceiptModal('../../<?php echo $row['Image']; ?>')">
+                                <img src="../../../<?php echo $row['Image']; ?>" alt="Receipt" class="receipt-preview" onclick="showReceiptModal('../../<?php echo $row['Image']; ?>')">
                             <?php else: ?>
                                 N/A
                             <?php endif; ?>

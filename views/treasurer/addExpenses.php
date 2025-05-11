@@ -405,7 +405,7 @@ if(isset($_GET['cancel'])) {
             </div>
 
             <div class="button-group">
-                <a href="?cancel=1" class="btn cancel-btn">Cancel</a>
+                <a href="home-treasurer.php" class="cancel-btn">Cancel</a>
                 <button type="submit" name="add" class="btn btn-add">Add Expense</button>
             </div>
         </form>

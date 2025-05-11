@@ -37,9 +37,21 @@ $regFeePaid = 0;
 $remainingRegFee = 0;
 $memberStatus = '';
 
-// Check if member is selected via POST
-if (isset($_POST['member_select']) && !empty($_POST['member_select'])) {
+// Check if member is passed in URL
+if (isset($_GET['member_id']) && !empty($_GET['member_id'])) {
+    $selectedMemberId = $_GET['member_id'];
+    
+    // Automatically select fine payment type if coming from fine page
+    $preSelectFinePayment = true;
+} 
+// Or if member is selected via POST
+elseif (isset($_POST['member_select']) && !empty($_POST['member_select'])) {
     $selectedMemberId = $_POST['member_select'];
+    $preSelectFinePayment = false;
+}
+
+// Check if member is selected via POST
+if ($selectedMemberId) {
     
     // Get member details
     $query = "SELECT Name, Status FROM Member WHERE MemberID = '$selectedMemberId'";
