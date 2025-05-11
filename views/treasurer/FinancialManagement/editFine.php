@@ -568,13 +568,13 @@ if ($isPopup): ?>
         
         switch(fineType) {
             case 'late':
-                document.getElementById('amount').value = lateFine.toFixed(2);
+                document.getElementById('amount').value = lateFine;
                 break;
             case 'absent':
-                document.getElementById('amount').value = absentFine.toFixed(2);
+                document.getElementById('amount').value = absentFine;
                 break;
             case 'violation':
-                document.getElementById('amount').value = violationFine.toFixed(2);
+                document.getElementById('amount').value = violationFine;
                 break;
         }
     }

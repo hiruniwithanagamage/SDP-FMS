@@ -1,848 +1,770 @@
 <?php
+$isPopup = isset($_GET['popup']) && $_GET['popup'] === 'true';
 session_start();
 require_once "../../../config/database.php";
 
-// Get current term and selected year from previous page
-$currentTerm = isset($_SESSION['selected_year']) ? $_SESSION['selected_year'] : date('Y');
-$selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
+// Check if ID parameter exists
+if (!isset($_GET['id']) || empty($_GET['id'])) {
+    $_SESSION['error_message'] = "No membership fee ID provided";
+    header("Location: membershipFee.php");
+    exit();
+}
 
-// Fetch membership fee details for the selected year with prepared statement
-function getMembershipFeeDetails($year, $limit = 15) {
-    $sql = "SELECT 
-            mf.*,
-            m.Name as MemberName,
-            m.MemberID,
-            mfp.Details as change_details,
-            p.Date as payment_date
-        FROM MembershipFee mf
-        JOIN Member m ON m.MemberID = mf.Member_MemberID
-        LEFT JOIN MembershipFeePayment mfp ON mfp.FeeID = mf.FeeID
-        LEFT JOIN Payment p ON p.PaymentID = mfp.PaymentID
-        WHERE YEAR(mf.Date) = ? AND mf.Term = ?
-        ORDER BY mf.Date DESC
-        LIMIT ?";
-    
+$feeID = $_GET['id'];
+
+// Function to get membership fee details
+function getFeeDetails($feeID) {
     $conn = getConnection();
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("iii", $year, $year, $limit);
+    $stmt = $conn->prepare("
+        SELECT 
+            mf.FeeID, 
+            mf.Amount, 
+            mf.Date, 
+            mf.Term,
+            mf.Type,
+            mf.IsPaid,
+            mf.Member_MemberID,
+            m.Name as MemberName
+        FROM MembershipFee mf
+        JOIN Member m ON mf.Member_MemberID = m.MemberID
+        WHERE mf.FeeID = ?
+    ");
+    
+    $stmt->bind_param("s", $feeID);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows === 0) {
+        return null;
+    }
+    
+    return $result->fetch_assoc();
+}
+
+// Function to get payment associated with the membership fee
+function getAssociatedPayment($feeID) {
+    $conn = getConnection();
+    $stmt = $conn->prepare("
+        SELECT 
+            p.PaymentID,
+            p.Amount,
+            p.Date,
+            p.Term,
+            mfp.Details
+        FROM Payment p
+        JOIN MembershipFeePayment mfp ON p.PaymentID = mfp.PaymentID
+        WHERE mfp.FeeID = ?
+    ");
+    
+    $stmt->bind_param("s", $feeID);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows === 0) {
+        return null;
+    }
+    
+    return $result->fetch_assoc();
+}
+
+// Function to get all members using prepared statement
+function getAllMembers() {
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT MemberID, Name FROM Member ORDER BY Name");
     $stmt->execute();
     $result = $stmt->get_result();
     return $result;
 }
 
-$feeDetails = getMembershipFeeDetails($selectedYear);
-$limitedFeeDetails = [];
-$rowCount = 0;
-
-// Fix the while loop
-while (($row = $feeDetails->fetch_assoc()) && $rowCount < 15) {
-    $limitedFeeDetails[] = $row;
-    $rowCount++;
-}
-
-// Get fee amounts from Static table with prepared statement
-function getFeeAmounts($year) {
-    $sql = "SELECT monthly_fee, registration_fee FROM Static WHERE year = ? LIMIT 1";
+// Function to get fee settings using prepared statement
+function getFeeSettings() {
     $conn = getConnection();
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $year);
+    $stmt = $conn->prepare("SELECT monthly_fee, registration_fee FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1");
     $stmt->execute();
-    return $stmt->get_result();
+    $result = $stmt->get_result();
+    return $result->fetch_assoc();
 }
 
-// Handle Update
-if(isset($_POST['update'])) {
-    $feeId = $_POST['fee_id'];
-    $amount = floatval($_POST['amount']);
-    $isPaid = $_POST['is_paid'];
+// Function to get current term/year using prepared statement
+function getCurrentTerm() {
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    return $row['year'] ?? date('Y');
+}
+
+// Get fee details
+$fee = getFeeDetails($feeID);
+if (!$fee) {
+    $_SESSION['error_message'] = "Membership fee not found";
+    header("Location: membershipFee.php");
+    exit();
+}
+
+// Get associated payment (if any)
+$associatedPayment = getAssociatedPayment($feeID);
+
+// Get all members for the dropdown
+$allMembers = getAllMembers();
+$currentTerm = getCurrentTerm();
+$feeSettings = getFeeSettings();
+
+// Process form submission
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    // Get form data
+    $memberID = $_POST['member_id'];
+    $amount = $_POST['amount'];
+    $type = $_POST['type'];
     $date = $_POST['date'];
-    $details = $_POST['details'];
+    $term = $_POST['term'];
+    $isPaid = $_POST['is_paid'];
+    $details = $_POST['payment_details'] ?? 'Updated membership fee';
     
     try {
         $conn = getConnection();
         
-        // Start transaction to ensure consistency
+        // Start transaction
         $conn->begin_transaction();
         
-        // Update MembershipFee table with prepared statement
-        $updateQuery = "UPDATE MembershipFee SET 
-                       Amount = ?,
-                       IsPaid = ?,
-                       Date = ?
-                       WHERE FeeID = ?";
+        // Update membership fee
+        $stmt = $conn->prepare("
+            UPDATE MembershipFee SET 
+                Member_MemberID = ?,
+                Amount = ?,
+                Type = ?,
+                Date = ?,
+                Term = ?,
+                IsPaid = ?
+            WHERE FeeID = ?
+        ");
         
-        $stmt = $conn->prepare($updateQuery);
-        $stmt->bind_param("dsss", $amount, $isPaid, $date, $feeId);
+        $stmt->bind_param("sssssss", 
+            $memberID, 
+            $amount, 
+            $type, 
+            $date, 
+            $term, 
+            $isPaid,
+            $feeID
+        );
+        
         $stmt->execute();
         
-        // If payment status changed to Paid, create payment record
-        if($isPaid == 'Yes') {
-            // First check if payment already exists
-            $checkQuery = "SELECT PaymentID FROM MembershipFeePayment WHERE FeeID = ?";
-            $stmt = $conn->prepare($checkQuery);
-            $stmt->bind_param("s", $feeId);
-            $stmt->execute();
-            $result = $stmt->get_result();
+        // Check if there's an associated payment to update
+        if ($associatedPayment) {
+            // Update the payment record
+            $paymentStmt = $conn->prepare("
+                UPDATE Payment SET 
+                    Amount = ?,
+                    Date = ?,
+                    Term = ?,
+                    Member_MemberID = ?
+                WHERE PaymentID = ?
+            ");
             
-            if($result->num_rows == 0) {
-                // Get member ID for the fee
-                $memberQuery = "SELECT Member_MemberID, Term FROM MembershipFee WHERE FeeID = ?";
-                $stmt = $conn->prepare($memberQuery);
-                $stmt->bind_param("s", $feeId);
-                $stmt->execute();
-                $memberResult = $stmt->get_result();
-                $memberData = $memberResult->fetch_assoc();
-                $memberId = $memberData['Member_MemberID'];
-                $term = $memberData['Term'];
-                
-                // Generate a proper payment ID
-                $paymentId = generatePaymentId($conn);
-                
-                // Create new payment
-                $paymentQuery = "INSERT INTO Payment 
-                                (PaymentID, Payment_Type, Method, Amount, Date, Term, Member_MemberID)
-                                VALUES (?, 'Membership', 'Cash', ?, ?, ?, ?)";
-                
-                $stmt = $conn->prepare($paymentQuery);
-                $stmt->bind_param("sdsss", $paymentId, $amount, $date, $term, $memberId);
-                $stmt->execute();
-                
-                // Link payment to membership fee with details
-                $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID, Details) 
-                            VALUES (?, ?, ?)";
-                $stmt = $conn->prepare($linkQuery);
-                $stmt->bind_param("sss", $feeId, $paymentId, $details);
-                $stmt->execute();
-            } else {
-                // Update existing payment
-                $row = $result->fetch_assoc();
-                $paymentId = $row['PaymentID'];
-                
-                // Update Payment record
-                $updatePaymentQuery = "UPDATE Payment SET 
-                                     Amount = ?,
-                                     Date = ?
-                                     WHERE PaymentID = ?";
-                $stmt = $conn->prepare($updatePaymentQuery);
-                $stmt->bind_param("dss", $amount, $date, $paymentId);
-                $stmt->execute();
-                
-                // Update MembershipFeePayment details
-                $newDetails = date('Y-m-d') . ": " . $details;
-                $updateDetailsQuery = "UPDATE MembershipFeePayment SET 
-                                     Details = CONCAT(IFNULL(Details,''), '\n', ?)
-                                     WHERE FeeID = ? AND PaymentID = ?";
-                $stmt = $conn->prepare($updateDetailsQuery);
-                $stmt->bind_param("sss", $newDetails, $feeId, $paymentId);
-                $stmt->execute();
-            }
-        } else {
-            // If marked as unpaid, delete any existing payment records
+            $paymentStmt->bind_param("sssss", 
+                $amount, 
+                $date, 
+                $term, 
+                $memberID,
+                $associatedPayment['PaymentID']
+            );
             
-            // First, get the payment ID related to this fee
-            $findPaymentQuery = "SELECT PaymentID FROM MembershipFeePayment WHERE FeeID = ?";
-            $stmt = $conn->prepare($findPaymentQuery);
-            $stmt->bind_param("s", $feeId);
-            $stmt->execute();
-            $result = $stmt->get_result();
+            $paymentStmt->execute();
             
-            if($result->num_rows > 0) {
-                $row = $result->fetch_assoc();
-                $paymentId = $row['PaymentID'];
-                
-                // Delete from MembershipFeePayment first
-                $deleteLinkQuery = "DELETE FROM MembershipFeePayment WHERE FeeID = ?";
-                $stmt = $conn->prepare($deleteLinkQuery);
-                $stmt->bind_param("s", $feeId);
-                $stmt->execute();
-                
-                // Delete from Payment table
-                $deletePaymentQuery = "DELETE FROM Payment WHERE PaymentID = ?";
-                $stmt = $conn->prepare($deletePaymentQuery);
-                $stmt->bind_param("s", $paymentId);
-                $stmt->execute();
-            }
+            // Update the MembershipFeePayment details
+            $membershipFeePaymentStmt = $conn->prepare("
+                UPDATE MembershipFeePayment SET 
+                    Details = ?
+                WHERE FeeID = ? AND PaymentID = ?
+            ");
+            
+            $membershipFeePaymentStmt->bind_param("sss", 
+                $details, 
+                $feeID,
+                $associatedPayment['PaymentID']
+            );
+            
+            $membershipFeePaymentStmt->execute();
+        } 
+        // If status changed to 'Paid' and no payment record exists, create one
+        else if ($isPaid === 'Yes' && !$associatedPayment) {
+            // Generate new PaymentID (you might have a function for this)
+            $paymentID = uniqid('PAY_');
+            
+            // Create a new payment record
+            $paymentStmt = $conn->prepare("
+                INSERT INTO Payment (
+                    PaymentID, 
+                    Payment_Type, 
+                    Method, 
+                    Amount, 
+                    Date, 
+                    Term, 
+                    Member_MemberID,
+                    status
+                ) VALUES (
+                    ?, 
+                    'membership_fee', 
+                    'cash', 
+                    ?, 
+                    ?, 
+                    ?, 
+                    ?,
+                    'cash'
+                )
+            ");
+            
+            $paymentStmt->bind_param("sssss", 
+                $paymentID, 
+                $amount, 
+                $date, 
+                $term, 
+                $memberID
+            );
+            
+            $paymentStmt->execute();
+            
+            // Create the link in MembershipFeePayment with details
+            $membershipFeePaymentStmt = $conn->prepare("
+                INSERT INTO MembershipFeePayment (
+                    FeeID, 
+                    PaymentID, 
+                    Details
+                ) VALUES (
+                    ?, 
+                    ?, 
+                    ?
+                )
+            ");
+            
+            $membershipFeePaymentStmt->bind_param("sss", 
+                $feeID, 
+                $paymentID, 
+                $details
+            );
+            
+            $membershipFeePaymentStmt->execute();
         }
         
-        // Commit all changes
+        // Commit transaction
         $conn->commit();
         
-        $_SESSION['success_message'] = "Fee details updated successfully!";
+        // Set success message
+        $_SESSION['success_message'] = "Membership Fee #$feeID successfully updated";
+        
+        // Handle redirection based on popup mode after ALL database operations are complete
+        if (!$isPopup) {
+            header("Location: membershipFee.php");
+            exit();
+        }
+        // If it's popup mode, we'll continue rendering the page with a success message
+        // and add JavaScript to refresh the parent later
         
     } catch (Exception $e) {
         // Rollback on error
-        if(isset($conn)) {
-            $conn->rollback();
-        }
-        $_SESSION['error_message'] = "Error updating fee details: " . $e->getMessage();
-    }
-    
-    header("Location: " . $_SERVER['PHP_SELF'] . "?year=" . $selectedYear);
-    exit();
-}
-
-if(isset($_POST['delete'])) {
-    $feeId = $_POST['fee_id'];
-    
-    try {
-        $conn = getConnection();
-        
-        // Start transaction for consistency
-        $conn->begin_transaction();
-        
-        // First, get the payment ID related to this fee
-        $findPaymentQuery = "SELECT PaymentID FROM MembershipFeePayment WHERE FeeID = ?";
-        $stmt = $conn->prepare($findPaymentQuery);
-        $stmt->bind_param("s", $feeId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        
-        // Delete related records from MembershipFeePayment
-        $deletePaymentLinks = "DELETE FROM MembershipFeePayment WHERE FeeID = ?";
-        $stmt = $conn->prepare($deletePaymentLinks);
-        $stmt->bind_param("s", $feeId);
-        $stmt->execute();
-        
-        // Delete related Payment records if they exist
-        if($result->num_rows > 0) {
-            $row = $result->fetch_assoc();
-            $paymentId = $row['PaymentID'];
-            
-            $deletePayment = "DELETE FROM Payment WHERE PaymentID = ?";
-            $stmt = $conn->prepare($deletePayment);
-            $stmt->bind_param("s", $paymentId);
-            $stmt->execute();
-        }
-        
-        // Then delete the fee record
-        $deleteFee = "DELETE FROM MembershipFee WHERE FeeID = ?";
-        $stmt = $conn->prepare($deleteFee);
-        $stmt->bind_param("s", $feeId);
-        $stmt->execute();
-        
-        // Commit all changes
-        $conn->commit();
-        
-        $_SESSION['success_message'] = "Fee record deleted successfully!";
-        
-    } catch (Exception $e) {
-        // Rollback on error
-        if(isset($conn)) {
-            $conn->rollback();
-        }
-        $_SESSION['error_message'] = "Error deleting fee record: " . $e->getMessage();
-    }
-    
-    header("Location: " . $_SERVER['PHP_SELF'] . "?year=" . $selectedYear);
-    exit();
-}
-
-// Function to generate a proper payment ID
-function generatePaymentId($conn) {
-    // Try to set isolation level
-    $conn->query("SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-    
-    // Get the highest ID
-    $query = "SELECT CAST(SUBSTRING(PaymentID, 4) AS UNSIGNED) as max_num 
-             FROM Payment 
-             WHERE PaymentID LIKE 'PAY%'
-             ORDER BY PaymentID DESC 
-             LIMIT 1 FOR UPDATE";
-    
-    $result = $conn->query($query);
-    
-    // Determine the next number
-    if ($result && $result->num_rows > 0) {
-        $row = $result->fetch_assoc();
-        $nextNum = $row['max_num'] + 1;
-    } else {
-        $nextNum = 1;
-    }
-    
-    // Generate the new ID
-    $newId = "PAY" . str_pad($nextNum, 3, '0', STR_PAD_LEFT);
-    
-    // Verify it doesn't exist (double check)
-    $verifyQuery = "SELECT COUNT(*) as count FROM Payment WHERE PaymentID = ?";
-    $stmt = $conn->prepare($verifyQuery);
-    $stmt->bind_param("s", $newId);
-    $stmt->execute();
-    $verifyResult = $stmt->get_result();
-    
-    if ($verifyResult->fetch_assoc()['count'] > 0) {
-        return generatePaymentId($conn); // Try again if ID exists
-    }
-    
-    return $newId;
-}
-
-// Get fee details for display
-$feeAmountsResult = getFeeAmounts($selectedYear);
-$feeAmounts = $feeAmountsResult->fetch_assoc();
-?>
-
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edit Membership Fee Details</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="../../../assets/css/adminDetails.css">
-    <style>
-        /* Add these styles to your existing adminActorDetails.css or include them in a style tag */
-
-/* Year Selection Box */
-.filter-section {
-    margin-bottom: 2rem;
-}
-
-.filter-input {
-    margin-top: 2rem;
-    padding: 0.8rem 1rem;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    font-size: 1rem;
-    min-width: 200px;
-    background-color: #1a237e;
-    color: #FFFFFF;
-    cursor: pointer;
-    transition: border-color 0.3s, box-shadow 0.3s;
-}
-
-.filter-input:focus {
-    border-color: #1a237e;
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(26, 35, 126, 0.1);
-}
-
-.filter-input:hover {
-    border-color: #1a237e;
-}
-
-/* Edit Modal Styles */
-.modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-    padding: 20px;
-    overflow-y: auto;
-}
-
-.modal-content {
-    background-color: white;
-    margin: 3% auto;
-    padding: 2.5rem;
-    width: 90%;
-    max-width: 600px;
-    border-radius: 12px;
-    position: relative;
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-}
-
-.modal-content h2 {
-    color: #1a237e;
-    margin-bottom: 1.5rem;
-}
-
-.close {
-    position: absolute;
-    right: 25px;
-    top: 25px;
-    font-size: 24px;
-    cursor: pointer;
-    color: #666;
-    transition: color 0.3s;
-}
-
-.close:hover {
-    color: #000;
-}
-
-.form-group {
-    margin-bottom: 1.5rem;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 0.7rem;
-    font-weight: 500;
-    color: #333;
-}
-
-.form-group input,
-.form-group select,
-.form-group textarea {
-    width: 100%;
-    padding: 0.8rem 1rem;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    font-size: 1rem;
-    transition: border-color 0.3s;
-}
-
-.form-group textarea {
-    min-height: 100px;
-    resize: vertical;
-}
-
-.form-group input:focus,
-.form-group select:focus,
-.form-group textarea:focus {
-    border-color: #1a237e;
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(26, 35, 126, 0.1);
-}
-
-.modal-footer {
-    margin-top: 2rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid #eee;
-    display: flex;
-    justify-content: flex-end;
-    gap: 1rem;
-}
-
-.save-btn, 
-.cancel-btn {
-    padding: 0.8rem 1.8rem;
-    border: none;
-    border-radius: 6px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: all 0.3s;
-}
-
-.save-btn {
-    background-color: #1a237e;
-    color: white;
-}
-
-.save-btn:hover {
-    background-color: #0d1757;
-}
-
-.cancel-btn {
-    background-color: #e0e0e0;
-    color: #333;
-}
-
-.cancel-btn:hover {
-    background-color: #d0d0d0;
-}
-
-.back-button-container {
-    margin-top: 0rem;
-    text-align: center;
-}
-
-.container {
-    margin-top: 0rem;
-}
-
-.back-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.8rem 1.5rem;
-    background-color: #1e3c72;
-    color: white;
-    text-decoration: none;
-    border-radius: 8px;
-    transition: background-color 0.3s ease;
-}
-
-.back-btn:hover {
-    background-color: #2a5298;
-}
-
-.back-btn i {
-    margin-right: 0.5rem;
-}
-
-.search-section {
-    margin-bottom: 2rem;
-}
-
-.search-input {
-    padding: 0.8rem 1rem;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    font-size: 1rem;
-    min-width: 300px;
-    background-color: white;
-    color: #333;
-    transition: border-color 0.3s, box-shadow 0.3s;
-}
-
-.search-input:focus {
-    border-color: #1a237e;
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(26, 35, 126, 0.1);
-}
-
-.search-input::placeholder {
-    color: #999;
-}
-
-/* Delete Modal Styles */
-.delete-modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-    padding: 20px;
-    overflow-y: auto;
-}
-
-.delete-modal-content {
-    background-color: white;
-    margin: 10% auto;
-    padding: 2rem;
-    width: 90%;
-    max-width: 500px;
-    border-radius: 12px;
-    position: relative;
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-    text-align: center;
-}
-
-.delete-modal-content h2 {
-    color: #e53935;
-    margin-bottom: 1rem;
-}
-
-.delete-modal-buttons {
-    display: flex;
-    justify-content: center;
-    gap: 1rem;
-    margin-top: 2rem;
-}
-
-.confirm-delete-btn {
-    padding: 0.8rem 1.8rem;
-    border: none;
-    border-radius: 6px;
-    font-size: 1rem;
-    cursor: pointer;
-    background-color: #e53935;
-    color: white;
-    transition: background-color 0.3s;
-}
-
-.confirm-delete-btn:hover {
-    background-color: #c62828;
-}
-
-/* Responsive Adjustments */
-@media (max-width: 768px) {
-    .filter-input {
-        width: 100%;
-    }
-
-    .modal-content, .delete-modal-content {
-        margin: 0;
-        margin-top: 20px;
-        width: 100%;
-        max-height: 95vh;
-        overflow-y: auto;
-    }
-
-    .modal-footer, .delete-modal-buttons {
-        flex-direction: column;
-    }
-
-    .save-btn, .cancel-btn, .confirm-delete-btn {
-        width: 100%;
+        $conn->rollback();
+        $_SESSION['error_message'] = "Error updating membership fee: " . $e->getMessage();
     }
 }
 
-.table-container {
-    max-height: 400px; /* Adjust height as needed */
-    overflow-y: auto;
-    padding-top: 0px;
-}
+// Fee type options
+$feeTypes = [
+    'registration' => 'Registration',
+    'monthly' => 'Monthly'
+];
 
-/* Keep the table header fixed while scrolling */
-.table-container table thead {
-    position: sticky;
-    top: 0;
-    background: #f8f9fa;
-    z-index: 1;
-}
+// Fee payment status options
+$paymentStatus = [
+    'No' => 'Unpaid',
+    'Yes' => 'Paid'
+];
 
-/* Add shadow to header when scrolling */
-.table-container table thead::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    border-bottom: 1px solid #eee;
-}
+// Now output the HTML based on popup mode
+if ($isPopup): ?>
+    <!-- Simplified header for popup mode -->
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>Edit Membership Fee</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+        <link rel="stylesheet" href="../../../assets/css/adminDetails.css">
+        <link rel="stylesheet" href="../../../assets/css/financialManagement.css">
+        <link rel="stylesheet" href="../../../assets/css/alert.css">
+        <style>
+            body { 
+                padding: 0; 
+                margin: 0; 
+                background: white; 
+                font-family: Arial, sans-serif;
+            }
+            .container { 
+                padding: 10px; 
+            }
+            .header-card { 
+                display: none; 
+            }
+            .main-container { 
+                padding: 0; 
+            }
+            .form-container {
+                background-color: #fff;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                padding: 20px;
+                width: 100%;
+                margin: 10px auto;
+            }
+            .form-title {
+                color: #1e3c72;
+                margin-bottom: 20px;
+                text-align: center;
+                font-size: 1.5rem;
+            }
+            .form-group {
+                margin-bottom: 15px;
+            }
+            .form-group label {
+                display: block;
+                margin-bottom: 6px;
+                font-weight: 600;
+                color: #333;
+            }
+            .form-control {
+                width: 100%;
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 14px;
+                transition: border-color 0.3s;
+                box-sizing: border-box;
+            }
+            .form-control:disabled {
+                background-color: #f5f5f5;
+                cursor: not-allowed;
+            }
+            .form-control:focus {
+                border-color: #1e3c72;
+                outline: none;
+                box-shadow: 0 0 0 2px rgba(30, 60, 114, 0.2);
+            }
+            .form-row {
+                display: flex;
+                gap: 15px;
+            }
+            .form-row .form-group {
+                flex: 1;
+            }
+            .btn-container {
+                display: flex;
+                justify-content: flex-end;
+                margin-top: 20px;
+            }
+            .btn {
+                min-width: 120px;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                cursor: pointer;
+                transition: background-color 0.3s;
+            }
+            .btn-primary {
+                background-color: #1e3c72;
+                color: white;
+                height: 40px;
+            }
+            .btn-primary:hover {
+                background-color: #16305c;
+            }
+            .btn-secondary {
+                background-color: #e0e0e0;
+                color: #333;
+                margin-right: 30px;
+                text-align: center;
+                font-weight: bold;
+                display: block;
+            }
 
-/* Style the scrollbar */
-.table-container::-webkit-scrollbar {
-    width: 8px;
-}
-
-.table-container::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 4px;
-}
-
-.table-container::-webkit-scrollbar-thumb {
-    background: #1e3c72;
-    border-radius: 4px;
-}
-
-.table-container::-webkit-scrollbar-thumb:hover {
-    background: #2a5298;
-}
-
-/* Ensure consistent cell heights */
-.table-container table td {
-    height: 40px;
-}
-</style>
-</head>
-<body>
-    <div class="main-container">
-        <?php include '../../templates/navbar-treasurer.php'; ?>
+            .btn-secondary:hover {
+                background-color: #5a6268;
+            }
+            .member-info {
+                background-color: #f9f9f9;
+                padding: 12px;
+                border-radius: 5px;
+                margin-bottom: 15px;
+                font-size: 14px;
+            }
+            .member-info-title {
+                font-weight: 600;
+                margin-bottom: 8px;
+                color: #1e3c72;
+            }
+            .alert {
+                padding: 10px 15px;
+                margin-bottom: 15px;
+                border-radius: 4px;
+            }
+            .alert-success {
+                background-color: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+            }
+            .alert-danger {
+                background-color: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
+            }
+            .status-paid {
+                background-color: #c2f1cd;
+                color: rgb(25, 151, 10);
+            }
+            .status-unpaid {
+                background-color: #e2bcc0;
+                color: rgb(234, 59, 59);
+            }
+            .payment-details {
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
         <div class="container">
-            <div class="header-section">
-                <h1>Edit Membership Fee Details</h1>
-                <div class="filter-section">
-                    <select class="filter-input" onchange="updateYear(this.value)">
-                        <?php for($y = $currentTerm; $y >= $currentTerm - 2; $y--): ?>
-                            <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
-                                Year <?php echo $y; ?>
-                            </option>
-                        <?php endfor; ?>
-                    </select>
+<?php else: ?>
+    <!-- Regular header for standalone page -->
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>Edit Membership Fee</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+        <link rel="stylesheet" href="../../../assets/css/adminDetails.css">
+        <link rel="stylesheet" href="../../../assets/css/financialManagement.css">
+        <link rel="stylesheet" href="../../../assets/css/alert.css">
+        <script src="../../../assets/js/alertHandler.js"></script>
+        <style>
+            .form-container {
+                background-color: #fff;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                padding: 30px;
+                max-width: 800px;
+                margin: 20px auto;
+            }
+
+            .form-title {
+                color: #1e3c72;
+                margin-bottom: 25px;
+                text-align: center;
+            }
+
+            .form-group {
+                margin-bottom: 20px;
+            }
+
+            .form-group label {
+                display: block;
+                margin-bottom: 8px;
+                font-weight: 600;
+                color: #333;
+            }
+
+            .form-control {
+                width: 100%;
+                padding: 12px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 16px;
+                transition: border-color 0.3s;
+            }
+
+            .form-control:disabled {
+                background-color: #f5f5f5;
+                cursor: not-allowed;
+            }
+
+            .form-control:focus {
+                border-color: #1e3c72;
+                outline: none;
+                box-shadow: 0 0 0 2px rgba(30, 60, 114, 0.2);
+            }
+
+            .form-row {
+                display: flex;
+                gap: 20px;
+            }
+
+            .form-row .form-group {
+                flex: 1;
+            }
+
+            .btn-container {
+                display: flex;
+                justify-content: space-between;
+                margin-top: 30px;
+            }
+
+            .btn {
+                padding: 12px 24px;
+                border: none;
+                border-radius: 4px;
+                font-size: 16px;
+                cursor: pointer;
+                transition: background-color 0.3s;
+            }
+
+            .btn-primary {
+                background-color: #1e3c72;
+                color: white;
+            }
+
+            .btn-primary:hover {
+                background-color: #16305c;
+            }
+
+            .btn-secondary {
+                background-color: #e0e0e0;
+                color: #333;
+            }
+
+            .btn-secondary:hover {
+                background-color: #5a6268;
+            }
+
+            .member-info {
+                background-color: #f9f9f9;
+                padding: 15px;
+                border-radius: 5px;
+                margin-bottom: 20px;
+            }
+
+            .member-info-title {
+                font-weight: 600;
+                margin-bottom: 10px;
+                color: #1e3c72;
+            }
+            
+            .status-badge {
+                display: inline-block;
+                padding: 5px 10px;
+                border-radius: 15px;
+                font-size: 0.8rem;
+                font-weight: bold;
+            }
+            
+            .status-paid {
+                background-color: #c2f1cd;
+                color: rgb(25, 151, 10);
+            }
+            
+            .status-unpaid {
+                background-color: #e2bcc0;
+                color: rgb(234, 59, 59);
+            }
+            
+            .payment-details {
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="main-container">
+            <?php include '../../templates/navbar-treasurer.php'; ?>
+            <div class="container">
+                <div class="header-card">
+                    <h1>Edit Membership Fee</h1>
+                    <a href="membershipFee.php" class="btn-secondary btn">
+                        <i class="fas fa-arrow-left"></i> Back to Membership Fees
+                    </a>
                 </div>
+<?php endif; ?>
+
+            <!-- Generate alerts -->
+            <div class="alerts-container">
+                <?php if(isset($_SESSION['success_message'])): ?>
+                    <div class="alert alert-success">
+                        <?php 
+                            echo $_SESSION['success_message'];
+                            unset($_SESSION['success_message']);
+                        ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php if(isset($_SESSION['error_message'])): ?>
+                    <div class="alert alert-danger">
+                        <?php 
+                            echo $_SESSION['error_message'];
+                            unset($_SESSION['error_message']);
+                        ?>
+                    </div>
+                <?php endif; ?>
             </div>
 
-            <div class="search-section">
-                <input type="text" 
-                    id="searchInput" 
-                    class="search-input" 
-                    placeholder="Search by Member Name or ID..."
-                    onkeyup="searchTable()">
+            <div class="form-container">
+                <h2 class="form-title">Edit Membership Fee #<?php echo htmlspecialchars($feeID); ?></h2>
+                
+                <div class="member-info">
+                    <div class="member-info-title">Current Fee Information</div>
+                    <p>Member ID: <?php echo htmlspecialchars($fee['Member_MemberID']); ?></p>
+                    <p>Member Name: <?php echo htmlspecialchars($fee['MemberName']); ?></p>
+                    <p>Payment Status: <span class="status-badge status-<?php echo strtolower($fee['IsPaid']) === 'yes' ? 'paid' : 'unpaid'; ?>"><?php echo ($fee['IsPaid'] === 'Yes') ? 'Paid' : 'Unpaid'; ?></span></p>
+                    <?php if($associatedPayment): ?>
+                    <p>Associated Payment ID: <?php echo htmlspecialchars($associatedPayment['PaymentID']); ?></p>
+                    <p>Payment Details: <?php echo htmlspecialchars($associatedPayment['Details'] ?? 'No details available'); ?></p>
+                    <?php endif; ?>
+                </div>
+
+                <form method="POST" action="">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="fee_id">Fee ID</label>
+                            <input type="text" id="fee_id" class="form-control" value="<?php echo htmlspecialchars($feeID); ?>" disabled>
+                        </div>
+                        <div class="form-group">
+                            <label for="member_id">Member</label>
+                            <select id="member_id" name="member_id" class="form-control" required>
+                                <?php while($member = $allMembers->fetch_assoc()): ?>
+                                    <option value="<?php echo $member['MemberID']; ?>" <?php echo ($member['MemberID'] == $fee['Member_MemberID']) ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($member['MemberID'] . ' - ' . $member['Name']); ?>
+                                    </option>
+                                <?php endwhile; ?>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="type">Fee Type</label>
+                            <select id="type" name="type" class="form-control" required onchange="updateAmount()">
+                                <?php foreach($feeTypes as $value => $label): ?>
+                                    <option value="<?php echo $value; ?>" <?php echo ($value == $fee['Type']) ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($label); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="amount">Fee Amount (Rs.)</label>
+                            <input type="number" id="amount" name="amount" class="form-control" value="<?php echo htmlspecialchars($fee['Amount']); ?>" min="0" step="0.01" required>
+                            <small>Registration Fee: Rs. <?php echo number_format($feeSettings['registration_fee'], 2); ?>, Monthly Fee: Rs. <?php echo number_format($feeSettings['monthly_fee'], 2); ?></small>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="date">Date</label>
+                            <input type="date" id="date" name="date" class="form-control" value="<?php echo date('Y-m-d', strtotime($fee['Date'])); ?>" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="term">Term</label>
+                            <input type="number" id="term" name="term" class="form-control" value="<?php echo htmlspecialchars($fee['Term']); ?>" min="1" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="is_paid">Payment Status</label>
+                            <select id="is_paid" name="is_paid" class="form-control" required onchange="togglePaymentDetails()">
+                                <?php foreach($paymentStatus as $value => $label): ?>
+                                    <option value="<?php echo $value; ?>" <?php echo ($value == $fee['IsPaid']) ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($label); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group payment-details" id="payment_details_group">
+                            <label for="payment_details">Payment Details</label>
+                            <input type="text" id="payment_details" name="payment_details" class="form-control" value="<?php echo htmlspecialchars($associatedPayment['Details'] ?? 'Updated membership fee'); ?>" placeholder="Enter payment details">
+                        </div>
+                    </div>
+
+                    <div class="btn-container">
+                        <?php if ($isPopup): ?>
+                            <button type="button" class="btn btn-secondary" onclick="window.parent.closeEditModal()">Cancel</button>
+                        <?php else: ?>
+                            <a href="membershipFee.php" class="btn btn-secondary">Cancel</a>
+                        <?php endif; ?>
+                        <button type="submit" class="btn btn-primary">Update Fee</button>
+                    </div>
+                </form>
             </div>
 
-            <?php if(isset($_SESSION['success_message'])): ?>
-                <div class="alert alert-success">
-                    <?php 
-                        echo $_SESSION['success_message'];
-                        unset($_SESSION['success_message']);
-                    ?>
-                </div>
-            <?php endif; ?>
-
-            <?php if(isset($_SESSION['error_message'])): ?>
-                <div class="alert alert-danger">
-                    <?php 
-                        echo $_SESSION['error_message'];
-                        unset($_SESSION['error_message']);
-                    ?>
-                </div>
-            <?php endif; ?>
-
-            <div class="table-responsive table-container">
-                <table class="treasurer-table">
-                    <thead>
-                        <tr>
-                            <th>Member ID</th>
-                            <th>Name</th>
-                            <th>Fee Type</th>
-                            <th>Amount</th>
-                            <th>Fee Date</th>
-                            <th>Payment Date</th>
-                            <th>Change Details</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-
-                        <?php foreach($limitedFeeDetails as $row): ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
-                            <td><?php echo htmlspecialchars($row['MemberName']); ?></td>
-                            <td><?php echo htmlspecialchars($row['Type']); ?></td>
-                            <td>Rs. <?php echo number_format($row['Amount'], 2); ?></td>
-                            <td><?php echo date('Y-m-d', strtotime($row['Date'])); ?></td>
-                            <td><?php echo $row['payment_date'] ? date('Y-m-d', strtotime($row['payment_date'])) : '-'; ?></td>
-                            <td class="history-cell" title="<?php echo htmlspecialchars($row['change_details'] ?? ''); ?>">
-                                <?php 
-                                // Limit display length with ellipsis for better UI
-                                $details = $row['change_details'] ?? '-';
-                                echo strlen($details) > 50 ? htmlspecialchars(substr($details, 0, 50) . '...') : htmlspecialchars($details); 
-                                ?>
-                            </td>
-                            <td>
-                                <div class="action-buttons">
-                                    <button class="action-btn edit-btn" onclick="openEditModal('<?php echo $row['FeeID']; ?>', '<?php echo $row['Amount']; ?>', '<?php echo $row['IsPaid']; ?>', '<?php echo date('Y-m-d', strtotime($row['Date'])); ?>')">
-                                        <i class="fas fa-edit"></i> Edit
-                                    </button>
-                                    <button class="action-btn delete-btn" onclick="openDeleteModal('<?php echo $row['FeeID']; ?>')">
-                                        <i class="fas fa-trash"></i> Delete
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+<?php if ($isPopup): ?>
     </div>
-
-    <!-- Edit Modal -->
-    <div id="editModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeModal()">&times;</span>
-            <h2>Edit Fee Details</h2>
-            <form id="editForm" method="POST">
-                <input type="hidden" id="edit_fee_id" name="fee_id">
-                
-                <div class="form-group">
-                    <label for="edit_amount">Amount (Rs.)</label>
-                    <input type="number" step="0.01" id="edit_amount" name="amount" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="edit_status">Payment Status</label>
-                    <select id="edit_status" name="is_paid" required>
-                        <option value="Yes">Paid</option>
-                        <option value="No">Unpaid</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="edit_date">Date</label>
-                    <input type="date" id="edit_date" name="date" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="edit_details">Change Details/Notes (Required)</label>
-                    <textarea id="edit_details" name="details" 
-                              placeholder="Please provide a reason for this change..." required></textarea>
-                </div>
-
-                <div class="modal-footer">
-                    <button type="button" class="cancel-btn" onclick="closeModal()">Cancel</button>
-                    <button type="submit" name="update" class="save-btn">Save Changes</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Delete Modal -->
-    <div id="deleteModal" class="delete-modal">
-        <div class="delete-modal-content">
-            <h2>Confirm Delete</h2>
-            <p>Are you sure you want to delete this fee record? This action cannot be undone.</p>
-            <form method="POST" id="deleteForm">
-                <input type="hidden" id="delete_fee_id" name="fee_id">
-                <div class="delete-modal-buttons">
-                    <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>
-                    <button type="submit" name="delete" class="confirm-delete-btn">Delete</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Back Button -->
-    <div class="container">
-        <div class="back-button-container">
-            <a href="membershipFee.php" class="back-btn">
-                <i class="fas fa-arrow-left"></i> Back to Membership Fees
-            </a>
-        </div>
-    </div>
-
-    <script>
-        function updateYear(year) {
-            window.location.href = `?year=${year}`;
-        }
-
-        function openEditModal(id, amount, isPaid, date) {
-            document.getElementById('editModal').style.display = 'block';
-            document.getElementById('edit_fee_id').value = id;
-            document.getElementById('edit_amount').value = amount;
-            document.getElementById('edit_status').value = isPaid;
-            document.getElementById('edit_date').value = date;
-        }
-
-        function closeModal() {
-            document.getElementById('editModal').style.display = 'none';
-        }
-
-        function openDeleteModal(id) {
-            document.getElementById('deleteModal').style.display = 'block';
-            document.getElementById('delete_fee_id').value = id;
-        }
-
-        function closeDeleteModal() {
-            document.getElementById('deleteModal').style.display = 'none';
-        }
-
-        // Combined window.onclick for both modals
-        window.onclick = function(event) {
-            const editModal = document.getElementById('editModal');
-            const deleteModal = document.getElementById('deleteModal');
-            
-            if (event.target == editModal) {
-                closeModal();
-            }
-            if (event.target == deleteModal) {
-                closeDeleteModal();
-            }
-        };
-
-        function searchTable() {
-            // Get input value and convert to lowercase for case-insensitive search
-            var input = document.getElementById("searchInput");
-            var filter = input.value.toLowerCase();
-            
-            // Get all table rows except the header
-            var table = document.querySelector(".treasurer-table");
-            var rows = table.getElementsByTagName("tr");
-            
-            // Loop through all table rows
-            for (var i = 1; i < rows.length; i++) {
-                var show = false;
-                
-                // Get member ID and name cells
-                var idCell = rows[i].cells[0];
-                var nameCell = rows[i].cells[1];
-                
-                if (idCell && nameCell) {
-                    var id = idCell.textContent || idCell.innerText;
-                    var name = nameCell.textContent || nameCell.innerText;
-                    
-                    // Check if either ID or name matches the search term
-                    if (id.toLowerCase().indexOf(filter) > -1 || 
-                        name.toLowerCase().indexOf(filter) > -1) {
-                        show = true;
-                    }
-                }
-                
-                // Show or hide the row based on search match
-                rows[i].style.display = show ? "" : "none";
-            }
-        }
-    </script>
+    
+    <?php if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_SESSION['error_message'])): ?>
+<script>
+    // If form was submitted successfully in popup mode, pass message to parent
+    window.parent.showAlert('success', 'Membership Fee #<?php echo $feeID; ?> successfully updated');
+    window.parent.closeEditModal();
+    // Don't reload the entire page as it will lose the alert
+</script>
+<?php elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_SESSION['error_message'])): ?>
+<script>
+    // If form had errors, pass error message to parent
+    window.parent.showAlert('error', '<?php echo addslashes($_SESSION['error_message']); ?>');
+</script>
+<?php unset($_SESSION['error_message']); ?>
+<?php endif; ?>
+    
 </body>
 </html>
+<?php else: ?>
+        </div>
+        <?php include '../../templates/footer.php'; ?>
+    </div>
+</body>
+</html>
+<?php endif; ?>
+
+<script>
+    // Auto-update amount based on fee type
+    function updateAmount() {
+        const feeType = document.getElementById('type').value;
+        const registrationFee = <?php echo $feeSettings['registration_fee']; ?>;
+        const monthlyFee = <?php echo $feeSettings['monthly_fee']; ?>;
+        
+        if (feeType === 'registration') {
+            document.getElementById('amount').value = registrationFee.toFixed(2);
+        } else if (feeType === 'monthly') {
+            document.getElementById('amount').value = monthlyFee.toFixed(2);
+        }
+    }
+    
+    // Toggle payment details visibility based on payment status
+    function togglePaymentDetails() {
+        const isPaid = document.getElementById('is_paid').value;
+        const paymentDetailsGroup = document.getElementById('payment_details_group');
+        
+        if (isPaid === 'Yes') {
+            paymentDetailsGroup.style.display = 'block';
+        } else {
+            paymentDetailsGroup.style.display = 'none';
+        }
+    }
+    
+    // Initialize payment details visibility on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        togglePaymentDetails();
+    });
+
+    // Form validation
+    document.querySelector('form').addEventListener('submit', function(e) {
+        const amount = parseFloat(document.getElementById('amount').value);
+        
+        if (isNaN(amount) || amount <= 0) {
+            e.preventDefault();
+            alert('Please enter a valid amount greater than zero.');
+        }
+        
+        const date = new Date(document.getElementById('date').value);
+        if (isNaN(date.getTime())) {
+            e.preventDefault();
+            alert('Please enter a valid date.');
+        }
+    });
+</script>

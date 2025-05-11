@@ -20,12 +20,14 @@ body {
 
 /* Header and Navigation */
 .header-section {
+    color:#1a237e;
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 2rem;
     flex-wrap: wrap;
     gap: 1rem;
+    border-bottom: 1px solid #ddd;
 }
 
 /* Search Section */

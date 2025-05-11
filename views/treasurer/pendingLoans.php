@@ -272,7 +272,7 @@ $result = getPendingLoans();
     <div class="main-container">
         <?php include '../templates/navbar-treasurer.php'; ?>
         <div class="container">
-            <div class="header-section">
+            <div class="header-section" style="border-bottom: 1px solid #ddd; color: #1a237e;">
                 <h1>Pending Loan Applications</h1>
                 <a href="home-treasurer.php" class="back-btn">
                     <i class="fas fa-arrow-left"></i>

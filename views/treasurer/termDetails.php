@@ -208,11 +208,11 @@ if(isset($_POST['update'])) {
     <div class="main-container">
         <?php include '../templates/navbar-treasurer.php'; ?>
         <div class="container">
-            <div class="header-section">
+            <div class="header-section" style="border-bottom: 1px solid #ddd; color: #1a237e;">
                 <h1>Term Details</h1>
                 <?php if($activeTerm): ?>
                 <button class="add-btn" onclick="openEditModal()">
-                    <i class="fas fa-edit"></i> Edit Active Term
+                    <i class="fas fa-edit"></i> Edit Active Term Details
                 </button>
                 <?php endif; ?>
             </div>
