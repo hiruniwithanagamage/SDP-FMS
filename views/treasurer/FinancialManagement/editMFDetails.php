@@ -83,56 +83,113 @@ if(isset($_POST['delete_fee'])) {
     $currentYear = isset($_GET['year']) ? $_GET['year'] : (isset($_POST['year']) ? $_POST['year'] : getCurrentTerm());
     
     try {
-        $conn = getConnection();
-        
         // Start transaction
-        $conn->begin_transaction();
+        begin_transaction();
         
-        // First check if this fee has any payments
-        $checkQuery = "SELECT * FROM MembershipFeePayment WHERE FeeID = ?";
-        $stmt = $conn->prepare($checkQuery);
+        // Get fee details first
+        $feeQuery = "SELECT f.Member_MemberID, f.Amount, f.Term, f.Type, f.IsPaid FROM MembershipFee f WHERE f.FeeID = ?";
+        $stmt = prepare($feeQuery);
         $stmt->bind_param("s", $feeId);
         $stmt->execute();
-        $result = $stmt->get_result();
+        $feeResult = $stmt->get_result();
         
-        // If there are payments linked to this fee, delete them first
-        if($result->num_rows > 0) {
-            // Get all payment IDs linked to this fee
-            $paymentIds = [];
-            while($row = $result->fetch_assoc()) {
-                $paymentIds[] = $row['PaymentID'];
+        if($feeResult->num_rows === 0) {
+            throw new Exception("Fee record not found");
+        }
+        
+        $feeDetails = $feeResult->fetch_assoc();
+        $memberID = $feeDetails['Member_MemberID'];
+        $amount = $feeDetails['Amount'];
+        $term = $feeDetails['Term'];
+        $type = $feeDetails['Type'];
+        $isPaid = $feeDetails['IsPaid'];
+        
+        // If the fee was paid, create an expense record to balance the accounts
+        if($isPaid == 'Yes') {
+            // Function to generate a unique expense ID
+            function generateExpenseID($term) {
+                // Get current year if term is not provided
+                if (empty($term)) {
+                    $term = date('Y');
+                }
+                
+                // Extract the last 2 digits of the term
+                $shortTerm = substr((string)$term, -2);
+                
+                // Find the highest sequence number for the current term
+                $stmt = prepare("
+                    SELECT MAX(CAST(SUBSTRING(ExpenseID, 6) AS UNSIGNED)) as max_seq 
+                    FROM Expenses 
+                    WHERE ExpenseID LIKE 'EXP{$shortTerm}%'
+                ");
+                
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $row = $result->fetch_assoc();
+                
+                $nextSeq = 1; // Default starting value
+                if ($row && $row['max_seq']) {
+                    $nextSeq = $row['max_seq'] + 1;
+                }
+                
+                // Format: EXP followed by last 2 digits of term and sequence number
+                // Use leading zeros for numbers 1-9, no leading zeros after 10
+                if ($nextSeq < 10) {
+                    return 'EXP' . $shortTerm . '0' . $nextSeq;
+                } else {
+                    return 'EXP' . $shortTerm . $nextSeq;
+                }
             }
             
-            // Delete the fee payment links
-            $deleteFeePaymentsQuery = "DELETE FROM MembershipFeePayment WHERE FeeID = ?";
-            $stmt = $conn->prepare($deleteFeePaymentsQuery);
-            $stmt->bind_param("s", $feeId);
+            // Get active treasurer
+            $treasurerQuery = "SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1";
+            $stmt = prepare($treasurerQuery);
             $stmt->execute();
+            $treasurerResult = $stmt->get_result();
+            $activeTreasurer = $treasurerResult->fetch_assoc()['TreasurerID'];
             
-            // Delete the associated payment records
-            if(!empty($paymentIds)) {
-                foreach($paymentIds as $paymentId) {
-                    $deletePaymentQuery = "DELETE FROM Payment WHERE PaymentID = ?";
-                    $stmt = $conn->prepare($deletePaymentQuery);
-                    $stmt->bind_param("s", $paymentId);
-                    $stmt->execute();
-                }
+            if (!$activeTreasurer) {
+                throw new Exception("No active treasurer found. Please set an active treasurer first.");
+            }
+            
+            // Generate expense ID
+            $expenseID = generateExpenseID($term);
+            $currentDate = date('Y-m-d');
+            
+            // Create an expense record
+            $expenseStmt = prepare("
+                INSERT INTO Expenses (
+                    ExpenseID, Category, Method, Amount, Date, Term, 
+                    Description, Treasurer_TreasurerID
+                ) VALUES (?, 'Adjustment', 'System', ?, ?, ?, 'Deleted Membership Fee', ?)
+            ");
+            
+            $expenseStmt->bind_param("sdsss", 
+                $expenseID,
+                $amount,
+                $currentDate,
+                $term,
+                $activeTreasurer
+            );
+            
+            if (!$expenseStmt->execute()) {
+                throw new Exception("Failed to create expense record: " . error);
             }
         }
         
         // Finally, delete the fee record
         $deleteFeeQuery = "DELETE FROM MembershipFee WHERE FeeID = ?";
-        $stmt = $conn->prepare($deleteFeeQuery);
+        $stmt = prepare($deleteFeeQuery);
         $stmt->bind_param("s", $feeId);
         $stmt->execute();
         
         // Commit transaction
-        $conn->commit();
+        commit();
         
         $_SESSION['success_message'] = "Membership Fee #$feeId was successfully deleted.";
     } catch(Exception $e) {
         // Rollback on error
-        $conn->rollback();
+        rollback();
         $_SESSION['error_message'] = "Error deleting fee: " . $e->getMessage();
     }
     
@@ -147,8 +204,7 @@ if(isset($_POST['delete_fee'])) {
 
 // Function to check if financial report for a specific term is approved
 function isReportApproved($year) {
-    $conn = getConnection();
-    $stmt = $conn->prepare("
+    $stmt = prepare("
         SELECT Status 
         FROM FinancialReportVersions 
         WHERE Term = ? 
@@ -450,7 +506,6 @@ $isReportApproved = isReportApproved($selectedYear);
             </div>
         </div>
 
-        <!-- Add this right after the header-card div -->
         <div class="alerts-container">
             <?php if(isset($_SESSION['success_message'])): ?>
                 <div class="alert alert-success">
@@ -676,10 +731,8 @@ $isReportApproved = isReportApproved($selectedYear);
         }
 
         function closeEditModal() {
+            // Just close the modal without refreshing
             document.getElementById('editFeeModal').style.display = 'none';
-            
-            // After closing, refresh the fee list to see any changes
-            updateFilters();
         }
 
         function filterByType(type) {
@@ -704,9 +757,9 @@ $isReportApproved = isReportApproved($selectedYear);
 
         function updateFilters() {
             const year = document.getElementById('yearSelect').value;
-            const month = document.getElementById('monthSelect').value;
             const urlParams = new URLSearchParams(window.location.search);
             const type = urlParams.get('type');
+            const month = document.getElementById('monthSelect').value;
             
             let url = `editMFDetails.php?year=${year}`;
             
@@ -718,10 +771,30 @@ $isReportApproved = isReportApproved($selectedYear);
                 url += `&month=${month}`;
             }
             
-            // Reset to first page when changing filters
-            url += `&page=1`;
+            // Instead of redirecting, just update the current URL without reloading
+            window.history.pushState({}, '', url);
             
-            window.location.href = url;
+            // Preserve any success messages that are currently visible
+            const alertsContainer = document.querySelector('.alerts-container');
+            const existingAlerts = alertsContainer.innerHTML;
+            
+            // Now use fetch to get the updated content
+            fetch(url)
+                .then(response => response.text())
+                .then(html => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    
+                    // Update the table container with new data
+                    document.querySelector('.table-container').innerHTML = 
+                        doc.querySelector('.table-container').innerHTML;
+                    
+                    // Keep existing alerts instead of replacing with new ones
+                    if (existingAlerts.trim()) {
+                        alertsContainer.innerHTML = existingAlerts;
+                    }
+                })
+                .catch(error => console.error('Error:', error));
         }
 
         // Pagination function
@@ -826,7 +899,7 @@ $isReportApproved = isReportApproved($selectedYear);
             
             // Create alert element
             const alertDiv = document.createElement('div');
-            alertDiv.className = type === 'success' ? 'alert alert-success'  : 
+            alertDiv.className = type === 'success' ? 'alert alert-success' : 
                                 type === 'info' ? 'alert alert-info' : 'alert alert-danger';
             alertDiv.textContent = message;
             
@@ -839,7 +912,7 @@ $isReportApproved = isReportApproved($selectedYear);
             // Scroll to top to see the alert
             window.scrollTo(0, 0);
             
-            // Manually trigger the alert handler for this new alert
+            // Add close button
             const closeBtn = document.createElement('span');
             closeBtn.innerHTML = '&times;';
             closeBtn.className = 'alert-close';
@@ -849,13 +922,15 @@ $isReportApproved = isReportApproved($selectedYear);
             closeBtn.style.fontSize = '20px';
             closeBtn.style.marginLeft = '15px';
             
+            // Proper event listener for closing the alert
             closeBtn.addEventListener('click', function() {
                 alertDiv.style.display = 'none';
             });
             
+            // Insert close button at the beginning of the alert
             alertDiv.insertBefore(closeBtn, alertDiv.firstChild);
             
-            // Auto-hide alerts after 5 seconds
+            // Auto-hide alerts after 5 seconds for all alert types
             setTimeout(function() {
                 alertDiv.style.opacity = '0';
                 setTimeout(function() {

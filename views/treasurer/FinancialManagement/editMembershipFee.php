@@ -12,22 +12,26 @@ if (!isset($_GET['id']) || empty($_GET['id'])) {
 
 $feeID = $_GET['id'];
 
-// Function to get membership fee details
-function getFeeDetails($feeID) {
+/**
+ * Function to get membership fee details
+ * @param string $feeID The fee ID to retrieve
+ * @return array|null The fee details or null if not found
+ */
+function getMembershipFeeDetails($feeID) {
     $conn = getConnection();
     $stmt = $conn->prepare("
         SELECT 
-            mf.FeeID, 
-            mf.Amount, 
-            mf.Date, 
-            mf.Term,
-            mf.Type,
-            mf.IsPaid,
-            mf.Member_MemberID,
+            f.FeeID, 
+            f.Amount, 
+            f.Date, 
+            f.Term, 
+            f.Type, 
+            f.IsPaid,
+            f.Member_MemberID,
             m.Name as MemberName
-        FROM MembershipFee mf
-        JOIN Member m ON mf.Member_MemberID = m.MemberID
-        WHERE mf.FeeID = ?
+        FROM MembershipFee f
+        JOIN Member m ON f.Member_MemberID = m.MemberID
+        WHERE f.FeeID = ?
     ");
     
     $stmt->bind_param("s", $feeID);
@@ -41,245 +45,412 @@ function getFeeDetails($feeID) {
     return $result->fetch_assoc();
 }
 
-// Function to get payment associated with the membership fee
-function getAssociatedPayment($feeID) {
-    $conn = getConnection();
-    $stmt = $conn->prepare("
-        SELECT 
-            p.PaymentID,
-            p.Amount,
-            p.Date,
-            p.Term,
-            mfp.Details
-        FROM Payment p
-        JOIN MembershipFeePayment mfp ON p.PaymentID = mfp.PaymentID
-        WHERE mfp.FeeID = ?
-    ");
-    
-    $stmt->bind_param("s", $feeID);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
-    if ($result->num_rows === 0) {
-        return null;
-    }
-    
-    return $result->fetch_assoc();
-}
-
-// Function to get all members using prepared statement
+/**
+ * Function to get all members
+ * @return mysqli_result The result set with all members
+ */
 function getAllMembers() {
     $conn = getConnection();
     $stmt = $conn->prepare("SELECT MemberID, Name FROM Member ORDER BY Name");
     $stmt->execute();
-    $result = $stmt->get_result();
-    return $result;
+    return $stmt->get_result();
 }
 
-// Function to get fee settings using prepared statement
-function getFeeSettings() {
+/**
+ * Function to get fee settings from Static table
+ * @param int $term The term year to get settings for
+ * @return array|null The fee settings or null if not found
+ */
+function getFeeSettings($term) {
     $conn = getConnection();
-    $stmt = $conn->prepare("SELECT monthly_fee, registration_fee FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1");
+    $stmt = $conn->prepare("
+        SELECT monthly_fee, registration_fee 
+        FROM Static 
+        WHERE year = ? AND status = 'active'
+        LIMIT 1
+    ");
+    $stmt->bind_param("i", $term);
     $stmt->execute();
     $result = $stmt->get_result();
     return $result->fetch_assoc();
 }
 
-// Function to get current term/year using prepared statement
-function getCurrentTerm() {
+/**
+ * Function to generate a unique payment ID
+ * @return string The generated payment ID
+ */
+function generatePaymentID() {
     $conn = getConnection();
-    $stmt = $conn->prepare("SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1");
+    
+    // Get current year if term is not provided
+    if (empty($term)) {
+        $term = date('Y');
+    }
+    
+    // Extract the last 2 digits of the term
+    $shortTerm = substr((string)$term, -2);
+    
+    // Find the highest sequence number for the current term
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(PaymentID, 6) AS UNSIGNED)) as max_seq 
+        FROM Payment 
+        WHERE PaymentID LIKE 'PAY{$shortTerm}%'
+    ");
+    
     $stmt->execute();
     $result = $stmt->get_result();
     $row = $result->fetch_assoc();
-    return $row['year'] ?? date('Y');
+    
+    $nextSeq = 1; // Default starting value
+    if ($row && $row['max_seq']) {
+        $nextSeq = $row['max_seq'] + 1;
+    }
+    
+    // Format: PAY followed by last 2 digits of term and sequence number
+    // Use leading zeros for numbers 1-9, no leading zeros after 10
+    if ($nextSeq < 10) {
+        return 'PAY' . $shortTerm . '0' . $nextSeq;
+    } else {
+        return 'PAY' . $shortTerm . $nextSeq;
+    }
 }
 
-// Get fee details
-$fee = getFeeDetails($feeID);
+/**
+ * Function to generate a unique expense ID
+ * @return string The generated expense ID
+ */
+function generateExpenseID() {
+    $conn = getConnection();
+    
+    // Get current year if term is not provided
+    if (empty($term)) {
+        $term = date('Y');
+    }
+    
+    // Extract the last 2 digits of the term
+    $shortTerm = substr((string)$term, -2);
+    
+    // Find the highest sequence number for the current term
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(ExpenseID, 6) AS UNSIGNED)) as max_seq 
+        FROM Expenses 
+        WHERE ExpenseID LIKE 'EXP{$shortTerm}%'
+    ");
+    
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    $nextSeq = 1; // Default starting value
+    if ($row && $row['max_seq']) {
+        $nextSeq = $row['max_seq'] + 1;
+    }
+
+    // Format: EXP followed by last 2 digits of term and sequence number
+    // Use leading zeros for numbers 1-9, no leading zeros after 10
+    if ($nextSeq < 10) {
+        return 'EXP' . $shortTerm . '0' . $nextSeq;
+    } else {
+        return 'EXP' . $shortTerm . $nextSeq;
+    }
+}
+
+/**
+ * Function to get active treasurer ID
+ * @return string|null The active treasurer ID or null if not found
+ */
+function getActiveTreasurer() {
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows === 0) {
+        return null;
+    }
+    $row = $result->fetch_assoc();
+    return $row['TreasurerID'];
+}
+
+// Get fee details, members list, and settings
+$fee = getMembershipFeeDetails($feeID);
 if (!$fee) {
     $_SESSION['error_message'] = "Membership fee not found";
-    header("Location: membershipFee.php");
+    header("Location: editMFDetails.php");
     exit();
 }
 
-// Get associated payment (if any)
-$associatedPayment = getAssociatedPayment($feeID);
-
-// Get all members for the dropdown
 $allMembers = getAllMembers();
-$currentTerm = getCurrentTerm();
-$feeSettings = getFeeSettings();
+$feeSettings = getFeeSettings($fee['Term']);
+$activeTreasurer = getActiveTreasurer();
+
+// Check if treasurer exists
+if (!$activeTreasurer) {
+    $_SESSION['error_message'] = "No active treasurer found. Please set an active treasurer first.";
+    if (!$isPopup) {
+        header("Location: editMFDetails.php");
+        exit();
+    }
+}
 
 // Process form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Get form data
-    $memberID = $_POST['member_id'];
-    $amount = $_POST['amount'];
-    $type = $_POST['type'];
-    $date = $_POST['date'];
-    $term = $_POST['term'];
-    $isPaid = $_POST['is_paid'];
-    $details = $_POST['payment_details'] ?? 'Updated membership fee';
-    
     try {
         $conn = getConnection();
         
         // Start transaction
         $conn->begin_transaction();
         
-        // Update membership fee
+        // Get form data
+        $memberID = $_POST['member_id'];
+        $amount = floatval($_POST['amount']);
+        $date = $_POST['date'];
+        $term = intval($_POST['term']);
+        $type = $_POST['type'];
+        $isPaid = $_POST['is_paid'];
+        
+        // VALIDATION 1: Check if date is not in the future
+        $currentDate = date('Y-m-d');
+        if ($date > $currentDate) {
+            throw new Exception("Date cannot be in the future");
+        }
+        
+        // VALIDATION 2: Check fee type and amount constraints
+        $oldAmount = floatval($fee['Amount']);
+        $oldIsPaid = $fee['IsPaid'];
+        $oldType = $fee['Type']; // Fix: Use correct case for 'Type'
+        
+        // VALIDATION 3: Prevent type swapping
+        if ($type != $oldType) {
+            throw new Exception("Fee type cannot be changed from " . ucfirst($oldType) . " to " . ucfirst($type));
+        }
+        
+        // Get current fee settings for validation
+        $currentFeeSettings = getFeeSettings($term);
+        if (!$currentFeeSettings) {
+            throw new Exception("Fee settings for term $term not found");
+        }
+        
+        // For monthly fees, amount cannot be changed
+        if ($type == 'monthly' && $amount != $oldAmount) {
+            throw new Exception("Monthly fee amount cannot be changed");
+        }
+        
+        // For registration fees, validate amount changes
+        if ($type == 'registration' && $amount != $oldAmount) {
+            // Cannot exceed the registration fee of the term
+            if ($amount > $currentFeeSettings['registration_fee']) {
+                throw new Exception("Amount cannot exceed the registration fee for this term (Rs. " . 
+                    number_format($currentFeeSettings['registration_fee'], 2) . ")");
+            }
+        }
+        
+        // Prepare the base update statement
         $stmt = $conn->prepare("
             UPDATE MembershipFee SET 
                 Member_MemberID = ?,
                 Amount = ?,
-                Type = ?,
                 Date = ?,
                 Term = ?,
+                Type = ?,
                 IsPaid = ?
             WHERE FeeID = ?
         ");
         
-        $stmt->bind_param("sssssss", 
+        $stmt->bind_param("sdsisss", 
             $memberID, 
             $amount, 
-            $type, 
             $date, 
             $term, 
+            $type, 
             $isPaid,
             $feeID
         );
         
-        $stmt->execute();
+        if (!$stmt->execute()) {
+            throw new Exception("Failed to update membership fee: " . $conn->error);
+        }
         
-        // Check if there's an associated payment to update
-        if ($associatedPayment) {
-            // Update the payment record
-            $paymentStmt = $conn->prepare("
-                UPDATE Payment SET 
-                    Amount = ?,
-                    Date = ?,
-                    Term = ?,
-                    Member_MemberID = ?
-                WHERE PaymentID = ?
-            ");
-            
-            $paymentStmt->bind_param("sssss", 
-                $amount, 
-                $date, 
-                $term, 
-                $memberID,
-                $associatedPayment['PaymentID']
-            );
-            
-            $paymentStmt->execute();
-            
-            // Update the MembershipFeePayment details
-            $membershipFeePaymentStmt = $conn->prepare("
-                UPDATE MembershipFeePayment SET 
-                    Details = ?
-                WHERE FeeID = ? AND PaymentID = ?
-            ");
-            
-            $membershipFeePaymentStmt->bind_param("sss", 
-                $details, 
-                $feeID,
-                $associatedPayment['PaymentID']
-            );
-            
-            $membershipFeePaymentStmt->execute();
-        } 
-        // If status changed to 'Paid' and no payment record exists, create one
-        else if ($isPaid === 'Yes' && !$associatedPayment) {
-            // Generate new PaymentID (you might have a function for this)
-            $paymentID = uniqid('PAY_');
-            
-            // Create a new payment record
-            $paymentStmt = $conn->prepare("
-                INSERT INTO Payment (
-                    PaymentID, 
-                    Payment_Type, 
-                    Method, 
-                    Amount, 
-                    Date, 
-                    Term, 
-                    Member_MemberID,
-                    status
-                ) VALUES (
-                    ?, 
-                    'membership_fee', 
-                    'cash', 
-                    ?, 
-                    ?, 
-                    ?, 
-                    ?,
-                    'cash'
-                )
-            ");
-            
-            $paymentStmt->bind_param("sssss", 
-                $paymentID, 
-                $amount, 
-                $date, 
-                $term, 
-                $memberID
-            );
-            
-            $paymentStmt->execute();
-            
-            // Create the link in MembershipFeePayment with details
-            $membershipFeePaymentStmt = $conn->prepare("
-                INSERT INTO MembershipFeePayment (
-                    FeeID, 
-                    PaymentID, 
-                    Details
-                ) VALUES (
-                    ?, 
-                    ?, 
-                    ?
-                )
-            ");
-            
-            $membershipFeePaymentStmt->bind_param("sss", 
-                $feeID, 
-                $paymentID, 
-                $details
-            );
-            
-            $membershipFeePaymentStmt->execute();
+        // Handle amount changes for registration fees
+        if ($type == 'registration' && $amount != $oldAmount && $isPaid == 'Yes') {
+            if ($amount < $oldAmount) {
+                // Case: Amount decreased - add as an expense
+                $expenseID = generateExpenseID($term);
+                $difference = $oldAmount - $amount;
+                
+                $expenseStmt = $conn->prepare("
+                    INSERT INTO Expenses (
+                        ExpenseID, Category, Method, Amount, Date, Term, 
+                        Description, Treasurer_TreasurerID
+                    ) VALUES (?, 'Adjustment', 'System', ?, ?, ?, 'Edited Membership Fee', ?)
+                ");
+                
+                $expenseStmt->bind_param("sdsss", 
+                    $expenseID,
+                    $difference,
+                    $currentDate,
+                    $term,
+                    $activeTreasurer
+                );
+                
+                if (!$expenseStmt->execute()) {
+                    throw new Exception("Failed to create expense record: " . $conn->error);
+                }
+                
+            } else if ($amount > $oldAmount) {
+                // Case: Amount increased - add as a payment
+                $paymentID = generatePaymentID($term);
+                $difference = $amount - $oldAmount;
+                
+                // Debug log
+                error_log("Creating payment record with ID: $paymentID, Amount: $difference");
+                
+                $paymentStmt = $conn->prepare("
+                    INSERT INTO Payment (
+                        PaymentID, Payment_Type, Method, Amount, Date, Term,
+                        Member_MemberID, status
+                    ) VALUES (?, 'Membership Fee', 'cash', ?, ?, ?, ?, 'cash')
+                ");
+                
+                $paymentStmt->bind_param("sdsss", 
+                    $paymentID,
+                    $difference,
+                    $currentDate,
+                    $term,
+                    $memberID
+                );
+                
+                if (!$paymentStmt->execute()) {
+                    throw new Exception("Failed to create payment record: " . $conn->error);
+                }
+                
+                // Add entry to MembershipFeePayment junction table
+                $junctionStmt = $conn->prepare("
+                    INSERT INTO MembershipFeePayment (FeeID, PaymentID, Details)
+                    VALUES (?, ?, 'Amount adjustment')
+                ");
+                
+                $junctionStmt->bind_param("ss", 
+                    $feeID,
+                    $paymentID
+                );
+                
+                if (!$junctionStmt->execute()) {
+                    throw new Exception("Failed to create fee-payment relationship: " . $conn->error);
+                }
+            }
+        }
+        
+        // Handle payment status changes
+        if ($isPaid != $oldIsPaid) {
+            if ($isPaid == 'Yes' && $oldIsPaid == 'No') {
+                // Case: Changed from unpaid to paid - add as payment
+                $paymentID = generatePaymentID($term);
+                
+                // Debug log
+                error_log("Creating payment record for status change with ID: $paymentID, Amount: $amount");
+                
+                $paymentStmt = $conn->prepare("
+                    INSERT INTO Payment (
+                        PaymentID, Payment_Type, Method, Amount, Date, Term,
+                        Member_MemberID, status
+                    ) VALUES (?, 'Membership Fee', 'cash', ?, ?, ?, ?, 'cash')
+                ");
+                
+                $paymentStmt->bind_param("sdsss", 
+                    $paymentID,
+                    $amount,
+                    $currentDate,
+                    $term,
+                    $memberID
+                );
+                
+                if (!$paymentStmt->execute()) {
+                    throw new Exception("Failed to create payment record: " . $conn->error);
+                }
+                
+                // Add entry to MembershipFeePayment junction table
+                $junctionStmt = $conn->prepare("
+                    INSERT INTO MembershipFeePayment (FeeID, PaymentID, Details)
+                    VALUES (?, ?, 'Status changed to Paid')
+                ");
+                
+                $junctionStmt->bind_param("ss", 
+                    $feeID,
+                    $paymentID
+                );
+                
+                if (!$junctionStmt->execute()) {
+                    throw new Exception("Failed to create fee-payment relationship: " . $conn->error);
+                }
+                
+            } else if ($isPaid == 'No' && $oldIsPaid == 'Yes') {
+                // Case: Changed from paid to unpaid - add as expense
+                $expenseID = generateExpenseID($term);
+                
+                $expenseStmt = $conn->prepare("
+                    INSERT INTO Expenses (
+                        ExpenseID, Category, Method, Amount, Date, Term, 
+                        Description, Treasurer_TreasurerID
+                    ) VALUES (?, 'Adjustment', 'System', ?, ?, ?, 'Edited Membership Fee', ?)
+                ");
+                
+                $expenseStmt->bind_param("sdsss", 
+                    $expenseID,
+                    $amount,
+                    $currentDate,
+                    $term,
+                    $activeTreasurer
+                );
+                
+                if (!$expenseStmt->execute()) {
+                    throw new Exception("Failed to create expense record: " . $conn->error);
+                }
+                
+                // Find and void any related payments in the junction table
+                $deleteJunctionStmt = $conn->prepare("
+                    DELETE FROM MembershipFeePayment WHERE FeeID = ?
+                ");
+                
+                $deleteJunctionStmt->bind_param("s", $feeID);
+                if (!$deleteJunctionStmt->execute()) {
+                    throw new Exception("Failed to update payment relationships: " . $conn->error);
+                }
+            }
         }
         
         // Commit transaction
         $conn->commit();
         
         // Set success message
-        $_SESSION['success_message'] = "Membership Fee #$feeID successfully updated";
+        $_SESSION['success_message'] = "Membership fee #$feeID successfully updated";
         
-        // Handle redirection based on popup mode after ALL database operations are complete
+        // Handle redirection based on popup mode
         if (!$isPopup) {
-            header("Location: membershipFee.php");
+            header("Location: editMFDetails.php?year=" . $term);
             exit();
         }
         // If it's popup mode, we'll continue rendering the page with a success message
-        // and add JavaScript to refresh the parent later
         
     } catch (Exception $e) {
         // Rollback on error
-        $conn->rollback();
+        if (isset($conn) && $conn->ping()) {
+            $conn->rollback();
+        }
         $_SESSION['error_message'] = "Error updating membership fee: " . $e->getMessage();
+        error_log("Fee Update Error: " . $e->getMessage());
     }
 }
 
-// Fee type options
+// Membership fee types
 $feeTypes = [
-    'registration' => 'Registration',
-    'monthly' => 'Monthly'
+    'monthly' => 'Monthly Fee',
+    'registration' => 'Registration Fee'
 ];
 
-// Fee payment status options
-$paymentStatus = [
-    'No' => 'Unpaid',
-    'Yes' => 'Paid'
+// Payment status options
+$isPaidOptions = [
+    'Yes' => 'Paid',
+    'No' => 'Unpaid'
 ];
 
 // Now output the HTML based on popup mode
@@ -388,18 +559,17 @@ if ($isPopup): ?>
                 font-weight: bold;
                 display: block;
             }
-
             .btn-secondary:hover {
                 background-color: #5a6268;
             }
-            .member-info {
+            .fee-info {
                 background-color: #f9f9f9;
                 padding: 12px;
                 border-radius: 5px;
                 margin-bottom: 15px;
                 font-size: 14px;
             }
-            .member-info-title {
+            .fee-info-title {
                 font-weight: 600;
                 margin-bottom: 8px;
                 color: #1e3c72;
@@ -427,9 +597,6 @@ if ($isPopup): ?>
                 background-color: #e2bcc0;
                 color: rgb(234, 59, 59);
             }
-            .payment-details {
-                display: none;
-            }
         </style>
     </head>
     <body>
@@ -455,24 +622,20 @@ if ($isPopup): ?>
                 max-width: 800px;
                 margin: 20px auto;
             }
-
             .form-title {
                 color: #1e3c72;
                 margin-bottom: 25px;
                 text-align: center;
             }
-
             .form-group {
                 margin-bottom: 20px;
             }
-
             .form-group label {
                 display: block;
                 margin-bottom: 8px;
                 font-weight: 600;
                 color: #333;
             }
-
             .form-control {
                 width: 100%;
                 padding: 12px;
@@ -481,33 +644,27 @@ if ($isPopup): ?>
                 font-size: 16px;
                 transition: border-color 0.3s;
             }
-
             .form-control:disabled {
                 background-color: #f5f5f5;
                 cursor: not-allowed;
             }
-
             .form-control:focus {
                 border-color: #1e3c72;
                 outline: none;
                 box-shadow: 0 0 0 2px rgba(30, 60, 114, 0.2);
             }
-
             .form-row {
                 display: flex;
                 gap: 20px;
             }
-
             .form-row .form-group {
                 flex: 1;
             }
-
             .btn-container {
                 display: flex;
                 justify-content: space-between;
                 margin-top: 30px;
             }
-
             .btn {
                 padding: 12px 24px;
                 border: none;
@@ -516,38 +673,31 @@ if ($isPopup): ?>
                 cursor: pointer;
                 transition: background-color 0.3s;
             }
-
             .btn-primary {
                 background-color: #1e3c72;
                 color: white;
             }
-
             .btn-primary:hover {
                 background-color: #16305c;
             }
-
             .btn-secondary {
                 background-color: #e0e0e0;
                 color: #333;
             }
-
             .btn-secondary:hover {
                 background-color: #5a6268;
             }
-
-            .member-info {
+            .fee-info {
                 background-color: #f9f9f9;
                 padding: 15px;
                 border-radius: 5px;
                 margin-bottom: 20px;
             }
-
-            .member-info-title {
+            .fee-info-title {
                 font-weight: 600;
                 margin-bottom: 10px;
                 color: #1e3c72;
             }
-            
             .status-badge {
                 display: inline-block;
                 padding: 5px 10px;
@@ -555,19 +705,13 @@ if ($isPopup): ?>
                 font-size: 0.8rem;
                 font-weight: bold;
             }
-            
             .status-paid {
                 background-color: #c2f1cd;
                 color: rgb(25, 151, 10);
             }
-            
             .status-unpaid {
                 background-color: #e2bcc0;
                 color: rgb(234, 59, 59);
-            }
-            
-            .payment-details {
-                display: none;
             }
         </style>
     </head>
@@ -577,48 +721,30 @@ if ($isPopup): ?>
             <div class="container">
                 <div class="header-card">
                     <h1>Edit Membership Fee</h1>
-                    <a href="membershipFee.php" class="btn-secondary btn">
-                        <i class="fas fa-arrow-left"></i> Back to Membership Fees
+                    <a href="editMFDetails.php" class="btn-secondary btn">
+                        <i class="fas fa-arrow-left"></i> Back to Fees
                     </a>
                 </div>
 <?php endif; ?>
 
-            <!-- Generate alerts -->
-            <div class="alerts-container">
-                <?php if(isset($_SESSION['success_message'])): ?>
-                    <div class="alert alert-success">
-                        <?php 
-                            echo $_SESSION['success_message'];
-                            unset($_SESSION['success_message']);
-                        ?>
-                    </div>
-                <?php endif; ?>
-
-                <?php if(isset($_SESSION['error_message'])): ?>
-                    <div class="alert alert-danger">
-                        <?php 
-                            echo $_SESSION['error_message'];
-                            unset($_SESSION['error_message']);
-                        ?>
-                    </div>
-                <?php endif; ?>
-            </div>
-
             <div class="form-container">
                 <h2 class="form-title">Edit Membership Fee #<?php echo htmlspecialchars($feeID); ?></h2>
                 
-                <div class="member-info">
-                    <div class="member-info-title">Current Fee Information</div>
+                <div class="fee-info">
+                    <div class="fee-info-title">Current Fee Information</div>
                     <p>Member ID: <?php echo htmlspecialchars($fee['Member_MemberID']); ?></p>
                     <p>Member Name: <?php echo htmlspecialchars($fee['MemberName']); ?></p>
-                    <p>Payment Status: <span class="status-badge status-<?php echo strtolower($fee['IsPaid']) === 'yes' ? 'paid' : 'unpaid'; ?>"><?php echo ($fee['IsPaid'] === 'Yes') ? 'Paid' : 'Unpaid'; ?></span></p>
-                    <?php if($associatedPayment): ?>
-                    <p>Associated Payment ID: <?php echo htmlspecialchars($associatedPayment['PaymentID']); ?></p>
-                    <p>Payment Details: <?php echo htmlspecialchars($associatedPayment['Details'] ?? 'No details available'); ?></p>
-                    <?php endif; ?>
+                    <p>Type: <?php echo ucfirst($fee['Type']); ?></p>
+                    <p>Payment Status: 
+                        <span class="status-badge status-<?php echo strtolower($fee['IsPaid']); ?>">
+                            <?php echo ($fee['IsPaid'] == 'Yes') ? 'Paid' : 'Unpaid'; ?>
+                        </span>
+                    </p>
                 </div>
 
                 <form method="POST" action="">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? ''); ?>">
+                    
                     <div class="form-row">
                         <div class="form-group">
                             <label for="fee_id">Fee ID</label>
@@ -638,55 +764,80 @@ if ($isPopup): ?>
 
                     <div class="form-row">
                         <div class="form-group">
+                            <label for="amount">Amount (Rs.)</label>
+                            <input type="number" id="amount" name="amount" class="form-control" 
+                                   value="<?php echo htmlspecialchars($fee['Amount']); ?>" 
+                                   min="0" step="0.01" required
+                                   <?php echo ($fee['Type'] == 'monthly') ? 'readonly' : ''; ?>>
+                            
+                            <?php if ($fee['Type'] == 'registration'): ?>
+                                <small>Maximum registration fee: Rs. <?php echo number_format($feeSettings['registration_fee'], 2); ?></small>
+                            <?php endif; ?>
+                        </div>
+                        <div class="form-group">
                             <label for="type">Fee Type</label>
-                            <select id="type" name="type" class="form-control" required onchange="updateAmount()">
+                            <!-- Make the type field disabled to prevent switching -->
+                            <select id="type" name="type" class="form-control" required readonly disabled>
                                 <?php foreach($feeTypes as $value => $label): ?>
                                     <option value="<?php echo $value; ?>" <?php echo ($value == $fee['Type']) ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($label); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="amount">Fee Amount (Rs.)</label>
-                            <input type="number" id="amount" name="amount" class="form-control" value="<?php echo htmlspecialchars($fee['Amount']); ?>" min="0" step="0.01" required>
-                            <small>Registration Fee: Rs. <?php echo number_format($feeSettings['registration_fee'], 2); ?>, Monthly Fee: Rs. <?php echo number_format($feeSettings['monthly_fee'], 2); ?></small>
+                            <!-- Add a hidden field to ensure the type value is submitted -->
+                            <input type="hidden" name="type" value="<?php echo htmlspecialchars($fee['Type']); ?>">
+                            <small>Fee type cannot be changed after creation</small>
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group">
                             <label for="date">Date</label>
-                            <input type="date" id="date" name="date" class="form-control" value="<?php echo date('Y-m-d', strtotime($fee['Date'])); ?>" required>
+                            <input type="date" id="date" name="date" class="form-control" 
+                                   value="<?php echo date('Y-m-d', strtotime($fee['Date'])); ?>" 
+                                   max="<?php echo date('Y-m-d'); ?>" required>
+                            <small>Date cannot be in the future</small>
                         </div>
                         <div class="form-group">
                             <label for="term">Term</label>
-                            <input type="number" id="term" name="term" class="form-control" value="<?php echo htmlspecialchars($fee['Term']); ?>" min="1" required>
+                            <input type="number" id="term" name="term" class="form-control" 
+                                   value="<?php echo htmlspecialchars($fee['Term']); ?>" min="2000" required>
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group">
                             <label for="is_paid">Payment Status</label>
-                            <select id="is_paid" name="is_paid" class="form-control" required onchange="togglePaymentDetails()">
-                                <?php foreach($paymentStatus as $value => $label): ?>
+                            <select id="is_paid" name="is_paid" class="form-control" required>
+                                <?php foreach($isPaidOptions as $value => $label): ?>
                                     <option value="<?php echo $value; ?>" <?php echo ($value == $fee['IsPaid']) ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($label); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <div class="form-group payment-details" id="payment_details_group">
-                            <label for="payment_details">Payment Details</label>
-                            <input type="text" id="payment_details" name="payment_details" class="form-control" value="<?php echo htmlspecialchars($associatedPayment['Details'] ?? 'Updated membership fee'); ?>" placeholder="Enter payment details">
+                        <?php if ($fee['Type'] == 'monthly'): ?>
+                        <div class="form-group">
+                            <label for="monthly_fee">Monthly Fee Rate (Rs.)</label>
+                            <input type="text" id="monthly_fee" class="form-control" 
+                                   value="<?php echo $feeSettings['monthly_fee']; ?>" disabled>
+                            <small>Current monthly fee as per system settings</small>
                         </div>
+                        <?php else: ?>
+                        <div class="form-group">
+                            <label for="registration_fee">Max Registration Fee (Rs.)</label>
+                            <input type="text" id="registration_fee" class="form-control" 
+                                   value="<?php echo $feeSettings['registration_fee']; ?>" disabled>
+                            <small>Maximum registration fee as per system settings</small>
+                        </div>
+                        <?php endif; ?>
                     </div>
 
                     <div class="btn-container">
                         <?php if ($isPopup): ?>
                             <button type="button" class="btn btn-secondary" onclick="window.parent.closeEditModal()">Cancel</button>
                         <?php else: ?>
-                            <a href="membershipFee.php" class="btn btn-secondary">Cancel</a>
+                            <a href="editMFDetails.php" class="btn btn-secondary">Cancel</a>
                         <?php endif; ?>
                         <button type="submit" class="btn btn-primary">Update Fee</button>
                     </div>
@@ -699,9 +850,11 @@ if ($isPopup): ?>
     <?php if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_SESSION['error_message'])): ?>
 <script>
     // If form was submitted successfully in popup mode, pass message to parent
-    window.parent.showAlert('success', 'Membership Fee #<?php echo $feeID; ?> successfully updated');
-    window.parent.closeEditModal();
-    // Don't reload the entire page as it will lose the alert
+    window.parent.showAlert('success', 'Membership fee #<?php echo $feeID; ?> successfully updated');
+    setTimeout(function() {
+        window.parent.updateFilters(); // Refresh the parent page to show updated data
+        window.parent.closeEditModal();
+    }); // To delay the refresh and modal close to ensure alert is visible -> ,1000
 </script>
 <?php elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_SESSION['error_message'])): ?>
 <script>
@@ -722,49 +875,45 @@ if ($isPopup): ?>
 <?php endif; ?>
 
 <script>
-    // Auto-update amount based on fee type
-    function updateAmount() {
-        const feeType = document.getElementById('type').value;
-        const registrationFee = <?php echo $feeSettings['registration_fee']; ?>;
-        const monthlyFee = <?php echo $feeSettings['monthly_fee']; ?>;
-        
-        if (feeType === 'registration') {
-            document.getElementById('amount').value = registrationFee.toFixed(2);
-        } else if (feeType === 'monthly') {
-            document.getElementById('amount').value = monthlyFee.toFixed(2);
-        }
-    }
-    
-    // Toggle payment details visibility based on payment status
-    function togglePaymentDetails() {
-        const isPaid = document.getElementById('is_paid').value;
-        const paymentDetailsGroup = document.getElementById('payment_details_group');
-        
-        if (isPaid === 'Yes') {
-            paymentDetailsGroup.style.display = 'block';
-        } else {
-            paymentDetailsGroup.style.display = 'none';
-        }
-    }
-    
-    // Initialize payment details visibility on page load
-    document.addEventListener('DOMContentLoaded', function() {
-        togglePaymentDetails();
-    });
-
     // Form validation
     document.querySelector('form').addEventListener('submit', function(e) {
         const amount = parseFloat(document.getElementById('amount').value);
+        const feeType = document.getElementById('type').value || document.querySelector('input[name="type"]').value;
+        const dateField = document.getElementById('date').value;
+        const currentDate = new Date().toISOString().split('T')[0];
         
+        // Validate amount
         if (isNaN(amount) || amount <= 0) {
             e.preventDefault();
             alert('Please enter a valid amount greater than zero.');
+            return;
         }
         
-        const date = new Date(document.getElementById('date').value);
-        if (isNaN(date.getTime())) {
+        // Validate date is not in the future
+        if (dateField > currentDate) {
             e.preventDefault();
-            alert('Please enter a valid date.');
+            alert('Date cannot be in the future.');
+            return;
+        }
+        
+        // If fee type is monthly, validate that amount matches the preset value
+        if (feeType === 'monthly') {
+            const expectedMonthlyFee = <?php echo $feeSettings['monthly_fee']; ?>;
+            if (amount !== expectedMonthlyFee) {
+                e.preventDefault();
+                alert('Monthly fee amount cannot be changed from the system setting of Rs. ' + 
+                      expectedMonthlyFee.toFixed(2));
+                return;
+            }
+        }
+        
+        // If fee type is registration, validate amount doesn't exceed max
+        if (feeType === 'registration') {
+            const maxRegistrationFee = <?php echo $feeSettings['registration_fee']; ?>;
+            if (amount > maxRegistrationFee) {
+                e.preventDefault();
+                alert('Registration fee cannot exceed Rs. ' + maxRegistrationFee.toFixed(2));
+                return;
+            }
         }
     });
-</script>
