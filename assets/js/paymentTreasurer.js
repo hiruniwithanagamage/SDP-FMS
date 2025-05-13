@@ -21,6 +21,9 @@ $(document).ready(function() {
         // Reset amount
         $('#amount').val('');
         $('#amountHint').text('');
+        
+        // Remove any previous input event handlers
+        $('#amount').off('input');
 
         // Show relevant container based on selection
         switch(selectedType) {
@@ -57,7 +60,7 @@ $(document).ready(function() {
 
             case 'loan':
                 $('#loanDetailsContainer').show();
-                $('#amount').prop('readonly', true);
+                $('#amount').prop('readonly', false); // Make amount editable for loans
                 break;
         }
     });
@@ -107,12 +110,55 @@ $(document).ready(function() {
         
         if (totalAmount > 0) {
             $('#amount').val(totalAmount.toFixed(2));
-            $('#amountHint').text(`Principal: Rs. ${principal.toFixed(2)} + Interest: Rs. ${interest.toFixed(2)}`);
+            updateLoanPaymentBreakdown(totalAmount, interest, principal);
+            
+            // Add validation for loan amount
+            $('#amount').off('input').on('input', function() {
+                const enteredAmount = parseFloat($(this).val()) || 0;
+                if (enteredAmount > totalAmount) {
+                    alert('Amount cannot exceed the total remaining loan balance');
+                    $(this).val(totalAmount.toFixed(2));
+                    updateLoanPaymentBreakdown(totalAmount, interest, principal);
+                } else if (enteredAmount < 0) {
+                    alert('Amount cannot be negative');
+                    $(this).val('0.00');
+                    updateLoanPaymentBreakdown(0, interest, principal);
+                } else {
+                    updateLoanPaymentBreakdown(enteredAmount, interest, principal);
+                }
+            });
         } else {
             $('#amount').val('');
             $('#amountHint').text('');
         }
     });
+    
+    // Function to update loan payment breakdown hint
+    function updateLoanPaymentBreakdown(paymentAmount, remainingInterest, remainingPrincipal) {
+        // Calculate how payment will be applied
+        const interestPayment = Math.min(paymentAmount, remainingInterest);
+        const principalPayment = Math.max(0, paymentAmount - interestPayment);
+        
+        let breakdownText = `Total: Rs. ${paymentAmount.toFixed(2)} (`;
+        
+        // Show detailed payment allocation
+        if (paymentAmount > 0) {
+            breakdownText += `Applied to interest: Rs. ${interestPayment.toFixed(2)}`;
+            
+            if (principalPayment > 0) {
+                breakdownText += `, Applied to principal: Rs. ${principalPayment.toFixed(2)}`;
+            }
+            
+            breakdownText += `)`;
+            
+            // Add remaining balances after payment
+            breakdownText += `<br>Remaining after payment: Interest: Rs. ${Math.max(0, remainingInterest - interestPayment).toFixed(2)}, Principal: Rs. ${Math.max(0, remainingPrincipal - principalPayment).toFixed(2)}`;
+        } else {
+            breakdownText = "Enter payment amount";
+        }
+        
+        $('#amountHint').html(breakdownText);
+    }
 
     // Form validation
     $('#paymentForm').on('submit', function(e) {
@@ -156,6 +202,19 @@ $(document).ready(function() {
             e.preventDefault();
             alert('Please select a loan to pay');
             return false;
+        }
+        
+        if (paymentType === 'loan') {
+            const selectedOption = $('#loanSelect').find('option:selected');
+            const principal = parseFloat(selectedOption.data('principal')) || 0;
+            const interest = parseFloat(selectedOption.data('interest')) || 0;
+            const totalAmount = principal + interest;
+            
+            if (amount > totalAmount) {
+                e.preventDefault();
+                alert('Amount cannot exceed the total remaining loan balance');
+                return false;
+            }
         }
     });
 });

@@ -76,7 +76,6 @@ if ($selectedMemberId) {
     $activeLoansQuery = "SELECT * FROM Loan 
                          WHERE Member_MemberID = '$selectedMemberId' 
                          AND Status = 'approved' 
-                         AND Remain_Loan > 0
                          ORDER BY Issued_Date DESC";
     $activeLoansResult = search($activeLoansQuery);
 
@@ -388,6 +387,6 @@ while ($row = $memberQueryResult->fetch_assoc()) {
         });
     });
     </script>
-    <script src="../../assets/js/treasurerPayment.js"></script>
+    <script src="../../assets/js/paymentTreasurer.js"></script>
 </body>
 </html>

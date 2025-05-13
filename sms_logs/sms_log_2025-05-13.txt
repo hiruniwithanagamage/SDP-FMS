@@ -1,0 +1,11 @@
+--------------------------------------------------
+Time: 2025-05-13 12:36:06
+Phone: 0703804216 (Mobitel)
+Email: 0703804216@sms.mobitel.lk
+Message: Password Reset Request
+Username: samoda
+Reset Code: 335bdca7
+Valid for: 1 hour
+From: Society Management System
+--------------------------------------------------
+

@@ -45,7 +45,6 @@ $unpaidFinesResult = search($unpaidFinesQuery);
 $activeLoansQuery = "SELECT * FROM Loan 
                      WHERE Member_MemberID = '$memberId' 
                      AND Status = 'approved' 
-                     AND Remain_Loan > 0
                      ORDER BY Issued_Date DESC";
 $activeLoansResult = search($activeLoansQuery);
 

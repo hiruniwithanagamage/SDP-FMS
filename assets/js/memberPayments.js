@@ -13,6 +13,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const monthCheckboxes = document.querySelectorAll('input[name="selected_months[]"]');
     const loanDetailsContainer = document.getElementById('loanDetailsContainer');
     const loanSelect = document.getElementById('loanSelect');
+    
+    // Store loan details for calculations
+    let currentLoanDetails = {
+        principal: 0,
+        interest: 0
+    };
 
     // Card number formatting
     const cardNumberInput = document.querySelector('input[name="card_number"]');
@@ -65,7 +71,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (loanDetailsContainer) {
                     loanDetailsContainer.style.display = 'block';
                 }
-                amountInput.readOnly = false;
+                amountInput.readOnly = false; // Make amount editable for loans
+                amountInput.value = ''; // Clear the amount field
                 amountHint.textContent = 'Enter loan payment amount';
                 break;
                 
@@ -88,6 +95,19 @@ document.addEventListener('DOMContentLoaded', function() {
             } else if (value < 1) {
                 this.value = 1;
             }
+        } else if (paymentType.value === 'loan') {
+            // Validate loan payment amount
+            const value = parseFloat(this.value) || 0;
+            const maxAmount = parseFloat(this.getAttribute('max')) || 0;
+            
+            if (value > maxAmount) {
+                this.value = maxAmount;
+            } else if (value < 0) {
+                this.value = 0;
+            }
+            
+            // Update payment breakdown
+            updateLoanPaymentBreakdown(value);
         }
     });
 
@@ -134,15 +154,68 @@ document.addEventListener('DOMContentLoaded', function() {
                 const interest = parseFloat(selectedOption.dataset.interest);
                 const total = principal + interest;
                 
+                // Store the current loan details
+                currentLoanDetails.principal = principal;
+                currentLoanDetails.interest = interest;
+                
                 amountInput.setAttribute('max', total);
-                amountInput.value = '';
-                amountHint.textContent = `Maximum payment: Rs. ${total.toLocaleString()} (Principal: Rs. ${principal.toLocaleString()}, Interest: Rs. ${interest.toLocaleString()})`;
+                amountInput.min = 0;
+                amountInput.value = total.toFixed(2); // Set default to total
+                
+                // Update payment breakdown
+                updateLoanPaymentBreakdown(total);
             } else {
                 amountInput.removeAttribute('max');
                 amountInput.value = '';
                 amountHint.textContent = '';
+                
+                // Reset loan details
+                currentLoanDetails.principal = 0;
+                currentLoanDetails.interest = 0;
             }
         });
+    }
+
+    // Function to update loan payment breakdown display
+    function updateLoanPaymentBreakdown(paymentAmount) {
+        if (!paymentAmount || paymentAmount <= 0) {
+            amountHint.innerHTML = 'Enter a payment amount';
+            return;
+        }
+        
+        const { interest, principal } = currentLoanDetails;
+        const total = interest + principal;
+        
+        if (total <= 0) {
+            amountHint.innerHTML = 'No loan balance to pay';
+            return;
+        }
+        
+        // Calculate how payment will be allocated (interest first)
+        const interestPayment = Math.min(paymentAmount, interest);
+        const principalPayment = Math.max(0, paymentAmount - interestPayment);
+        
+        // Calculate remaining balances
+        const remainingInterest = Math.max(0, interest - interestPayment);
+        const remainingPrincipal = Math.max(0, principal - principalPayment);
+        
+        // Build the breakdown message
+        let message = `<strong>Payment Breakdown (Rs. ${paymentAmount.toFixed(2)}):</strong><br>`;
+        message += `- Interest payment: Rs. ${interestPayment.toFixed(2)}<br>`;
+        
+        if (principalPayment > 0) {
+            message += `- Principal payment: Rs. ${principalPayment.toFixed(2)}<br>`;
+        }
+        
+        message += `<br><strong>Remaining after payment:</strong><br>`;
+        message += `- Interest: Rs. ${remainingInterest.toFixed(2)}<br>`;
+        message += `- Principal: Rs. ${remainingPrincipal.toFixed(2)}<br>`;
+        message += `- Total: Rs. ${(remainingInterest + remainingPrincipal).toFixed(2)}`;
+        
+        // Add note about interest-first allocation
+        message += `<br><br><em>Note: Payments are applied to interest first, then to principal.</em>`;
+        
+        amountHint.innerHTML = message;
     }
 
     // Payment method handler
@@ -200,6 +273,10 @@ document.addEventListener('DOMContentLoaded', function() {
         amountHint.textContent = '';
         monthCheckboxes.forEach(cb => cb.checked = false);
         removeAllErrors();
+        
+        // Reset loan details
+        currentLoanDetails.principal = 0;
+        currentLoanDetails.interest = 0;
 
         // Reset payment methods
         document.querySelectorAll('input[name="payment_method"]').forEach(radio => {
@@ -251,7 +328,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // Validate amount
-        if (!amountInput.value || amountInput.value <= 0) {
+        if (!amountInput.value || parseFloat(amountInput.value) <= 0) {
             showError(amountInput, 'Please enter a valid amount');
             isValid = false;
         }
@@ -262,9 +339,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 showError(loanSelect, 'Please select a loan');
                 isValid = false;
             } else {
-                const selectedOption = loanSelect.options[loanSelect.selectedIndex];
-                const total = parseFloat(selectedOption.dataset.principal) + 
-                            parseFloat(selectedOption.dataset.interest);
+                const total = currentLoanDetails.principal + currentLoanDetails.interest;
                 if (parseFloat(amountInput.value) > total) {
                     showError(amountInput, 'Payment amount cannot exceed total remaining amount');
                     isValid = false;
@@ -285,9 +360,9 @@ document.addEventListener('DOMContentLoaded', function() {
             showError(document.querySelector('.payment-methods'), 'Please select a payment method');
             isValid = false;
         } else {
-            if (paymentMethod.value === '') {
+            if (paymentMethod.value === 'online') {
                 isValid = validateCardDetails() && isValid;
-            } else if (paymentMethod.value === '') {
+            } else if (paymentMethod.value === 'transfer') {
                 isValid = validateBankTransfer() && isValid;
             }
         }

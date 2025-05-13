@@ -74,6 +74,104 @@ function getCurrentTerm() {
     return $row['year'] ?? date('Y');
 }
 
+/**
+ * Function to generate a unique payment ID
+ * @param string $term The term year for the payment
+ * @return string The generated payment ID
+ */
+function generatePaymentID($term = null) {
+    $conn = getConnection();
+    
+    // Get current year if term is not provided
+    if (empty($term)) {
+        $term = date('Y');
+    }
+    
+    // Extract the last 2 digits of the term
+    $shortTerm = substr((string)$term, -2);
+    
+    // Find the highest sequence number for the current term
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(PaymentID, 6) AS UNSIGNED)) as max_seq 
+        FROM Payment 
+        WHERE PaymentID LIKE 'PAY{$shortTerm}%'
+    ");
+    
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    $nextSeq = 1; // Default starting value
+    if ($row && $row['max_seq']) {
+        $nextSeq = $row['max_seq'] + 1;
+    }
+    
+    // Format: PAY followed by last 2 digits of term and sequence number
+    // Use leading zeros for numbers 1-9, no leading zeros after 10
+    if ($nextSeq < 10) {
+        return 'PAY' . $shortTerm . '0' . $nextSeq;
+    } else {
+        return 'PAY' . $shortTerm . $nextSeq;
+    }
+}
+
+/**
+ * Function to generate a unique expense ID
+ * @param string $term The term year for the expense
+ * @return string The generated expense ID
+ */
+function generateExpenseID($term = null) {
+    $conn = getConnection();
+    
+    // Get current year if term is not provided
+    if (empty($term)) {
+        $term = date('Y');
+    }
+    
+    // Extract the last 2 digits of the term
+    $shortTerm = substr((string)$term, -2);
+    
+    // Find the highest sequence number for the current term
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(ExpenseID, 6) AS UNSIGNED)) as max_seq 
+        FROM Expenses 
+        WHERE ExpenseID LIKE 'EXP{$shortTerm}%'
+    ");
+    
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    $nextSeq = 1; // Default starting value
+    if ($row && $row['max_seq']) {
+        $nextSeq = $row['max_seq'] + 1;
+    }
+
+    // Format: EXP followed by last 2 digits of term and sequence number
+    // Use leading zeros for numbers 1-9, no leading zeros after 10
+    if ($nextSeq < 10) {
+        return 'EXP' . $shortTerm . '0' . $nextSeq;
+    } else {
+        return 'EXP' . $shortTerm . $nextSeq;
+    }
+}
+
+/**
+ * Function to get active treasurer ID
+ * @return string|null The active treasurer ID or null if not found
+ */
+function getActiveTreasurer() {
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows === 0) {
+        return null;
+    }
+    $row = $result->fetch_assoc();
+    return $row['TreasurerID'];
+}
+
 // Get loan details
 $loan = getLoanDetails($loanID);
 if (!$loan) {
@@ -86,28 +184,27 @@ if (!$loan) {
 $allMembers = getAllMembers();
 $currentTerm = getCurrentTerm();
 $loanSettings = getLoanSettings();
+$activeTreasurer = getActiveTreasurer();
+
+// Check if treasurer exists
+if (!$activeTreasurer) {
+    $_SESSION['error_message'] = "No active treasurer found. Please set an active treasurer first.";
+    if (!$isPopup) {
+        header("Location: loan.php");
+        exit();
+    }
+}
 
 // Process form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Get form data
     $memberID = $_POST['member_id'];
-    $amount = $_POST['amount'];
-    $term = $_POST['term'];
+    $amount = floatval($_POST['amount']);
+    $term = intval($_POST['term']);
     $reason = $_POST['reason'];
     $issuedDate = $_POST['issued_date'];
     $dueDate = $_POST['due_date'];
     $status = $_POST['status'];
-    
-    // Get current interest rate from Static table
-    $interestQuery = "SELECT interest FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
-    $interestResult = search($interestQuery);
-    $interestRate = 3; // Default value if query fails
-    if ($interestResult && $interestResult->num_rows > 0) {
-        $interestData = $interestResult->fetch_assoc();
-        $interestRate = $interestData['interest'];
-    }
-    $interestRate = $interestRate / 100; // Convert percentage to decimal
-    $interestAmount = $amount * $interestRate;
     
     try {
         $conn = getConnection();
@@ -115,46 +212,297 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         // Start transaction
         $conn->begin_transaction();
         
-        // If loan status is changing, handle differently
-        if ($loan['Status'] != $status) {
-            if ($status == 'approved' && $loan['Status'] == 'pending') {
-                // Loan is being approved - set up initial values
+        // VALIDATION 1: Member cannot be changed
+        if ($memberID !== $loan['Member_MemberID']) {
+            throw new Exception("Member cannot be changed for an existing loan");
+        }
+        
+        // VALIDATION 2: Term cannot be changed
+        if ($term !== intval($loan['Term'])) {
+            throw new Exception("Term cannot be changed for an existing loan");
+        }
+        
+        // VALIDATION 3: Check if date is not in the future
+        $currentDate = date('Y-m-d');
+        if ($issuedDate > $currentDate) {
+            throw new Exception("Issue date cannot be in the future");
+        }
+        
+        // VALIDATION 4: Loan amount must be between 500 and max_loan_limit
+        $minLoanAmount = 500;
+        $maxLoanAmount = $loanSettings['max_loan_limit'];
+        
+        if ($amount < $minLoanAmount) {
+            throw new Exception("Loan amount cannot be less than Rs. " . number_format($minLoanAmount, 2));
+        }
+        
+        if ($amount > $maxLoanAmount) {
+            throw new Exception("Loan amount cannot exceed the maximum limit of Rs. " . number_format($maxLoanAmount, 2));
+        }
+        
+        // VALIDATION 5: Due date cannot be changed
+        if ($dueDate !== date('Y-m-d', strtotime($loan['Due_Date']))) {
+            // Calculate correct due date based on issue date (1 year duration)
+            $correctDueDate = date('Y-m-d', strtotime($issuedDate . ' + 1 year'));
+            if ($dueDate !== $correctDueDate) {
+                throw new Exception("Due date cannot be manually changed. It is automatically set to 1 year after issue date.");
+            }
+        }
+        
+        // VALIDATION 6: Check if status allows amount change
+        $oldStatus = $loan['Status'];
+        $oldAmount = floatval($loan['Amount']);
+        $oldIssuedDate = $loan['Issued_Date'];
+        
+        // If loan is approved and has payments, amount cannot be changed
+        if ($oldStatus === 'approved' && floatval($loan['Paid_Loan']) > 0 && $amount !== $oldAmount) {
+            throw new Exception("Loan amount cannot be changed after payments have been made");
+        }
+        
+        // Get current interest rate from Static table
+        $interestRate = $loanSettings['interest'] / 100; // Convert percentage to decimal
+        
+        // Calculate new due date if issue date has changed
+        if ($issuedDate !== date('Y-m-d', strtotime($oldIssuedDate))) {
+            $dueDate = date('Y-m-d', strtotime($issuedDate . ' + 1 year'));
+        }
+        
+        // Initialize variables for financial tracking
+        $paidLoan = $loan['Paid_Loan'];
+        $remainLoan = $loan['Remain_Loan'];
+        $paidInterest = $loan['Paid_Interest'];
+        $remainInterest = $loan['Remain_Interest'];
+        
+        // Handle status changes
+        if ($oldStatus !== $status) {
+            // Case 1: Changing from pending to approved
+            if ($oldStatus === 'pending' && $status === 'approved') {
+                // Set up initial values for approved loan
                 $paidLoan = 0;
                 $remainLoan = $amount;
                 $paidInterest = 0;
-                $remainInterest = $interestAmount;
-            } else if ($status == 'rejected') {
-                // Loan is being rejected - zero out all values
+                $remainInterest = $amount * $interestRate;
+                
+                // Add as an expense when loan is approved
+                $expenseID = generateExpenseID($term);
+                $description = "Loan approval - ID: $loanID";
+                
+                $expenseStmt = $conn->prepare("
+                    INSERT INTO Expenses (
+                        ExpenseID, Category, Method, Amount, Date, Term, 
+                        Description, Treasurer_TreasurerID
+                    ) VALUES (?, 'Loan', 'System', ?, ?, ?, ?, ?)
+                ");
+                
+                $expenseStmt->bind_param("sdssss", 
+                    $expenseID,
+                    $amount,
+                    $currentDate,
+                    $term,
+                    $description,
+                    $activeTreasurer
+                );
+                
+                if (!$expenseStmt->execute()) {
+                    throw new Exception("Failed to create expense record: " . $conn->error);
+                }
+                
+                // Update the loan with the expense ID
+                $updateExpenseStmt = $conn->prepare("
+                    UPDATE Loan SET Expenses_ExpenseID = ? WHERE LoanID = ?
+                ");
+                
+                $updateExpenseStmt->bind_param("ss", $expenseID, $loanID);
+                
+                if (!$updateExpenseStmt->execute()) {
+                    throw new Exception("Failed to link expense to loan: " . $conn->error);
+                }
+            }
+            // Case 2: Changing from approved to pending/rejected
+            else if ($oldStatus === 'approved' && ($status === 'pending' || $status === 'rejected')) {
+                // Check if loan has been paid
+                if (floatval($loan['Paid_Loan']) > 0) {
+                    throw new Exception("Cannot change status from approved to " . ucfirst($status) . " after payments have been made");
+                }
+                
+                // If changing to pending/rejected, create a payment to reverse the loan amount
+                $paymentID = generatePaymentID($term);
+                $notes = $status === 'pending' ? "Loan status changed from approved to pending" : "Loan rejected";
+                
+                $paymentStmt = $conn->prepare("
+                    INSERT INTO Payment (
+                        PaymentID, Payment_Type, Method, Amount, Date, Term,
+                        Member_MemberID, status, Notes
+                    ) VALUES (?, 'Loan Return', 'system', ?, ?, ?, ?, 'cash', ?)
+                ");
+                
+                $paymentStmt->bind_param("sdssss", 
+                    $paymentID,
+                    $oldAmount,
+                    $currentDate,
+                    $term,
+                    $memberID,
+                    $notes
+                );
+                
+                if (!$paymentStmt->execute()) {
+                    throw new Exception("Failed to create payment record: " . $conn->error);
+                }
+                
+                // Add entry to LoanPayment junction table
+                $junctionStmt = $conn->prepare("
+                    INSERT INTO LoanPayment (LoanID, PaymentID)
+                    VALUES (?, ?)
+                ");
+                
+                $junctionStmt->bind_param("ss", 
+                    $loanID,
+                    $paymentID
+                );
+                
+                if (!$junctionStmt->execute()) {
+                    throw new Exception("Failed to create loan-payment relationship: " . $conn->error);
+                }
+                
+                // Reset financial values
                 $paidLoan = 0;
                 $remainLoan = 0;
                 $paidInterest = 0;
                 $remainInterest = 0;
-            } else {
-                // Keep existing values
-                $paidLoan = $loan['Paid_Loan'];
-                $remainLoan = $loan['Remain_Loan'];
-                $paidInterest = $loan['Paid_Interest'];
-                $remainInterest = $loan['Remain_Interest'];
+            }
+            // Case 3: Changing from rejected to approved
+            else if ($oldStatus === 'rejected' && $status === 'approved') {
+                // Same as pending to approved
+                $paidLoan = 0;
+                $remainLoan = $amount;
+                $paidInterest = 0;
+                $remainInterest = $amount * $interestRate;
+                
+                // Add as an expense when loan is approved
+                $expenseID = generateExpenseID($term);
+                $description = "Loan approval - ID: $loanID";
+                
+                $expenseStmt = $conn->prepare("
+                    INSERT INTO Expenses (
+                        ExpenseID, Category, Method, Amount, Date, Term, 
+                        Description, Treasurer_TreasurerID
+                    ) VALUES (?, 'Loan', 'System', ?, ?, ?, ?, ?)
+                ");
+                
+                $expenseStmt->bind_param("sdssss", 
+                    $expenseID,
+                    $amount,
+                    $currentDate,
+                    $term,
+                    $description,
+                    $activeTreasurer
+                );
+                
+                if (!$expenseStmt->execute()) {
+                    throw new Exception("Failed to create expense record: " . $conn->error);
+                }
+                
+                // Update the loan with the expense ID
+                $updateExpenseStmt = $conn->prepare("
+                    UPDATE Loan SET Expenses_ExpenseID = ? WHERE LoanID = ?
+                ");
+                
+                $updateExpenseStmt->bind_param("ss", $expenseID, $loanID);
+                
+                if (!$updateExpenseStmt->execute()) {
+                    throw new Exception("Failed to link expense to loan: " . $conn->error);
+                }
             }
         } else {
             // Status not changing
-            if ($amount != $loan['Amount']) {
-                // Amount is changing
-                $amountDifference = $amount - $loan['Amount'];
-                
-                // Adjust remaining loan amount
-                $remainLoan = $loan['Remain_Loan'] + $amountDifference;
-                $paidLoan = $loan['Paid_Loan'];
-                
-                // Recalculate interest
-                $remainInterest = $amount * $interestRate - $loan['Paid_Interest'];
-                $paidInterest = $loan['Paid_Interest'];
-            } else {
-                // No amount change, keep values
-                $paidLoan = $loan['Paid_Loan'];
-                $remainLoan = $loan['Remain_Loan'];
-                $paidInterest = $loan['Paid_Interest'];
-                $remainInterest = $loan['Remain_Interest'];
+            if ($amount != $oldAmount) {
+                // If status is approved, handle amount changes
+                if ($status === 'approved') {
+                    // Case 1: Amount decreased
+                    if ($amount < $oldAmount) {
+                        $amountDifference = $oldAmount - $amount;
+                        
+                        // Add as a payment
+                        $paymentID = generatePaymentID($term);
+                        $notes = "Loan amount reduced from Rs. " . number_format($oldAmount, 2) . " to Rs. " . number_format($amount, 2);
+                        
+                        $paymentStmt = $conn->prepare("
+                            INSERT INTO Payment (
+                                PaymentID, Payment_Type, Method, Amount, Date, Term,
+                                Member_MemberID, status, Notes
+                            ) VALUES (?, 'Loan Adjustment', 'system', ?, ?, ?, ?, 'cash', ?)
+                        ");
+                        
+                        $paymentStmt->bind_param("sdssss", 
+                            $paymentID,
+                            $amountDifference,
+                            $currentDate,
+                            $term,
+                            $memberID,
+                            $notes
+                        );
+                        
+                        if (!$paymentStmt->execute()) {
+                            throw new Exception("Failed to create payment record: " . $conn->error);
+                        }
+                        
+                        // Add entry to LoanPayment junction table
+                        $junctionStmt = $conn->prepare("
+                            INSERT INTO LoanPayment (LoanID, PaymentID)
+                            VALUES (?, ?)
+                        ");
+                        
+                        $junctionStmt->bind_param("ss", 
+                            $loanID,
+                            $paymentID
+                        );
+                        
+                        if (!$junctionStmt->execute()) {
+                            throw new Exception("Failed to create loan-payment relationship: " . $conn->error);
+                        }
+                        
+                        // Adjust remaining loan amount and interest
+                        $remainLoan = $amount;
+                        $remainInterest = $amount * $interestRate;
+                    }
+                    // Case 2: Amount increased
+                    else if ($amount > $oldAmount) {
+                        $amountDifference = $amount - $oldAmount;
+                        
+                        // Add as an expense
+                        $expenseID = generateExpenseID($term);
+                        $description = "Loan amount increased from Rs. " . number_format($oldAmount, 2) . " to Rs. " . number_format($amount, 2);
+                        
+                        $expenseStmt = $conn->prepare("
+                            INSERT INTO Expenses (
+                                ExpenseID, Category, Method, Amount, Date, Term, 
+                                Description, Treasurer_TreasurerID
+                            ) VALUES (?, 'Loan Adjustment', 'System', ?, ?, ?, ?, ?)
+                        ");
+                        
+                        $expenseStmt->bind_param("sdssss", 
+                            $expenseID,
+                            $amountDifference,
+                            $currentDate,
+                            $term,
+                            $description,
+                            $activeTreasurer
+                        );
+                        
+                        if (!$expenseStmt->execute()) {
+                            throw new Exception("Failed to create expense record: " . $conn->error);
+                        }
+                        
+                        // Adjust remaining loan amount and interest
+                        $remainLoan = $loan['Remain_Loan'] + $amountDifference;
+                        $remainInterest = $loan['Remain_Interest'] + ($amountDifference * $interestRate);
+                    }
+                }
+                // If status is pending or rejected, simply update the amount
+                else {
+                    $remainLoan = $amount;
+                    $remainInterest = $amount * $interestRate;
+                }
             }
         }
         
@@ -208,8 +556,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         
     } catch (Exception $e) {
         // Rollback on error
-        $conn->rollback();
+        if (isset($conn) && $conn->ping()) {
+            $conn->rollback();
+        }
         $_SESSION['error_message'] = "Error updating loan: " . $e->getMessage();
+        error_log("Loan Update Error: " . $e->getMessage());
     }
 }
 
@@ -555,6 +906,8 @@ if ($isPopup): ?>
                 </div>
 
                 <form method="POST" action="">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? ''); ?>">
+                    
                     <div class="form-row">
                         <div class="form-group">
                             <label for="loan_id">Loan ID</label>
@@ -562,49 +915,89 @@ if ($isPopup): ?>
                         </div>
                         <div class="form-group">
                             <label for="member_id">Member</label>
-                            <select id="member_id" name="member_id" class="form-control" required>
+                            <!-- Disabled dropdown to prevent changing member -->
+                            <select id="member_id" name="member_id" class="form-control" required readonly disabled>
                                 <?php while($member = $allMembers->fetch_assoc()): ?>
                                     <option value="<?php echo $member['MemberID']; ?>" <?php echo ($member['MemberID'] == $loan['Member_MemberID']) ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($member['MemberID'] . ' - ' . $member['Name']); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>
+                            <!-- Hidden field to ensure the member ID is submitted -->
+                            <input type="hidden" name="member_id" value="<?php echo htmlspecialchars($loan['Member_MemberID']); ?>">
+                            <small>Member cannot be changed after loan creation</small>
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group">
                             <label for="amount">Loan Amount (Rs.)</label>
-                            <input type="number" id="amount" name="amount" class="form-control" value="<?php echo htmlspecialchars($loan['Amount']); ?>" min="0" step="0.01" max="<?php echo $loanSettings['max_loan_limit']; ?>" required>
-                            <small>Maximum loan limit: Rs. <?php echo number_format($loanSettings['max_loan_limit'], 2); ?></small>
+                            <input type="number" id="amount" name="amount" class="form-control" 
+                                   value="<?php echo htmlspecialchars($loan['Amount']); ?>" 
+                                   min="500" step="0.01" 
+                                   max="<?php echo $loanSettings['max_loan_limit']; ?>" 
+                                   required
+                                   <?php echo ($loan['Status'] === 'approved' && floatval($loan['Paid_Loan']) > 0) ? 'readonly disabled' : ''; ?>>
+                            <?php if ($loan['Status'] === 'approved' && floatval($loan['Paid_Loan']) > 0): ?>
+                                <small>Amount cannot be changed after payments have been made</small>
+                            <?php else: ?>
+                                <small>Minimum: Rs. 500, Maximum: Rs. <?php echo number_format($loanSettings['max_loan_limit'], 2); ?></small>
+                            <?php endif; ?>
                         </div>
                         <div class="form-group">
                             <label for="term">Term</label>
-                            <input type="number" id="term" name="term" class="form-control" value="<?php echo htmlspecialchars($loan['Term']); ?>" min="1" required>
+                            <!-- Term cannot be changed - disabled field -->
+                            <input type="number" id="term" name="term" class="form-control" 
+                                   value="<?php echo htmlspecialchars($loan['Term']); ?>" 
+                                   min="1" readonly disabled>
+                            <!-- Hidden field to ensure the term is submitted -->
+                            <input type="hidden" name="term" value="<?php echo htmlspecialchars($loan['Term']); ?>">
+                            <small>Term cannot be changed after loan creation</small>
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group">
                             <label for="issued_date">Issue Date</label>
-                            <input type="date" id="issued_date" name="issued_date" class="form-control" value="<?php echo date('Y-m-d', strtotime($loan['Issued_Date'])); ?>" required>
+                            <input type="date" id="issued_date" name="issued_date" 
+                                   class="form-control" 
+                                   value="<?php echo date('Y-m-d', strtotime($loan['Issued_Date'])); ?>" 
+                                   max="<?php echo date('Y-m-d'); ?>" 
+                                   required
+                                   <?php echo ($loan['Status'] === 'approved' && floatval($loan['Paid_Loan']) > 0) ? 'readonly disabled' : ''; ?>>
+                            <small>Date cannot be in the future</small>
                         </div>
                         <div class="form-group">
                             <label for="due_date">Due Date</label>
-                            <input type="date" id="due_date" name="due_date" class="form-control" value="<?php echo date('Y-m-d', strtotime($loan['Due_Date'])); ?>" required>
+                            <!-- Due date is calculated automatically and cannot be changed -->
+                            <input type="date" id="due_date" name="due_date" 
+                                   class="form-control" 
+                                   value="<?php echo date('Y-m-d', strtotime($loan['Due_Date'])); ?>" 
+                                   readonly disabled>
+                            <!-- Hidden field to store the due date, will be updated by JS when issue date changes -->
+                            <input type="hidden" name="due_date" 
+                                   id="hidden_due_date" 
+                                   value="<?php echo date('Y-m-d', strtotime($loan['Due_Date'])); ?>">
+                            <small>Due date is automatically set to 1 year after issue date</small>
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group">
                             <label for="status">Status</label>
-                            <select id="status" name="status" class="form-control" required>
+                            <select id="status" name="status" class="form-control" required
+                                    <?php echo ($loan['Status'] === 'approved' && floatval($loan['Paid_Loan']) > 0) ? 'disabled' : ''; ?>>
                                 <?php foreach($loanStatus as $value => $label): ?>
                                     <option value="<?php echo $value; ?>" <?php echo ($value == $loan['Status']) ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($label); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
+                            <?php if ($loan['Status'] === 'approved' && floatval($loan['Paid_Loan']) > 0): ?>
+                                <!-- Hidden field to ensure the status is submitted when the select is disabled -->
+                                <input type="hidden" name="status" value="<?php echo htmlspecialchars($loan['Status']); ?>">
+                                <small>Status cannot be changed after payments have been made</small>
+                            <?php endif; ?>
                         </div>
                         <div class="form-group">
                             <label for="interest_rate">Interest Rate (%)</label>
@@ -636,8 +1029,10 @@ if ($isPopup): ?>
 <script>
     // If form was submitted successfully in popup mode, pass message to parent
     window.parent.showAlert('success', 'Loan #<?php echo $loanID; ?> successfully updated');
-    window.parent.closeEditModal();
-    // Don't reload the entire page as it will lose the alert
+    setTimeout(function() {
+        window.parent.updateFilters(); // Refresh the parent page to show updated data
+        window.parent.closeEditModal();
+    }); // To delay the refresh and modal close to ensure alert is visible -> ,1000
 </script>
 <?php elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_SESSION['error_message'])): ?>
 <script>
@@ -660,64 +1055,68 @@ if ($isPopup): ?>
 <script>
     // Date validation to ensure due date is after issue date
     document.getElementById('issued_date').addEventListener('change', function() {
-        const issuedDate = new Date(this.value);
-        const dueDate = new Date(document.getElementById('due_date').value);
-        
-        if (dueDate <= issuedDate) {
-            // Set due date to issue date + 1 month by default
-            const newDueDate = new Date(issuedDate);
-            newDueDate.setMonth(newDueDate.getMonth() + parseInt(document.getElementById('term').value));
-            
-            // Format the date as YYYY-MM-DD for the input
-            const year = newDueDate.getFullYear();
-            const month = String(newDueDate.getMonth() + 1).padStart(2, '0');
-            const day = String(newDueDate.getDate()).padStart(2, '0');
-            
-            document.getElementById('due_date').value = `${year}-${month}-${day}`;
-        }
-    });
-    
-    document.getElementById('term').addEventListener('change', function() {
         updateDueDate();
     });
     
+    // Function to update due date based on issue date
     function updateDueDate() {
         const issuedDate = new Date(document.getElementById('issued_date').value);
-        const term = parseInt(document.getElementById('term').value) || 0;
         
-        if (!isNaN(issuedDate.getTime()) && term > 0) {
-            // Calculate new due date based on term
+        if (!isNaN(issuedDate.getTime())) {
+            // Calculate new due date (1 year after issue date)
             const newDueDate = new Date(issuedDate);
-            newDueDate.setMonth(newDueDate.getMonth() + term);
+            newDueDate.setFullYear(newDueDate.getFullYear() + 1);
             
             // Format the date as YYYY-MM-DD for the input
             const year = newDueDate.getFullYear();
             const month = String(newDueDate.getMonth() + 1).padStart(2, '0');
             const day = String(newDueDate.getDate()).padStart(2, '0');
+            const formattedDate = `${year}-${month}-${day}`;
             
-            document.getElementById('due_date').value = `${year}-${month}-${day}`;
+            // Update the hidden due date input
+            document.getElementById('hidden_due_date').value = formattedDate;
+            
+            // Show the calculated date in the disabled visible field
+            document.getElementById('due_date').value = formattedDate;
         }
     }
 
     // Form validation
     document.querySelector('form').addEventListener('submit', function(e) {
         const amount = parseFloat(document.getElementById('amount').value);
-        const maxLimit = <?php echo $loanSettings['max_loan_limit']; ?>;
+        const minAmount = 500;
+        const maxAmount = <?php echo $loanSettings['max_loan_limit']; ?>;
+        const status = document.getElementById('status').value;
+        const oldStatus = '<?php echo $loan['Status']; ?>';
+        const hasPaidAmount = <?php echo floatval($loan['Paid_Loan']) > 0 ? 'true' : 'false'; ?>;
+        const issuedDate = document.getElementById('issued_date').value;
+        const currentDate = new Date().toISOString().split('T')[0];
         
-        if (isNaN(amount) || amount <= 0) {
+        // Validate amount
+        if (isNaN(amount) || amount < minAmount) {
             e.preventDefault();
-            alert('Please enter a valid amount greater than zero.');
-        } else if (amount > maxLimit) {
-            e.preventDefault();
-            alert('Loan amount exceeds the maximum limit of Rs. ' + maxLimit.toFixed(2));
+            alert('Please enter a valid amount of at least Rs. ' + minAmount.toFixed(2));
+            return;
         }
         
-        const issuedDate = new Date(document.getElementById('issued_date').value);
-        const dueDate = new Date(document.getElementById('due_date').value);
-        
-        if (dueDate <= issuedDate) {
+        if (amount > maxAmount) {
             e.preventDefault();
-            alert('Due date must be after issue date.');
+            alert('Loan amount exceeds the maximum limit of Rs. ' + maxAmount.toFixed(2));
+            return;
+        }
+        
+        // Validate issue date
+        if (issuedDate > currentDate) {
+            e.preventDefault();
+            alert('Issue date cannot be in the future.');
+            return;
+        }
+        
+        // Prevent status change if payments have been made
+        if (hasPaidAmount && oldStatus === 'approved' && status !== 'approved') {
+            e.preventDefault();
+            alert('Cannot change status from approved after payments have been made.');
+            return;
         }
     });
 </script>
