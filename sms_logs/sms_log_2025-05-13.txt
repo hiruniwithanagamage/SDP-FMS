@@ -9,3 +9,42 @@ Valid for: 1 hour
 From: Society Management System
 --------------------------------------------------
 
+--------------------------------------------------
+Time: 2025-05-13 17:03:40
+Phone: 0703804216 (Mobitel)
+Email: 0703804216@sms.mobitel.lk
+Message: New Death Welfare Application
+ID: WF001
+Member:  (Member1)
+Relationship: Dog
+Amount: Rs.200.00
+Date: 2025-05-13
+From: Society Management System
+--------------------------------------------------
+
+--------------------------------------------------
+Time: 2025-05-13 17:21:04
+Phone: 0703804216 (Mobitel)
+Email: 0703804216@sms.mobitel.lk
+Message: New Death Welfare Application
+ID: WF001
+Member:  (Member1)
+Relationship: Dog
+Amount: Rs.200.00
+Date: 2025-05-13
+From: Society Management System
+--------------------------------------------------
+
+--------------------------------------------------
+Time: 2025-05-13 17:27:27
+Phone: 0703804216 (Mobitel)
+Email: 0703804216@sms.mobitel.lk
+Message: New Death Welfare Application
+ID: WF001
+Member:  (Member1)
+Relationship: Dog
+Amount: Rs.200.00
+Date: 2025-05-13
+From: Society Management System
+--------------------------------------------------
+

@@ -138,44 +138,115 @@ if(isset($_POST['delete_welfare'])) {
         // Start transaction
         $conn->begin_transaction();
         
-        // Check if this welfare has linked expenses
-        $checkQuery = "SELECT * FROM DeathWelfare WHERE WelfareID = ? AND Expense_ExpenseID IS NOT NULL";
-        $stmt = $conn->prepare($checkQuery);
+        // Get welfare claim details
+        $getWelfareQuery = "SELECT * FROM DeathWelfare WHERE WelfareID = ?";
+        $stmt = $conn->prepare($getWelfareQuery);
         $stmt->bind_param("s", $welfareId);
         $stmt->execute();
-        $result = $stmt->get_result();
+        $welfareResult = $stmt->get_result();
         
-        // If there are expenses linked to this welfare claim, handle them
-        if($result->num_rows > 0) {
-            $row = $result->fetch_assoc();
-            $expenseId = $row['Expense_ExpenseID'];
+        if($welfareResult->num_rows > 0) {
+            $welfareData = $welfareResult->fetch_assoc();
+            $status = $welfareData['Status'];
+            $memberId = $welfareData['Member_MemberID'];
+            $amount = $welfareData['Amount'];
+            $expenseId = $welfareData['Expense_ExpenseID'];
             
-            // Delete the expense record
-            $deleteExpenseQuery = "DELETE FROM Expenses WHERE ExpenseID = ?";
-            $stmt = $conn->prepare($deleteExpenseQuery);
-            $stmt->bind_param("s", $expenseId);
-            $stmt->execute();
+            // Handle based on status
+            if($status == 'pending' || $status == 'rejected') {
+                // For pending or rejected claims, simply delete the record
+                $deleteWelfareQuery = "DELETE FROM DeathWelfare WHERE WelfareID = ?";
+                $stmt = $conn->prepare($deleteWelfareQuery);
+                $stmt->bind_param("s", $welfareId);
+                $stmt->execute();
+                
+                $_SESSION['success_message'] = "Welfare claim #$welfareId was successfully deleted.";
+            } 
+            else if($status == 'approved') {
+                // For approved claims:
+                // 1. Delete the expense record if exists
+                if($expenseId) {
+                    $deleteExpenseQuery = "DELETE FROM Expenses WHERE ExpenseID = ?";
+                    $stmt = $conn->prepare($deleteExpenseQuery);
+                    $stmt->bind_param("s", $expenseId);
+                    $stmt->execute();
+                }
+                
+                // 2. Add a new payment entry of type cash with status 'cash'
+                $paymentId = generatePaymentID($currentTerm);
+                $paymentType = "Death Welfare";
+                $method = "Cash";
+                $date = date('Y-m-d');
+                $notes = "Refund for deleted welfare claim #$welfareId";
+                
+                $addPaymentQuery = "INSERT INTO Payment (PaymentID, Payment_Type, Method, Amount, Date, Term, Notes, Member_MemberID, status) 
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cash')";
+                $stmt = $conn->prepare($addPaymentQuery);
+                $stmt->bind_param("sssdsiss", $paymentId, $paymentType, $method, $amount, $date, $currentTerm, $notes, $memberId);
+                $stmt->execute();
+                
+                // 3. Delete the welfare claim
+                $deleteWelfareQuery = "DELETE FROM DeathWelfare WHERE WelfareID = ?";
+                $stmt = $conn->prepare($deleteWelfareQuery);
+                $stmt->bind_param("s", $welfareId);
+                $stmt->execute();
+                
+                $_SESSION['success_message'] = "Approved welfare claim #$welfareId was successfully deleted and a payment record was created.";
+            }
+        } else {
+            throw new Exception("Welfare claim not found.");
         }
-        
-        // Delete the welfare record
-        $deleteWelfareQuery = "DELETE FROM DeathWelfare WHERE WelfareID = ?";
-        $stmt = $conn->prepare($deleteWelfareQuery);
-        $stmt->bind_param("s", $welfareId);
-        $stmt->execute();
         
         // Commit transaction
         $conn->commit();
         
-        $_SESSION['success_message'] = "Welfare claim #$welfareId was successfully deleted.";
     } catch(Exception $e) {
         // Rollback on error
-        $conn->rollback();
+        if(isset($conn)) {
+            $conn->rollback();
+        }
         $_SESSION['error_message'] = "Error deleting welfare claim: " . $e->getMessage();
     }
     
     // Redirect back to welfare page
     header("Location: deathWelfare.php?year=" . $currentTerm);
     exit();
+}
+
+function generatePaymentID($term = null) {
+    $conn = getConnection();
+    
+    // Get current year if term is not provided
+    if (empty($term)) {
+        $term = date('Y');
+    }
+    
+    // Extract the last 2 digits of the term
+    $shortTerm = substr((string)$term, -2);
+    
+    // Find the highest sequence number for the current term
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(PaymentID, 6) AS UNSIGNED)) as max_seq 
+        FROM Payment 
+        WHERE PaymentID LIKE 'PAY{$shortTerm}%'
+    ");
+    
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    $nextSeq = 1; // Default starting value
+    if ($row && $row['max_seq']) {
+        $nextSeq = $row['max_seq'] + 1;
+    }
+    
+    // Format: PAY followed by last 2 digits of term and sequence number
+    // Use leading zeros for numbers 1-9, no leading zeros after 10
+    if ($nextSeq < 10) {
+        return 'PAY' . $shortTerm . '0' . $nextSeq;
+    } else {
+        return 'PAY' . $shortTerm . $nextSeq;
+    }
 }
 
 // Function to check if financial report for a specific term is approved

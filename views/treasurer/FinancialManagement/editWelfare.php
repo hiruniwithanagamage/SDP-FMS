@@ -24,6 +24,7 @@ function getWelfareDetails($welfareID) {
             dw.Relationship, 
             dw.Status,
             dw.Member_MemberID,
+            dw.Expense_ExpenseID,
             m.Name as MemberName
         FROM DeathWelfare dw
         JOIN Member m ON dw.Member_MemberID = m.MemberID
@@ -69,6 +70,163 @@ function getCurrentTerm() {
     return $row['year'] ?? date('Y');
 }
 
+/**
+ * Function to generate a unique expense ID
+ * @param string $term The term year for the expense
+ * @return string The generated expense ID
+ */
+function generateExpenseID($term = null) {
+    $conn = getConnection();
+    
+    // Get current year if term is not provided
+    if (empty($term)) {
+        $term = date('Y');
+    }
+    
+    // Extract the last 2 digits of the term
+    $shortTerm = substr((string)$term, -2);
+    
+    // Find the highest sequence number for the current term
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(ExpenseID, 6) AS UNSIGNED)) as max_seq 
+        FROM Expenses 
+        WHERE ExpenseID LIKE 'EXP{$shortTerm}%'
+    ");
+    
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    $nextSeq = 1; // Default starting value
+    if ($row && $row['max_seq']) {
+        $nextSeq = $row['max_seq'] + 1;
+    }
+
+    // Format: EXP followed by last 2 digits of term and sequence number
+    // Use leading zeros for numbers 1-9, no leading zeros after 10
+    if ($nextSeq < 10) {
+        return 'EXP' . $shortTerm . '0' . $nextSeq;
+    } else {
+        return 'EXP' . $shortTerm . $nextSeq;
+    }
+}
+
+// Function to create an expense record
+function createExpenseRecord($amount, $date, $description, $treasurerID) {
+    $conn = getConnection();
+    $currentTerm = getCurrentTerm();
+    
+    // Generate a unique expense ID using the improved function
+    $expenseID = generateExpenseID($currentTerm);
+    
+    $stmt = $conn->prepare("
+        INSERT INTO Expenses (
+            ExpenseID, Category, Method, Amount, Date, Term, 
+            Description, Treasurer_TreasurerID
+        ) VALUES (
+            ?, 'Death Welfare', 'Cash', ?, ?, ?, ?, ?
+        )
+    ");
+    
+    $stmt->bind_param("sdssss", 
+        $expenseID,
+        $amount,
+        $date,
+        $currentTerm,
+        $description,
+        $treasurerID
+    );
+    
+    if ($stmt->execute()) {
+        return $expenseID;
+    }
+    
+    return false;
+}
+
+/**
+ * Function to generate a unique payment ID
+ * @param string $term The term year for the payment
+ * @return string The generated payment ID
+ */
+function generatePaymentID($term = null) {
+    $conn = getConnection();
+    
+    // Get current year if term is not provided
+    if (empty($term)) {
+        $term = date('Y');
+    }
+    
+    // Extract the last 2 digits of the term
+    $shortTerm = substr((string)$term, -2);
+    
+    // Find the highest sequence number for the current term
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(PaymentID, 6) AS UNSIGNED)) as max_seq 
+        FROM Payment 
+        WHERE PaymentID LIKE 'PAY{$shortTerm}%'
+    ");
+    
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    $nextSeq = 1; // Default starting value
+    if ($row && $row['max_seq']) {
+        $nextSeq = $row['max_seq'] + 1;
+    }
+    
+    // Format: PAY followed by last 2 digits of term and sequence number
+    // Use leading zeros for numbers 1-9, no leading zeros after 10
+    if ($nextSeq < 10) {
+        return 'PAY' . $shortTerm . '0' . $nextSeq;
+    } else {
+        return 'PAY' . $shortTerm . $nextSeq;
+    }
+}
+
+// Function to create a payment record when welfare status changes from approved to rejected
+function createPaymentRecord($amount, $date, $memberID) {
+    $conn = getConnection();
+    $currentTerm = getCurrentTerm();
+    
+    // Generate a unique payment ID using the improved function
+    $paymentID = generatePaymentID($currentTerm);
+    
+    $stmt = $conn->prepare("
+        INSERT INTO Payment (
+            PaymentID, Payment_Type, Method, Amount, Date, Term, 
+            Notes, Member_MemberID, status
+        ) VALUES (
+            ?, 'Death Welfare Refund', 'Cash', ?, ?, ?, 'Death welfare status changed from approved to rejected', ?, 'cash'
+        )
+    ");
+    
+    $stmt->bind_param("sdsss", 
+        $paymentID,
+        $amount,
+        $date,
+        $currentTerm,
+        $memberID
+    );
+    
+    if ($stmt->execute()) {
+        return $paymentID;
+    }
+    
+    return false;
+}
+
+// Function to delete expense record
+function deleteExpenseRecord($expenseID) {
+    if (!$expenseID) return true; // No expense to delete
+    
+    $conn = getConnection();
+    $stmt = $conn->prepare("DELETE FROM Expenses WHERE ExpenseID = ?");
+    $stmt->bind_param("s", $expenseID);
+    return $stmt->execute();
+}
+
 // Get welfare details
 $welfare = getWelfareDetails($welfareID);
 if (!$welfare) {
@@ -82,65 +240,133 @@ $allMembers = getAllMembers();
 $currentTerm = getCurrentTerm();
 $welfareSettings = getWelfareSettings();
 
+// Get active treasurer ID (you might need to adjust this based on your authentication system)
+function getActiveTreasurerID() {
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    return $row ? $row['TreasurerID'] : null;
+}
+
+$treasurerID = getActiveTreasurerID();
+
 // Process form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Get form data
     $memberID = $_POST['member_id'];
     $date = $_POST['date'];
     $relationship = $_POST['relationship'];
-    $status = $_POST['status'];
+    $newStatus = $_POST['status'];
+    $oldStatus = $welfare['Status'];
     
     // Use the fixed standard welfare amount - not allowing it to be changed
     $amount = $welfareSettings['death_welfare'];
     
-    try {
-        $conn = getConnection();
-        
-        // Start transaction
-        $conn->begin_transaction();
-        
-        // Update welfare record
-        $stmt = $conn->prepare("
-            UPDATE DeathWelfare SET 
-                Member_MemberID = ?,
-                Amount = ?,
-                Date = ?,
-                Relationship = ?,
-                Status = ?,
-                Term = ?
-            WHERE WelfareID = ?
-        ");
-        
-        $stmt->bind_param("sssssis", 
-            $memberID, 
-            $amount, 
-            $date, 
-            $relationship,
-            $status,
-            $currentTerm,
-            $welfareID
-        );
-        
-        $stmt->execute();
-        
-        // Commit transaction
-        $conn->commit();
-        
-        // Set success message
-        $_SESSION['success_message'] = "Welfare claim #$welfareID successfully updated";
-        
-        // Handle redirection based on popup mode after ALL database operations are complete
+    // Validation for member ID
+    if ($memberID !== $welfare['Member_MemberID']) {
+        $_SESSION['error_message'] = "Member cannot be changed for an existing welfare claim";
+        // If popup mode, we'll continue rendering the page with an error message
         if (!$isPopup) {
-            header("Location: deathWelfare.php");
+            header("Location: " . $_SERVER['PHP_SELF'] . "?id=" . $welfareID . ($isPopup ? "&popup=true" : ""));
             exit();
         }
-        // If it's popup mode, we'll continue rendering the page with a success message
-        // and add JavaScript to refresh the parent later
-        
-    } catch (Exception $e) {
-        // Rollback on error
-        $conn->rollback();
-        $_SESSION['error_message'] = "Error updating welfare claim: " . $e->getMessage();
+    }
+    // Validation for future date
+    else if (strtotime($date) > time()) {
+        $_SESSION['error_message'] = "Claim date cannot be in the future";
+        // If popup mode, we'll continue rendering the page with an error message
+        if (!$isPopup) {
+            header("Location: " . $_SERVER['PHP_SELF'] . "?id=" . $welfareID . ($isPopup ? "&popup=true" : ""));
+            exit();
+        }
+    }
+    // Status validation
+    else if (($oldStatus === 'approved' && $newStatus === 'pending') || 
+             ($oldStatus === 'rejected' && $newStatus !== 'rejected')) {
+        $_SESSION['error_message'] = "Cannot change status from $oldStatus to $newStatus";
+        // If popup mode, we'll continue rendering the page with an error message
+        if (!$isPopup) {
+            header("Location: " . $_SERVER['PHP_SELF'] . "?id=" . $welfareID . ($isPopup ? "&popup=true" : ""));
+            exit();
+        }
+    }
+    else {
+        try {
+            $conn = getConnection();
+            
+            // Start transaction
+            $conn->begin_transaction();
+            
+            // Handle expense record based on status change
+            $expenseID = $welfare['Expense_ExpenseID'];
+            
+            // If status is changing from pending to approved
+            if ($oldStatus === 'pending' && $newStatus === 'approved') {
+                $description = "Death welfare payment for " . $welfare['MemberName'] . " (" . 
+                               ucfirst($relationship) . ")";
+                $expenseID = createExpenseRecord($amount, $date, $description, $treasurerID);
+                
+                if (!$expenseID) {
+                    throw new Exception("Failed to create expense record");
+                }
+            }
+            // If status is changing from approved to rejected
+            else if ($oldStatus === 'approved' && $newStatus === 'rejected') {
+                // Create a payment record (refund)
+                $paymentID = createPaymentRecord($amount, $date, $memberID);
+                
+                if (!$paymentID) {
+                    throw new Exception("Failed to create payment record for refund");
+                }
+            }
+            
+            // Update welfare record
+            $stmt = $conn->prepare("
+                UPDATE DeathWelfare SET 
+                    Member_MemberID = ?,
+                    Amount = ?,
+                    Date = ?,
+                    Relationship = ?,
+                    Status = ?,
+                    Term = ?,
+                    Expense_ExpenseID = ?
+                WHERE WelfareID = ?
+            ");
+            
+            $stmt->bind_param("sdsssiss", 
+                $memberID, 
+                $amount, 
+                $date, 
+                $relationship,
+                $newStatus,
+                $currentTerm,
+                $expenseID,
+                $welfareID
+            );
+            
+            $stmt->execute();
+            
+            // Commit transaction
+            $conn->commit();
+            
+            // Set success message
+            $_SESSION['success_message'] = "Welfare claim #$welfareID successfully updated";
+            
+            // Handle redirection based on popup mode after ALL database operations are complete
+            if (!$isPopup) {
+                header("Location: deathWelfare.php");
+                exit();
+            }
+            // If it's popup mode, we'll continue rendering the page with a success message
+            // and add JavaScript to refresh the parent later
+            
+        } catch (Exception $e) {
+            // Rollback on error
+            $conn->rollback();
+            $_SESSION['error_message'] = "Error updating welfare claim: " . $e->getMessage();
+        }
     }
 }
 
@@ -316,6 +542,14 @@ if ($isPopup): ?>
                 margin-top: 5px;
                 display: block;
             }
+            .footnote {
+                margin-top: 20px;
+                padding: 10px;
+                background-color: #f8f9fa;
+                border-radius: 4px;
+                font-size: 12px;
+                color: #666;
+            }
         </style>
     </head>
     <body>
@@ -463,6 +697,15 @@ if ($isPopup): ?>
                 margin-top: 5px;
                 display: block;
             }
+            
+            .footnote {
+                margin-top: 20px;
+                padding: 15px;
+                background-color: #f8f9fa;
+                border-radius: 5px;
+                font-size: 14px;
+                color: #666;
+            }
         </style>
     </head>
     <body>
@@ -517,12 +760,19 @@ if ($isPopup): ?>
                         <div class="form-group">
                             <label for="member_id">Member</label>
                             <select id="member_id" name="member_id" class="form-control" required>
-                                <?php while($member = $allMembers->fetch_assoc()): ?>
-                                    <option value="<?php echo $member['MemberID']; ?>" <?php echo ($member['MemberID'] == $welfare['Member_MemberID']) ? 'selected' : ''; ?>>
+                                <?php
+                                // Reset the pointer to the beginning of the result set
+                                $allMembers->data_seek(0);
+                                while($member = $allMembers->fetch_assoc()): 
+                                ?>
+                                    <option value="<?php echo $member['MemberID']; ?>" 
+                                        <?php echo ($member['MemberID'] == $welfare['Member_MemberID']) ? 'selected' : ''; ?>
+                                        <?php echo ($welfare['Member_MemberID'] != $member['MemberID']) ? 'disabled' : ''; ?>>
                                         <?php echo htmlspecialchars($member['MemberID'] . ' - ' . $member['Name']); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>
+                            <span class="standard-value">Member cannot be changed for an existing welfare claim</span>
                         </div>
                     </div>
 
@@ -534,7 +784,8 @@ if ($isPopup): ?>
                         </div>
                         <div class="form-group">
                             <label for="date">Claim Date</label>
-                            <input type="date" id="date" name="date" class="form-control" value="<?php echo date('Y-m-d', strtotime($welfare['Date'])); ?>" required>
+                            <input type="date" id="date" name="date" class="form-control" value="<?php echo date('Y-m-d', strtotime($welfare['Date'])); ?>" required max="<?php echo date('Y-m-d'); ?>">
+                            <span class="standard-value">Date cannot be in the future</span>
                         </div>
                     </div>
 
@@ -552,8 +803,23 @@ if ($isPopup): ?>
                         <div class="form-group">
                             <label for="status">Status</label>
                             <select id="status" name="status" class="form-control" required>
-                                <?php foreach($welfareStatus as $value => $label): ?>
-                                    <option value="<?php echo $value; ?>" <?php echo ($value == $welfare['Status']) ? 'selected' : ''; ?>>
+                                <?php foreach($welfareStatus as $value => $label): 
+                                    $disabled = '';
+                                    $tooltipText = '';
+                                    
+                                    // Add validation rules for status changes
+                                    if (
+                                        ($welfare['Status'] === 'approved' && $value === 'pending') || 
+                                        ($welfare['Status'] === 'rejected' && $value !== 'rejected')
+                                    ) {
+                                        $disabled = 'disabled';
+                                        $tooltipText = "Cannot change from {$welfare['Status']} to $value";
+                                    }
+                                ?>
+                                    <option value="<?php echo $value; ?>" 
+                                        <?php echo ($value == $welfare['Status']) ? 'selected' : ''; ?>
+                                        <?php echo $disabled; ?>
+                                        title="<?php echo $tooltipText; ?>">
                                         <?php echo htmlspecialchars($label); ?>
                                     </option>
                                 <?php endforeach; ?>
@@ -601,14 +867,31 @@ if ($isPopup): ?>
 <?php endif; ?>
 
 <script>
-    // Form validation
+    // Form validation for date
     document.querySelector('form').addEventListener('submit', function(e) {
         const date = new Date(document.getElementById('date').value);
         const today = new Date();
         
+        // Set time to 00:00:00 for both dates for accurate comparison
+        date.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        
         if (date > today) {
             e.preventDefault();
             alert('Claim date cannot be in the future.');
+        }
+    });
+    
+    // Additional validation for status changes
+    document.getElementById('status').addEventListener('change', function() {
+        const currentStatus = '<?php echo $welfare['Status']; ?>';
+        const newStatus = this.value;
+        
+        // Check if the status change is not allowed
+        if ((currentStatus === 'approved' && newStatus === 'pending') || 
+            (currentStatus === 'rejected' && newStatus !== 'rejected')) {
+            alert('Cannot change status from ' + currentStatus + ' to ' + newStatus);
+            this.value = currentStatus; // Reset to original value
         }
     });
 </script>

@@ -324,7 +324,7 @@ $formattedTotalDues = number_format($totalDues, 2);
 
             <h1 class="page-title">Payment Dues</h1>
 
-            <a href="index.php" class="back-link">
+            <a href="home-member.php" class="back-link">
                             <i class="fas fa-arrow-left"></i> Back to Dashboard
                         </a>
     </div>
