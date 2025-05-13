@@ -89,63 +89,76 @@ if(isset($_POST['delete_payment'])) {
         // Start transaction
         $conn->begin_transaction();
         
-        // First check if this loan has any payments
-        $checkQuery = "SELECT * FROM LoanPayment WHERE LoanID = ?";
-        $stmt = $conn->prepare($checkQuery);
+        // First, check the loan status and payment status
+        $checkLoanQuery = "SELECT l.*, 
+                          (SELECT COUNT(*) FROM LoanPayment WHERE LoanID = l.LoanID) as payment_count 
+                          FROM Loan l WHERE l.LoanID = ?";
+        $stmt = $conn->prepare($checkLoanQuery);
         $stmt->bind_param("s", $loanId);
         $stmt->execute();
-        $result = $stmt->get_result();
+        $loanResult = $stmt->get_result();
         
-        // If there are payments linked to this loan, delete them first
-        if($result->num_rows > 0) {
-            // Get all payment IDs linked to this loan
-            $paymentIds = [];
-            while($row = $result->fetch_assoc()) {
-                $paymentIds[] = $row['PaymentID'];
-            }
-            
-            // Delete the loan payment links
-            $deleteLoanPaymentsQuery = "DELETE FROM LoanPayment WHERE LoanID = ?";
-            $stmt = $conn->prepare($deleteLoanPaymentsQuery);
-            $stmt->bind_param("s", $loanId);
-            $stmt->execute();
-            
-            // Delete the associated payment records
-            if(!empty($paymentIds)) {
-                foreach($paymentIds as $paymentId) {
-                    $deletePaymentQuery = "DELETE FROM Payment WHERE PaymentID = ?";
-                    $stmt = $conn->prepare($deletePaymentQuery);
-                    $stmt->bind_param("s", $paymentId);
-                    $stmt->execute();
-                }
-            }
+        if($loanResult->num_rows == 0) {
+            throw new Exception("Loan not found");
         }
         
-        // Check if this loan has any guarantors
-        $checkGuarantorsQuery = "SELECT * FROM Guarantor WHERE Loan_LoanID = ?";
-        $stmt = $conn->prepare($checkGuarantorsQuery);
-        $stmt->bind_param("s", $loanId);
-        $stmt->execute();
-        $result = $stmt->get_result();
+        $loanData = $loanResult->fetch_assoc();
+        $loanStatus = $loanData['Status'];
+        $hasPayments = ($loanData['payment_count'] > 0);
+        $memberID = $loanData['Member_MemberID'];
+        $loanAmount = $loanData['Amount'];
         
-        // If there are guarantors for this loan, delete them
-        if($result->num_rows > 0) {
+        // Case 1: Approved loan with payments - cannot delete
+        if($loanStatus == 'approved' && $hasPayments) {
+            $_SESSION['error_message'] = "Cannot delete loan #$loanId as it has already been approved and has payments.";
+            $conn->rollback();
+        }
+        // Case 2: Approved loan without payments - convert to cash payment
+        else if($loanStatus == 'approved' && !$hasPayments) {
+            // Generate a new payment ID
+            $paymentID = uniqid('PAY');
+            
+            // Insert a new payment record
+            $insertPaymentQuery = "INSERT INTO Payment (PaymentID, Payment_Type, Method, Amount, Date, Term, 
+                                  Notes, Member_MemberID, status) 
+                                  VALUES (?, 'loan_conversion', 'cash', ?, CURDATE(), ?, 
+                                  'Converted from deleted loan #$loanId', ?, 'cash')";
+            $stmt = $conn->prepare($insertPaymentQuery);
+            $stmt->bind_param("sdis", $paymentID, $loanAmount, $currentYear, $memberID);
+            $stmt->execute();
+            
+            // Delete the loan record and any guarantors
             $deleteGuarantorsQuery = "DELETE FROM Guarantor WHERE Loan_LoanID = ?";
             $stmt = $conn->prepare($deleteGuarantorsQuery);
             $stmt->bind_param("s", $loanId);
             $stmt->execute();
+            
+            $deleteLoanQuery = "DELETE FROM Loan WHERE LoanID = ?";
+            $stmt = $conn->prepare($deleteLoanQuery);
+            $stmt->bind_param("s", $loanId);
+            $stmt->execute();
+            
+            $_SESSION['success_message'] = "Loan #$loanId was converted to a cash payment and deleted successfully.";
         }
-        
-        // Finally, delete the loan record
-        $deleteLoanQuery = "DELETE FROM Loan WHERE LoanID = ?";
-        $stmt = $conn->prepare($deleteLoanQuery);
-        $stmt->bind_param("s", $loanId);
-        $stmt->execute();
+        // Case 3: Not approved (pending/rejected) - delete normally
+        else {
+            // Delete guarantors
+            $deleteGuarantorsQuery = "DELETE FROM Guarantor WHERE Loan_LoanID = ?";
+            $stmt = $conn->prepare($deleteGuarantorsQuery);
+            $stmt->bind_param("s", $loanId);
+            $stmt->execute();
+            
+            // Delete the loan record
+            $deleteLoanQuery = "DELETE FROM Loan WHERE LoanID = ?";
+            $stmt = $conn->prepare($deleteLoanQuery);
+            $stmt->bind_param("s", $loanId);
+            $stmt->execute();
+            
+            $_SESSION['success_message'] = "Loan #$loanId was successfully deleted.";
+        }
         
         // Commit transaction
         $conn->commit();
-        
-        $_SESSION['success_message'] = "Loan #$loanId was successfully deleted.";
     } catch(Exception $e) {
         // Rollback on error
         $conn->rollback();

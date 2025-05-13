@@ -333,7 +333,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     INSERT INTO Payment (
                         PaymentID, Payment_Type, Method, Amount, Date, Term,
                         Member_MemberID, status, Notes
-                    ) VALUES (?, 'Loan Return', 'system', ?, ?, ?, ?, 'cash', ?)
+                    ) VALUES (?, 'Loan Return', 'system', ?, ?, ?, ?, 'edited', ?)
                 ");
                 
                 $paymentStmt->bind_param("sdssss", 
@@ -430,7 +430,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             INSERT INTO Payment (
                                 PaymentID, Payment_Type, Method, Amount, Date, Term,
                                 Member_MemberID, status, Notes
-                            ) VALUES (?, 'Loan Adjustment', 'system', ?, ?, ?, ?, 'cash', ?)
+                            ) VALUES (?, 'Loan Adjustment', 'system', ?, ?, ?, ?, 'edited', ?)
                         ");
                         
                         $paymentStmt->bind_param("sdssss", 

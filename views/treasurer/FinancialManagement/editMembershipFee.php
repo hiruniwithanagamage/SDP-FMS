@@ -308,7 +308,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     INSERT INTO Payment (
                         PaymentID, Payment_Type, Method, Amount, Date, Term,
                         Member_MemberID, status
-                    ) VALUES (?, 'Membership Fee', 'cash', ?, ?, ?, ?, 'cash')
+                    ) VALUES (?, 'Membership Fee', 'cash', ?, ?, ?, ?, 'edited')
                 ");
                 
                 $paymentStmt->bind_param("sdsss", 
@@ -353,7 +353,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     INSERT INTO Payment (
                         PaymentID, Payment_Type, Method, Amount, Date, Term,
                         Member_MemberID, status
-                    ) VALUES (?, 'Membership Fee', 'cash', ?, ?, ?, ?, 'cash')
+                    ) VALUES (?, 'Membership Fee', 'cash', ?, ?, ?, ?, 'edited')
                 ");
                 
                 $paymentStmt->bind_param("sdsss", 
