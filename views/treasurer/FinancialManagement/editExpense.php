@@ -62,6 +62,28 @@ function getCurrentTerm() {
     return $row['year'] ?? date('Y');
 }
 
+// Function to get max loan limit and max expense limit from static table or use default values
+function getLimits() {
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT max_loan_limit FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    // Set default limits
+    $limits = [
+        'loan' => 20000,        // Default loan limit
+        'general' => 300000     // Default general expense limit
+    ];
+    
+    // If value exists in database, override default loan limit
+    if ($row && isset($row['max_loan_limit'])) {
+        $limits['loan'] = $row['max_loan_limit'];
+    }
+    
+    return $limits;
+}
+
 // Check if this expense is linked to a Death Welfare
 function isLinkedToDeathWelfare($expenseID) {
     $conn = getConnection();
@@ -88,9 +110,13 @@ if (!$expense) {
 // Check if expense is linked to Death Welfare
 $isLinked = isLinkedToDeathWelfare($expenseID);
 
+// Check if category is Adjustment - NEW VALIDATION
+$isAdjustment = ($expense['Category'] === 'Adjustment');
+
 // Get all treasurers for the dropdown
 $allTreasurers = getAllTreasurers();
 $currentTerm = getCurrentTerm();
+$limits = getLimits();
 
 // Process form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -103,120 +129,162 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $term = $_POST['term'];
     $description = $_POST['description'];
     
-    // Handle file upload if a new receipt is provided
-    $imagePath = $expense['Image']; // Default to existing image path
+    // SERVER-SIDE VALIDATION - NEW CODE
+    $validationErrors = [];
     
-    if (!empty($_FILES['receipt']['name'])) {
-        // Use the same relative path structure as in add expense
-        $uploadDir = "uploads/expenses/";
-        
-        // Create sanitized category name
-        $sanitizedCategory = preg_replace('/[^A-Za-z0-9]/', '', $category);
-        
-        // Create filename with extension
-        $fileExtension = strtolower(pathinfo($_FILES['receipt']['name'], PATHINFO_EXTENSION));
-        $fileName = $expenseID . '_' . $sanitizedCategory . '_' . date('Ymd') . '.' . $fileExtension;
-        
-        // Store physical file with correct absolute path
-        $absoluteUploadDir = $_SERVER['DOCUMENT_ROOT'] . '/SDP/uploads/expenses/';
-        
-        // Ensure directory exists
-        if (!file_exists($absoluteUploadDir)) {
-            mkdir($absoluteUploadDir, 0777, true);
-        }
-        
-        $absoluteTargetPath = $absoluteUploadDir . $fileName;
-        
-        // Check if file is a valid image
-        $allowedTypes = array('jpg', 'jpeg', 'png', 'pdf');
-        if (in_array(strtolower($fileType), $allowedTypes)) {
-            // Upload file
-            if (move_uploaded_file($_FILES["receipt"]["tmp_name"], $targetFilePath)) {
-                $imagePath = $targetFilePath;
-            } else {
-                $_SESSION['error_message'] = "Error uploading file.";
-            }
-        } else {
-            $_SESSION['error_message'] = "Only JPG, JPEG, PNG, and PDF files are allowed.";
-        }
-
-        if (move_uploaded_file($_FILES["receipt"]["tmp_name"], $absoluteTargetPath)) {
-            // Store relative path in database
-            $imagePath = $uploadDir . $fileName;
-        } else {
-            $_SESSION['error_message'] = "Error uploading file.";
-        }
+    // Validate category - NEW VALIDATION
+    if ($isAdjustment) {
+        $validationErrors[] = "Adjustment expenses cannot be edited.";
     }
     
-    try {
-        $conn = getConnection();
-        
-        // Start transaction
-        $conn->begin_transaction();
-        
-        // Check if expense is linked to Death Welfare
-        if ($isLinked) {
-            // If linked, can only update description and image
-            $stmt = $conn->prepare("
-                UPDATE Expenses SET 
-                    Description = ?,
-                    Image = ?
-                WHERE ExpenseID = ?
-            ");
-            
-            $stmt->bind_param("sss", 
-                $description, 
-                $imagePath,
-                $expenseID
-            );
-        } else {
-            // If not linked, update all fields
-            $stmt = $conn->prepare("
-                UPDATE Expenses SET 
-                    Category = ?,
-                    Method = ?,
-                    Amount = ?,
-                    Date = ?,
-                    Term = ?,
-                    Description = ?,
-                    Image = ?,
-                    Treasurer_TreasurerID = ?
-                WHERE ExpenseID = ?
-            ");
-            
-            $stmt->bind_param("ssdssisss", 
-                $category, 
-                $method, 
-                $amount, 
-                $date, 
-                $term, 
-                $description, 
-                $imagePath,
-                $treasurerID,
-                $expenseID
-            );
-        }
-        
-        $stmt->execute();
-        
-        // Commit transaction
-        $conn->commit();
-        
-        // Set success message
-        $_SESSION['success_message'] = "Expense #$expenseID successfully updated";
-        
-        // Handle redirection based on popup mode after ALL database operations are complete
+    // Validate amount - UPDATED VALIDATION
+    if (!is_numeric($amount) || $amount <= 0) {
+        $validationErrors[] = "Amount must be a positive number.";
+    }
+    
+    // Apply different limits based on category
+    $maxLimit = ($category === 'Loan') ? $limits['loan'] : $limits['general'];
+    
+    if (floatval($amount) > $maxLimit) {
+        $validationErrors[] = "Amount cannot exceed the maximum limit of Rs. " . number_format($maxLimit, 2) . " for " . $category . " category.";
+    }
+    
+    // Validate Death Welfare amount - NEW VALIDATION
+    if ($isLinked && floatval($amount) != floatval($expense['Amount'])) {
+        $validationErrors[] = "Amount cannot be changed for Death Welfare expenses.";
+    }
+    
+    // Validate date - NEW VALIDATION
+    $expenseDate = new DateTime($date);
+    $today = new DateTime();
+    if ($expenseDate > $today) {
+        $validationErrors[] = "Expense date cannot be in the future.";
+    }
+    
+    // Validate term - NEW VALIDATION
+    if (intval($term) !== intval($expense['Term'])) {
+        $validationErrors[] = "Term cannot be changed.";
+    }
+    
+    // If validation errors found, set error message and don't proceed
+    if (!empty($validationErrors)) {
+        $_SESSION['error_message'] = "Validation errors: " . implode(" ", $validationErrors);
+        // Redirect back to the same page to show error
         if (!$isPopup) {
-            header("Location: trackExpenses.php");
+            header("Location: editExpense.php?id=" . $expenseID);
             exit();
         }
-        // If it's popup mode, we'll continue rendering the page with a success message
-        // and add JavaScript to refresh the parent later
+        // For popup, we'll continue rendering with error message
+    } else {
+        // Handle file upload if a new receipt is provided
+        $imagePath = $expense['Image']; // Default to existing image path
         
-    } catch (Exception $e) {
-        // Rollback on error
-        $conn->rollback();
-        $_SESSION['error_message'] = "Error updating expense: " . $e->getMessage();
+        if (!empty($_FILES['receipt']['name'])) {
+            // Use the same relative path structure as in add expense
+            $uploadDir = "uploads/expenses/";
+            
+            // Create sanitized category name
+            $sanitizedCategory = preg_replace('/[^A-Za-z0-9]/', '', $category);
+            
+            // Create filename with extension
+            $fileExtension = strtolower(pathinfo($_FILES['receipt']['name'], PATHINFO_EXTENSION));
+            $fileName = $expenseID . '_' . $sanitizedCategory . '_' . date('Ymd') . '.' . $fileExtension;
+            
+            // Store physical file with correct absolute path
+            $absoluteUploadDir = $_SERVER['DOCUMENT_ROOT'] . '/SDP/uploads/expenses/';
+            
+            // Ensure directory exists
+            if (!file_exists($absoluteUploadDir)) {
+                mkdir($absoluteUploadDir, 0777, true);
+            }
+            
+            $absoluteTargetPath = $absoluteUploadDir . $fileName;
+            
+            // Check if file is a valid image or PDF - FIXED VALIDATION
+            $allowedTypes = array('jpg', 'jpeg', 'png', 'pdf');
+            if (in_array($fileExtension, $allowedTypes)) {
+                // Upload file
+                if (move_uploaded_file($_FILES["receipt"]["tmp_name"], $absoluteTargetPath)) {
+                    // Store relative path in database
+                    $imagePath = $uploadDir . $fileName;
+                } else {
+                    $_SESSION['error_message'] = "Error uploading file.";
+                }
+            } else {
+                $_SESSION['error_message'] = "Only JPG, JPEG, PNG, and PDF files are allowed.";
+            }
+        }
+        
+        try {
+            $conn = getConnection();
+            
+            // Start transaction
+            $conn->begin_transaction();
+            
+            // Check if expense is linked to Death Welfare
+            if ($isLinked) {
+                // If linked, can only update description and image
+                $stmt = $conn->prepare("
+                    UPDATE Expenses SET 
+                        Description = ?,
+                        Image = ?
+                    WHERE ExpenseID = ?
+                ");
+                
+                $stmt->bind_param("sss", 
+                    $description, 
+                    $imagePath,
+                    $expenseID
+                );
+            } else {
+                // If not linked, update all fields
+                $stmt = $conn->prepare("
+                    UPDATE Expenses SET 
+                        Category = ?,
+                        Method = ?,
+                        Amount = ?,
+                        Date = ?,
+                        Term = ?,
+                        Description = ?,
+                        Image = ?,
+                        Treasurer_TreasurerID = ?
+                    WHERE ExpenseID = ?
+                ");
+                
+                $stmt->bind_param("ssdssisss", 
+                    $category, 
+                    $method, 
+                    $amount, 
+                    $date, 
+                    $term, 
+                    $description, 
+                    $imagePath,
+                    $treasurerID,
+                    $expenseID
+                );
+            }
+            
+            $stmt->execute();
+            
+            // Commit transaction
+            $conn->commit();
+            
+            // Set success message
+            $_SESSION['success_message'] = "Expense #$expenseID successfully updated";
+            
+            // Handle redirection based on popup mode after ALL database operations are complete
+            if (!$isPopup) {
+                header("Location: trackExpenses.php");
+                exit();
+            }
+            // If it's popup mode, we'll continue rendering the page with a success message
+            // and add JavaScript to refresh the parent later
+            
+        } catch (Exception $e) {
+            // Rollback on error
+            $conn->rollback();
+            $_SESSION['error_message'] = "Error updating expense: " . $e->getMessage();
+        }
     }
 }
 
@@ -227,15 +295,15 @@ $categories = [
     'Utility' => 'Utility',
     'Maintenance' => 'Maintenance',
     'Event' => 'Event',
+    'Loan' => 'Loan',
+    'Adjustment' => 'Adjustment',
     'Other' => 'Other'
 ];
 
 // Payment method options
 $paymentMethods = [
     'Cash' => 'Cash',
-    'Check' => 'Check',
     'Bank Transfer' => 'Bank Transfer',
-    'Digital Payment' => 'Digital Payment'
 ];
 
 // Now output the HTML based on popup mode
@@ -568,6 +636,10 @@ if ($isPopup): ?>
                     <?php if ($isLinked): ?>
                     <p style="color: #cc0000; font-weight: bold;">This expense is linked to a Death Welfare record. Some fields are locked to maintain data integrity.</p>
                     <?php endif; ?>
+                    
+                    <?php if ($isAdjustment): ?>
+                    <p style="color: #cc0000; font-weight: bold;">This expense has an Adjustment category and cannot be edited.</p>
+                    <?php endif; ?>
                 </div>
 
                 <form method="POST" action="" enctype="multipart/form-data">
@@ -578,14 +650,14 @@ if ($isPopup): ?>
                         </div>
                         <div class="form-group">
                             <label for="treasurer_id">Treasurer</label>
-                            <select id="treasurer_id" name="treasurer_id" class="form-control" <?php echo $isLinked ? 'disabled' : ''; ?> required>
+                            <select id="treasurer_id" name="treasurer_id" class="form-control" <?php echo ($isLinked || $isAdjustment) ? 'disabled' : ''; ?> required>
                                 <?php while($treasurer = $allTreasurers->fetch_assoc()): ?>
                                     <option value="<?php echo $treasurer['TreasurerID']; ?>" <?php echo ($treasurer['TreasurerID'] == $expense['Treasurer_TreasurerID']) ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($treasurer['TreasurerID'] . ' - ' . $treasurer['Name']); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>
-                            <?php if ($isLinked): ?>
+                            <?php if ($isLinked || $isAdjustment): ?>
                             <input type="hidden" name="treasurer_id" value="<?php echo $expense['Treasurer_TreasurerID']; ?>">
                             <?php endif; ?>
                         </div>
@@ -594,21 +666,28 @@ if ($isPopup): ?>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="category">Category</label>
-                            <select id="category" name="category" class="form-control" <?php echo $isLinked ? 'disabled' : ''; ?> required>
+                            <select id="category" name="category" class="form-control" <?php echo ($isLinked || $isAdjustment) ? 'disabled' : ''; ?> required>
                                 <?php foreach($categories as $value => $label): ?>
                                     <option value="<?php echo $value; ?>" <?php echo ($value == $expense['Category']) ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($label); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
-                            <?php if ($isLinked): ?>
+                            <?php if ($isLinked || $isAdjustment): ?>
                             <input type="hidden" name="category" value="<?php echo $expense['Category']; ?>">
                             <?php endif; ?>
                         </div>
                         <div class="form-group">
                             <label for="amount">Amount (Rs.)</label>
-                            <input type="number" id="amount" name="amount" class="form-control" value="<?php echo htmlspecialchars($expense['Amount']); ?>" min="0" step="0.01" <?php echo $isLinked ? 'disabled' : ''; ?> required>
-                            <?php if ($isLinked): ?>
+                            <input type="number" id="amount" name="amount" class="form-control" value="<?php echo htmlspecialchars($expense['Amount']); ?>" min="0" step="0.01" <?php echo ($isLinked || $isAdjustment) ? 'disabled' : ''; ?> required>
+                            <div class="form-note" id="amount-note">
+                                <?php if ($expense['Category'] === 'Loan'): ?>
+                                    Maximum amount: Rs. <?php echo number_format($limits['loan'], 2); ?>
+                                <?php else: ?>
+                                    Maximum amount: Rs. <?php echo number_format($limits['general'], 2); ?>
+                                <?php endif; ?>
+                            </div>
+                            <?php if ($isLinked || $isAdjustment): ?>
                             <input type="hidden" name="amount" value="<?php echo $expense['Amount']; ?>">
                             <?php endif; ?>
                         </div>
@@ -617,21 +696,21 @@ if ($isPopup): ?>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="method">Payment Method</label>
-                            <select id="method" name="method" class="form-control" <?php echo $isLinked ? 'disabled' : ''; ?> required>
+                            <select id="method" name="method" class="form-control" <?php echo ($isLinked || $isAdjustment) ? 'disabled' : ''; ?> required>
                                 <?php foreach($paymentMethods as $value => $label): ?>
                                     <option value="<?php echo $value; ?>" <?php echo ($value == $expense['Method']) ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($label); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
-                            <?php if ($isLinked): ?>
+                            <?php if ($isLinked || $isAdjustment): ?>
                             <input type="hidden" name="method" value="<?php echo $expense['Method']; ?>">
                             <?php endif; ?>
                         </div>
                         <div class="form-group">
                             <label for="date">Date</label>
-                            <input type="date" id="date" name="date" class="form-control" value="<?php echo date('Y-m-d', strtotime($expense['Date'])); ?>" <?php echo $isLinked ? 'disabled' : ''; ?> required>
-                            <?php if ($isLinked): ?>
+                            <input type="date" id="date" name="date" class="form-control" value="<?php echo date('Y-m-d', strtotime($expense['Date'])); ?>" <?php echo ($isLinked || $isAdjustment) ? 'disabled' : ''; ?> required>
+                            <?php if ($isLinked || $isAdjustment): ?>
                             <input type="hidden" name="date" value="<?php echo date('Y-m-d', strtotime($expense['Date'])); ?>">
                             <?php endif; ?>
                         </div>
@@ -640,14 +719,13 @@ if ($isPopup): ?>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="term">Term</label>
-                            <input type="number" id="term" name="term" class="form-control" value="<?php echo htmlspecialchars($expense['Term']); ?>" <?php echo $isLinked ? 'disabled' : ''; ?> required>
-                            <?php if ($isLinked): ?>
+                            <input type="number" id="term" name="term" class="form-control" value="<?php echo htmlspecialchars($expense['Term']); ?>" disabled required>
                             <input type="hidden" name="term" value="<?php echo $expense['Term']; ?>">
-                            <?php endif; ?>
+                            <div class="form-note">Term cannot be changed.</div>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" id="receipt-group">
                             <label for="receipt">Receipt Image</label>
-                            <input type="file" id="receipt" name="receipt" class="form-control">
+                            <input type="file" id="receipt" name="receipt" class="form-control" <?php echo $isAdjustment ? 'disabled' : ''; ?>>
                             <div class="form-note">Leave empty to keep the current receipt. Only JPG, JPEG, PNG, and PDF files are allowed.</div>
                             <?php if (!empty($expense['Image'])): ?>
                             <div>
@@ -658,8 +736,17 @@ if ($isPopup): ?>
                                     if (strpos($imgPath, '../../../') === 0) {
                                         $imgPath = substr($imgPath, 9); // Remove "../../../" if it's already there
                                     }
+                                    
+                                    // Determine if it's an image or PDF for correct display
+                                    $fileExtension = strtolower(pathinfo($imgPath, PATHINFO_EXTENSION));
+                                    $isPdf = ($fileExtension === 'pdf');
                                 ?>
-                                <img src="../../../<?php echo $expense['Image']; ?>" alt="Receipt" class="receipt-preview">
+                                
+                                <?php if ($isPdf): ?>
+                                    <a href="../../../<?php echo $expense['Image']; ?>" target="_blank" class="btn btn-sm btn-info">View PDF Receipt</a>
+                                <?php else: ?>
+                                    <img src="../../../<?php echo $expense['Image']; ?>" alt="Receipt" class="receipt-preview">
+                                <?php endif; ?>
                             </div>
                             <?php endif; ?>
                         </div>
@@ -667,7 +754,10 @@ if ($isPopup): ?>
 
                     <div class="form-group">
                         <label for="description">Description</label>
-                        <textarea id="description" name="description" class="form-control" rows="3"><?php echo htmlspecialchars($expense['Description'] ?? ''); ?></textarea>
+                        <textarea id="description" name="description" class="form-control" rows="3" <?php echo $isAdjustment ? 'disabled' : ''; ?>><?php echo htmlspecialchars($expense['Description'] ?? ''); ?></textarea>
+                        <?php if ($isAdjustment): ?>
+                        <input type="hidden" name="description" value="<?php echo htmlspecialchars($expense['Description'] ?? ''); ?>">
+                        <?php endif; ?>
                     </div>
 
                     <div class="btn-container">
@@ -676,7 +766,7 @@ if ($isPopup): ?>
                         <?php else: ?>
                             <a href="trackExpenses.php" class="btn btn-secondary">Cancel</a>
                         <?php endif; ?>
-                        <button type="submit" class="btn btn-primary">Update Expense</button>
+                        <button type="submit" class="btn btn-primary" <?php echo $isAdjustment ? 'disabled' : ''; ?>>Update Expense</button>
                     </div>
                 </form>
             </div>
@@ -710,21 +800,85 @@ if ($isPopup): ?>
 <?php endif; ?>
 
 <script>
-    // Form validation
-    document.querySelector('form').addEventListener('submit', function(e) {
-        const amount = parseFloat(document.getElementById('amount').value);
+    // Form validation and dynamic UI behavior
+    document.addEventListener('DOMContentLoaded', function() {
+        const methodSelect = document.getElementById('method');
+        const receiptGroup = document.getElementById('receipt-group');
+        const amountInput = document.getElementById('amount');
+        const dateInput = document.getElementById('date');
+        const categorySelect = document.getElementById('category');
+        const amountNote = document.getElementById('amount-note');
         
-        if (isNaN(amount) || amount <= 0) {
-            e.preventDefault();
-            alert('Please enter a valid amount greater than zero.');
+        // Define limits
+        const loanLimit = <?php echo $limits['loan']; ?>;
+        const generalLimit = <?php echo $limits['general']; ?>;
+        
+        // Show/hide receipt upload based on payment method
+        function toggleReceiptVisibility() {
+            if (methodSelect.value === 'Bank Transfer') {
+                receiptGroup.style.display = 'block';
+            } else {
+                receiptGroup.style.display = '<?php echo (!empty($expense['Image'])) ? "block" : "none"; ?>';
+            }
         }
         
-        const date = new Date(document.getElementById('date').value);
-        const today = new Date();
-        
-        if (date > today) {
-            e.preventDefault();
-            alert('Expense date cannot be in the future.');
+        // Update max amount note based on category
+        function updateAmountLimit() {
+            if (categorySelect.value === 'Loan') {
+                amountNote.textContent = 'Maximum amount: Rs. ' + loanLimit.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            } else {
+                amountNote.textContent = 'Maximum amount: Rs. ' + generalLimit.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            }
         }
+        
+        // Initialize visibility and limits
+        toggleReceiptVisibility();
+        updateAmountLimit();
+        
+        // Add event listeners for changes
+        methodSelect.addEventListener('change', toggleReceiptVisibility);
+        categorySelect.addEventListener('change', updateAmountLimit);
+        
+        // Form validation before submission
+        document.querySelector('form').addEventListener('submit', function(e) {
+            let isValid = true;
+            let errorMessage = '';
+            
+            // Validate amount
+            const amount = parseFloat(amountInput.value);
+            const maxLimit = categorySelect.value === 'Loan' ? loanLimit : generalLimit;
+            
+            if (isNaN(amount) || amount <= 0) {
+                isValid = false;
+                errorMessage += 'Please enter a valid amount greater than zero. ';
+            }
+            
+            if (amount > maxLimit) {
+                isValid = false;
+                errorMessage += 'Amount cannot exceed the maximum limit of Rs. ' + maxLimit.toLocaleString() + ' for ' + categorySelect.value + ' category. ';
+            }
+            
+            // Validate date
+            const expenseDate = new Date(dateInput.value);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Reset time to beginning of day for accurate comparison
+            
+            if (expenseDate > today) {
+                isValid = false;
+                errorMessage += 'Expense date cannot be in the future. ';
+            }
+            
+            // Check if category is Death Welfare and method is appropriate
+            if (categorySelect.value === 'Death Welfare' && methodSelect.value !== 'Bank Transfer') {
+                isValid = false;
+                errorMessage += 'Death Welfare expenses must use Bank Transfer payment method. ';
+            }
+            
+            // If there are validation errors, prevent form submission and show alert
+            if (!isValid) {
+                e.preventDefault();
+                alert('Validation Error: ' + errorMessage);
+            }
+        });
     });
 </script>

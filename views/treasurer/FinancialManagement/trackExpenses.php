@@ -108,8 +108,8 @@ if(isset($_GET['delete']) && isset($_GET['id'])) {
     $expenseId = $_GET['id'];
     $currentYear = isset($_GET['year']) ? $_GET['year'] : getCurrentTerm();
     
-    // Check if this expense is linked to a Death Welfare
-    $checkQuery = "SELECT * FROM DeathWelfare WHERE Expense_ExpenseID = ?";
+    // First check if this expense is an Adjustment - if so, do not allow deletion
+    $checkCategoryQuery = "SELECT Category FROM Expenses WHERE ExpenseID = ?";
     
     try {
         $conn = getConnection();
@@ -117,23 +117,35 @@ if(isset($_GET['delete']) && isset($_GET['id'])) {
         // Start transaction
         $conn->begin_transaction();
         
-        // Check for linked records
-        $stmt = $conn->prepare($checkQuery);
+        // Check if this is an Adjustment expense
+        $stmt = $conn->prepare($checkCategoryQuery);
         $stmt->bind_param("s", $expenseId);
         $stmt->execute();
-        $result = $stmt->get_result();
+        $categoryResult = $stmt->get_result();
+        $categoryRow = $categoryResult->fetch_assoc();
         
-        if($result->num_rows > 0) {
-            $_SESSION['error_message'] = "Cannot delete this expense as it is linked to a Death Welfare record.";
+        if($categoryRow && $categoryRow['Category'] === 'Adjustment') {
+            $_SESSION['error_message'] = "Cannot delete this expense as it is an Adjustment record.";
         } else {
-            // Delete the expense
-            $deleteQuery = "DELETE FROM Expenses WHERE ExpenseID = ?";
-            $stmt = $conn->prepare($deleteQuery);
+            // Then check if this expense is linked to a Death Welfare
+            $checkQuery = "SELECT * FROM DeathWelfare WHERE Expense_ExpenseID = ?";
+            $stmt = $conn->prepare($checkQuery);
             $stmt->bind_param("s", $expenseId);
             $stmt->execute();
+            $result = $stmt->get_result();
             
-            $conn->commit();
-            $_SESSION['success_message'] = "Expense #$expenseId was successfully deleted.";
+            if($result->num_rows > 0) {
+                $_SESSION['error_message'] = "Cannot delete this expense as it is linked to a Death Welfare record.";
+            } else {
+                // Delete the expense
+                $deleteQuery = "DELETE FROM Expenses WHERE ExpenseID = ?";
+                $stmt = $conn->prepare($deleteQuery);
+                $stmt->bind_param("s", $expenseId);
+                $stmt->execute();
+                
+                $conn->commit();
+                $_SESSION['success_message'] = "Expense #$expenseId was successfully deleted.";
+            }
         }
     } catch(Exception $e) {
         // Rollback on error
