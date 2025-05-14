@@ -54,6 +54,104 @@ function getFineSettings() {
     return $result->fetch_assoc();
 }
 
+/**
+ * Function to generate a unique payment ID
+ * @param string $term The term year for the payment
+ * @return string The generated payment ID
+ */
+function generatePaymentID($term = null) {
+    $conn = getConnection();
+    
+    // Get current year if term is not provided
+    if (empty($term)) {
+        $term = date('Y');
+    }
+    
+    // Extract the last 2 digits of the term
+    $shortTerm = substr((string)$term, -2);
+    
+    // Find the highest sequence number for the current term
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(PaymentID, 6) AS UNSIGNED)) as max_seq 
+        FROM Payment 
+        WHERE PaymentID LIKE 'PAY{$shortTerm}%'
+    ");
+    
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    $nextSeq = 1; // Default starting value
+    if ($row && $row['max_seq']) {
+        $nextSeq = $row['max_seq'] + 1;
+    }
+    
+    // Format: PAY followed by last 2 digits of term and sequence number
+    // Use leading zeros for numbers 1-9, no leading zeros after 10
+    if ($nextSeq < 10) {
+        return 'PAY' . $shortTerm . '0' . $nextSeq;
+    } else {
+        return 'PAY' . $shortTerm . $nextSeq;
+    }
+}
+
+/**
+ * Function to generate a unique expense ID
+ * @param string $term The term year for the expense
+ * @return string The generated expense ID
+ */
+function generateExpenseID($term = null) {
+    $conn = getConnection();
+    
+    // Get current year if term is not provided
+    if (empty($term)) {
+        $term = date('Y');
+    }
+    
+    // Extract the last 2 digits of the term
+    $shortTerm = substr((string)$term, -2);
+    
+    // Find the highest sequence number for the current term
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(ExpenseID, 6) AS UNSIGNED)) as max_seq 
+        FROM Expenses 
+        WHERE ExpenseID LIKE 'EXP{$shortTerm}%'
+    ");
+    
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    $nextSeq = 1; // Default starting value
+    if ($row && $row['max_seq']) {
+        $nextSeq = $row['max_seq'] + 1;
+    }
+
+    // Format: EXP followed by last 2 digits of term and sequence number
+    // Use leading zeros for numbers 1-9, no leading zeros after 10
+    if ($nextSeq < 10) {
+        return 'EXP' . $shortTerm . '0' . $nextSeq;
+    } else {
+        return 'EXP' . $shortTerm . $nextSeq;
+    }
+}
+
+/**
+ * Function to get active treasurer ID
+ * @return string|null The active treasurer ID or null if not found
+ */
+function getActiveTreasurer() {
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows === 0) {
+        return null;
+    }
+    $row = $result->fetch_assoc();
+    return $row['TreasurerID'];
+}
+
 // Get fine details
 $fine = getFineDetails($fineID);
 if (!$fine) {
@@ -66,6 +164,16 @@ if (!$fine) {
 $allMembers = getAllMembers();
 $fineSettings = getFineSettings();
 $currentActiveTerm = $fineSettings['year'];
+$activeTreasurer = getActiveTreasurer(); 
+
+// Check if treasurer exists
+if (!$activeTreasurer) {
+    $_SESSION['error_message'] = "No active treasurer found. Please set an active treasurer first.";
+    if (!$isPopup) {
+        header("Location: fine.php");
+        exit();
+    }
+}
 
 // Process form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -82,6 +190,170 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         
         // Start transaction
         $conn->begin_transaction();
+        
+        // VALIDATION 1: If fine is paid, member cannot be changed
+        if ($fine['IsPaid'] === 'Yes' && $memberID !== $fine['Member_MemberID']) {
+            throw new Exception("Member cannot be changed for a paid fine");
+        }
+        
+        // VALIDATION 2: If fine is paid, type cannot be changed
+        if ($fine['IsPaid'] === 'Yes' && $description !== $fine['Description']) {
+            throw new Exception("Fine type cannot be changed for a paid fine");
+        }
+        
+        // VALIDATION 3: Check if date is not in the future
+        $currentDate = date('Y-m-d');
+        if ($date > $currentDate) {
+            throw new Exception("Fine date cannot be in the future");
+        }
+        
+        // VALIDATION 4: Amount should match the fine type
+        $fineAmount = 0;
+        switch ($description) {
+            case 'late':
+                $fineAmount = $fineSettings['late_fine'];
+                break;
+            case 'absent':
+                $fineAmount = $fineSettings['absent_fine'];
+                break;
+            case 'violation':
+                $fineAmount = $fineSettings['rules_violation_fine'];
+                break;
+        }
+        
+        if (floatval($amount) !== floatval($fineAmount)) {
+            throw new Exception("Amount must match the fine type. The amount for " . ucfirst($description) . " Fine is Rs. " . number_format($fineAmount, 2));
+        }
+        
+        // Get old status for comparison
+        $oldStatus = $fine['IsPaid'];
+        
+        // VALIDATION 5: Handle status changes (paid/unpaid)
+        if ($oldStatus !== $isPaid) {
+            // Case 1: Changing from unpaid to paid
+            if ($oldStatus === 'No' && $isPaid === 'Yes') {
+                // Generate a payment ID
+                $paymentID = generatePaymentID($term);
+                
+                // Create payment record
+                $paymentStmt = $conn->prepare("
+                    INSERT INTO Payment (
+                        PaymentID, Payment_Type, Method, Amount, Date, Term,
+                        Member_MemberID, status, Notes
+                    ) VALUES (?, 'Fine', 'system', ?, ?, ?, ?, 'transfer', ?)
+                ");
+                
+                $notes = "Payment for Fine #$fineID - " . ucfirst($description) . " Fine";
+                
+                $paymentStmt->bind_param("sdssss", 
+                    $paymentID,
+                    $amount,
+                    $currentDate,
+                    $term,
+                    $memberID,
+                    $notes
+                );
+                
+                if (!$paymentStmt->execute()) {
+                    throw new Exception("Failed to create payment record: " . $conn->error);
+                }
+                
+                // Create entry in FinePayment junction table
+                $junctionStmt = $conn->prepare("
+                    INSERT INTO FinePayment (FineID, PaymentID)
+                    VALUES (?, ?)
+                ");
+                
+                $junctionStmt->bind_param("ss", 
+                    $fineID,
+                    $paymentID
+                );
+                
+                if (!$junctionStmt->execute()) {
+                    throw new Exception("Failed to create fine-payment relationship: " . $conn->error);
+                }
+                
+                // Update the fine with the payment ID
+                $updatePaymentIDStmt = $conn->prepare("
+                    UPDATE Fine SET Payment_PaymentID = ? WHERE FineID = ?
+                ");
+                
+                $updatePaymentIDStmt->bind_param("ss", 
+                    $paymentID,
+                    $fineID
+                );
+                
+                if (!$updatePaymentIDStmt->execute()) {
+                    throw new Exception("Failed to update fine with payment ID: " . $conn->error);
+                }
+            }
+            
+            // Case 2: Changing from paid to unpaid
+            if ($oldStatus === 'Yes' && $isPaid === 'No') {
+                // Check if payment ID exists
+                if (!empty($fine['Payment_PaymentID'])) {
+                    // Create expense record for the reversal
+                    $expenseID = generateExpenseID($term);
+                    $expenseDescription = "Edited Fine - Reverting paid fine #$fineID to unpaid"; // Changed variable name
+                    
+                    $expenseStmt = $conn->prepare("
+                        INSERT INTO Expenses (
+                            ExpenseID, Category, Method, Amount, Date, Term, 
+                            Description, Treasurer_TreasurerID
+                        ) VALUES (?, 'Adjustment', 'System', ?, ?, ?, ?, ?)
+                    ");
+                    
+                    $expenseStmt->bind_param("sdssss", 
+                        $expenseID,
+                        $amount,
+                        $currentDate,
+                        $term,
+                        $expenseDescription, // Use the renamed variable
+                        $activeTreasurer
+                    );
+                    
+                    if (!$expenseStmt->execute()) {
+                        throw new Exception("Failed to create expense record: " . $conn->error);
+                    }
+                    
+                    // Remove the payment ID from the fine
+                    $removePaymentStmt = $conn->prepare("
+                        UPDATE Fine SET Payment_PaymentID = NULL WHERE FineID = ?
+                    ");
+                    
+                    $removePaymentStmt->bind_param("s", $fineID);
+                    
+                    if (!$removePaymentStmt->execute()) {
+                        throw new Exception("Failed to remove payment reference from fine: " . $conn->error);
+                    }
+                    
+                    // Delete from FinePayment junction table
+                    $deleteJunctionStmt = $conn->prepare("
+                        DELETE FROM FinePayment WHERE FineID = ? AND PaymentID = ?
+                    ");
+                    
+                    $deleteJunctionStmt->bind_param("ss", 
+                        $fineID,
+                        $fine['Payment_PaymentID']
+                    );
+                    
+                    if (!$deleteJunctionStmt->execute()) {
+                        throw new Exception("Failed to remove fine-payment relationship: " . $conn->error);
+                    }
+                    
+                    // Delete the payment record
+                    $deletePaymentStmt = $conn->prepare("
+                        DELETE FROM Payment WHERE PaymentID = ?
+                    ");
+                    
+                    $deletePaymentStmt->bind_param("s", $fine['Payment_PaymentID']);
+                    
+                    if (!$deletePaymentStmt->execute()) {
+                        throw new Exception("Failed to delete payment record: " . $conn->error);
+                    }
+                }
+            }
+        }
         
         // Update fine
         $stmt = $conn->prepare("
@@ -475,24 +747,34 @@ if ($isPopup): ?>
                         </div>
                         <div class="form-group">
                             <label for="member_id">Member</label>
-                            <select id="member_id" name="member_id" class="form-control" required>
-                                <?php while($member = $allMembers->fetch_assoc()): ?>
+                            <select id="member_id" name="member_id" class="form-control" required <?php echo ($fine['IsPaid'] == 'Yes') ? 'disabled' : ''; ?>>
+                                <?php 
+                                $allMembers->data_seek(0); // Reset result pointer
+                                while($member = $allMembers->fetch_assoc()): 
+                                ?>
                                     <option value="<?php echo $member['MemberID']; ?>" <?php echo ($member['MemberID'] == $fine['Member_MemberID']) ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($member['MemberID'] . ' - ' . $member['Name']); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>
+                            <?php if ($fine['IsPaid'] == 'Yes'): ?>
+                                <!-- Hidden field to ensure the member ID is submitted when the select is disabled -->
+                                <input type="hidden" name="member_id" value="<?php echo htmlspecialchars($fine['Member_MemberID']); ?>">
+                                <small>Member cannot be changed for a paid fine</small>
+                            <?php endif; ?>
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group">
                             <label for="amount">Fine Amount (Rs.)</label>
-                            <input type="number" id="amount" name="amount" class="form-control" value="<?php echo htmlspecialchars($fine['Amount']); ?>" min="0" step="0.01" required>
+                            <input type="number" id="amount" name="amount" class="form-control" value="<?php echo htmlspecialchars($fine['Amount']); ?>" min="0" step="0.01" required readonly>
+                            <small>Amount is automatically set based on fine type</small>
                         </div>
                         <div class="form-group">
                             <label for="date">Date</label>
-                            <input type="date" id="date" name="date" class="form-control" value="<?php echo date('Y-m-d', strtotime($fine['Date'])); ?>" required>
+                            <input type="date" id="date" name="date" class="form-control" value="<?php echo date('Y-m-d', strtotime($fine['Date'])); ?>" max="<?php echo date('Y-m-d'); ?>" required>
+                            <small>Date cannot be in the future</small>
                         </div>
                     </div>
 
@@ -509,13 +791,18 @@ if ($isPopup): ?>
                         </div>
                         <div class="form-group">
                             <label for="description">Fine Type</label>
-                            <select id="description" name="description" class="form-control" onchange="updateAmount()">
+                            <select id="description" name="description" class="form-control" onchange="updateAmount()" <?php echo ($fine['IsPaid'] == 'Yes') ? 'disabled' : ''; ?>>
                                 <?php foreach($fineTypes as $value => $label): ?>
                                     <option value="<?php echo $value; ?>" <?php echo ($value == $fine['Description']) ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($label); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
+                            <?php if ($fine['IsPaid'] == 'Yes'): ?>
+                                <!-- Hidden field to ensure the description is submitted when the select is disabled -->
+                                <input type="hidden" name="description" value="<?php echo htmlspecialchars($fine['Description']); ?>">
+                                <small>Fine type cannot be changed for a paid fine</small>
+                            <?php endif; ?>
                         </div>
                     </div>
 
@@ -538,7 +825,7 @@ if ($isPopup): ?>
     // If form was submitted successfully in popup mode, pass message to parent
     window.parent.showAlert('success', 'Fine #<?php echo $fineID; ?> successfully updated');
     window.parent.closeEditModal();
-    // Don't reload the entire page as it will lose the alert
+    window.parent.updateFilters(); // Refresh the parent page to show updated data
 </script>
 <?php elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_SESSION['error_message'])): ?>
 <script>
@@ -581,20 +868,43 @@ if ($isPopup): ?>
 
     // Form validation
     document.querySelector('form').addEventListener('submit', function(e) {
-        const amount = parseFloat(document.getElementById('amount').value);
+        const date = document.getElementById('date').value;
+        const currentDate = new Date().toISOString().split('T')[0];
         
-        if (isNaN(amount) || amount <= 0) {
+        // Validate date is not in the future
+        if (date > currentDate) {
             e.preventDefault();
-            alert('Please enter a valid amount greater than zero.');
+            alert('Fine date cannot be in the future.');
+            return;
+        }
+        
+        // Check if fine type and amount match
+        const fineType = document.getElementById('description').value;
+        const amount = parseFloat(document.getElementById('amount').value);
+        let correctAmount = 0;
+        
+        switch(fineType) {
+            case 'late':
+                correctAmount = <?php echo (float)$fineSettings['late_fine']; ?>;
+                break;
+            case 'absent':
+                correctAmount = <?php echo (float)$fineSettings['absent_fine']; ?>;
+                break;
+            case 'violation':
+                correctAmount = <?php echo (float)$fineSettings['rules_violation_fine']; ?>;
+                break;
+        }
+        
+        if (amount !== correctAmount) {
+            e.preventDefault();
+            alert('Fine amount must match the selected fine type. The correct amount for ' + 
+                  fineType.charAt(0).toUpperCase() + fineType.slice(1) + ' Fine is Rs. ' + 
+                  correctAmount.toFixed(2));
         }
     });
     
     // On page load, ensure the amount matches the fine type and current settings
     document.addEventListener('DOMContentLoaded', function() {
-        // Only update if fine type matches one of the standard types
-        const currentType = document.getElementById('description').value;
-        if (currentType === 'late' || currentType === 'absent' || currentType === 'violation') {
-            updateAmount();
-        }
+        updateAmount();
     });
 </script>

@@ -85,7 +85,49 @@ if(isset($_POST['delete_fine'])) {
         // Start transaction
         $conn->begin_transaction();
         
-        // First check if this fine has any payments
+        // First, get fine details
+        $getFineQuery = "SELECT * FROM Fine WHERE FineID = ?";
+        $stmt = $conn->prepare($getFineQuery);
+        $stmt->bind_param("s", $fineId);
+        $stmt->execute();
+        $fineResult = $stmt->get_result();
+        
+        if($fineResult->num_rows == 0) {
+            throw new Exception("Fine not found");
+        }
+        
+        $fineData = $fineResult->fetch_assoc();
+        $isPaid = ($fineData['IsPaid'] === 'Yes');
+        $fineAmount = $fineData['Amount'];
+        $memberID = $fineData['Member_MemberID'];
+        $fineDescription = $fineData['Description'];
+        
+        // If the fine has been paid, create an expense adjustment record
+        if($isPaid) {
+            // Get current active treasurer ID
+            $treasurerQuery = "SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1";
+            $treasurerResult = search($treasurerQuery);
+            $treasurerRow = $treasurerResult->fetch_assoc();
+            $treasurerID = $treasurerRow['TreasurerID'];
+            
+            // Generate a new expense ID
+            $expenseID = generateExpenseID($term = null);
+            
+            // Insert a new expense record
+            $insertExpenseQuery = "INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, 
+                                  Description, Treasurer_TreasurerID) 
+                                  VALUES (?, 'adjustment', 'system', ?, CURDATE(), ?, 
+                                  'Deleted Fine - Deleting paid fine #$fineId for $fineDescription', ?)";
+            $stmt = $conn->prepare($insertExpenseQuery);
+            $stmt->bind_param("sdis", $expenseID, $fineAmount, $currentYear, $treasurerID);
+            $stmt->execute();
+            
+            $_SESSION['success_message'] = "Fine #$fineId was deleted and recorded as an expense adjustment.";
+        } else {
+            $_SESSION['success_message'] = "Fine #$fineId was successfully deleted.";
+        }
+        
+        // Check if this fine has any payments
         $checkQuery = "SELECT * FROM Payment p 
                       JOIN FinePayment fp ON p.PaymentID = fp.PaymentID
                       WHERE fp.FineID = ?";
@@ -125,10 +167,23 @@ if(isset($_POST['delete_fine'])) {
         $stmt->bind_param("s", $fineId);
         $stmt->execute();
         
+        // Add to change log
+        $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, UserID, TreasurerID, OldValues, NewValues, 
+                    ChangeDetails) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        $recordType = "Fine";
+        $userId = $_SESSION['user_id'] ?? 'Unknown';
+        $treasurerId = $treasurerID ?? 'Unknown';
+        $oldValues = json_encode($fineData);
+        $newValues = "{}";
+        $changeDetails = "Deleted fine record #$fineId";
+        
+        $stmt = $conn->prepare($logQuery);
+        $stmt->bind_param("sssssss", $recordType, $fineId, $userId, $treasurerId, $oldValues, $newValues, $changeDetails);
+        $stmt->execute();
+        
         // Commit transaction
         $conn->commit();
         
-        $_SESSION['success_message'] = "Fine #$fineId was successfully deleted.";
     } catch(Exception $e) {
         // Rollback on error
         $conn->rollback();
@@ -138,6 +193,42 @@ if(isset($_POST['delete_fine'])) {
     // Redirect back to fine page
     header("Location: fine.php?year=" . $currentYear);
     exit();
+}
+
+function generateExpenseID($term = null) {
+    $conn = getConnection();
+    
+    // Get current year if term is not provided
+    if (empty($term)) {
+        $term = date('Y');
+    }
+    
+    // Extract the last 2 digits of the term
+    $shortTerm = substr((string)$term, -2);
+    
+    // Find the highest sequence number for the current term
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(ExpenseID, 6) AS UNSIGNED)) as max_seq 
+        FROM Expenses 
+        WHERE ExpenseID LIKE 'EXP{$shortTerm}%'
+    ");
+    
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    $nextSeq = 1; // Default starting value
+    if ($row && $row['max_seq']) {
+        $nextSeq = $row['max_seq'] + 1;
+    }
+
+    // Format: EXP followed by last 2 digits of term and sequence number
+    // Use leading zeros for numbers 1-9, no leading zeros after 10
+    if ($nextSeq < 10) {
+        return 'EXP' . $shortTerm . '0' . $nextSeq;
+    } else {
+        return 'EXP' . $shortTerm . $nextSeq;
+    }
 }
 
 // Function to check if financial report for a specific term is approved
