@@ -62,26 +62,14 @@ function getCurrentTerm() {
     return $row['year'] ?? date('Y');
 }
 
-// Function to get max loan limit and max expense limit from static table or use default values
-function getLimits() {
+// Function to get max loan limit from static table
+function getMaxLoanLimit() {
     $conn = getConnection();
     $stmt = $conn->prepare("SELECT max_loan_limit FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1");
     $stmt->execute();
     $result = $stmt->get_result();
     $row = $result->fetch_assoc();
-    
-    // Set default limits
-    $limits = [
-        'loan' => 20000,        // Default loan limit
-        'general' => 300000     // Default general expense limit
-    ];
-    
-    // If value exists in database, override default loan limit
-    if ($row && isset($row['max_loan_limit'])) {
-        $limits['loan'] = $row['max_loan_limit'];
-    }
-    
-    return $limits;
+    return $row['max_loan_limit'] ?? 50000; // Default fallback value if not found
 }
 
 // Check if this expense is linked to a Death Welfare
@@ -110,13 +98,13 @@ if (!$expense) {
 // Check if expense is linked to Death Welfare
 $isLinked = isLinkedToDeathWelfare($expenseID);
 
-// Check if category is Adjustment - NEW VALIDATION
+// Check if category is Adjustment
 $isAdjustment = ($expense['Category'] === 'Adjustment');
 
 // Get all treasurers for the dropdown
 $allTreasurers = getAllTreasurers();
 $currentTerm = getCurrentTerm();
-$limits = getLimits();
+$maxLoanLimit = getMaxLoanLimit();
 
 // Process form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -129,39 +117,39 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $term = $_POST['term'];
     $description = $_POST['description'];
     
-    // SERVER-SIDE VALIDATION - NEW CODE
+    // SERVER-SIDE VALIDATION
     $validationErrors = [];
     
-    // Validate category - NEW VALIDATION
+    // Validate category - prevent editing Adjustment expenses
     if ($isAdjustment) {
         $validationErrors[] = "Adjustment expenses cannot be edited.";
     }
     
-    // Validate amount - UPDATED VALIDATION
+    // Validate amount
     if (!is_numeric($amount) || $amount <= 0) {
         $validationErrors[] = "Amount must be a positive number.";
     }
     
-    // Apply different limits based on category
-    $maxLimit = ($category === 'Loan') ? $limits['loan'] : $limits['general'];
-    
-    if (floatval($amount) > $maxLimit) {
-        $validationErrors[] = "Amount cannot exceed the maximum limit of Rs. " . number_format($maxLimit, 2) . " for " . $category . " category.";
+    if (floatval($amount) > $maxLoanLimit) {
+        $validationErrors[] = "Amount cannot exceed the maximum limit of Rs. " . number_format($maxLoanLimit, 2);
     }
     
-    // Validate Death Welfare amount - NEW VALIDATION
+    // Validate Death Welfare amount - prevent changing amount for Death Welfare expenses
     if ($isLinked && floatval($amount) != floatval($expense['Amount'])) {
         $validationErrors[] = "Amount cannot be changed for Death Welfare expenses.";
     }
     
-    // Validate date - NEW VALIDATION
+    // Validate date - prevent future dates
     $expenseDate = new DateTime($date);
+    $expenseDate->setTime(0, 0, 0);
+
     $today = new DateTime();
+    $today->setTime(0, 0, 0);
     if ($expenseDate > $today) {
         $validationErrors[] = "Expense date cannot be in the future.";
     }
     
-    // Validate term - NEW VALIDATION
+    // Validate term - prevent changing term
     if (intval($term) !== intval($expense['Term'])) {
         $validationErrors[] = "Term cannot be changed.";
     }
@@ -200,7 +188,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             
             $absoluteTargetPath = $absoluteUploadDir . $fileName;
             
-            // Check if file is a valid image or PDF - FIXED VALIDATION
+            // Check if file is a valid image or PDF
             $allowedTypes = array('jpg', 'jpeg', 'png', 'pdf');
             if (in_array($fileExtension, $allowedTypes)) {
                 // Upload file
@@ -288,15 +276,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 }
 
-// Category options
+// Category options - removed Adjustment from selectable options
 $categories = [
     'Death Welfare' => 'Death Welfare',
     'Administrative' => 'Administrative',
     'Utility' => 'Utility',
     'Maintenance' => 'Maintenance',
     'Event' => 'Event',
-    'Loan' => 'Loan',
-    'Adjustment' => 'Adjustment',
     'Other' => 'Other'
 ];
 
@@ -667,7 +653,15 @@ if ($isPopup): ?>
                         <div class="form-group">
                             <label for="category">Category</label>
                             <select id="category" name="category" class="form-control" <?php echo ($isLinked || $isAdjustment) ? 'disabled' : ''; ?> required>
-                                <?php foreach($categories as $value => $label): ?>
+                                <?php
+                                // Handle Adjustment category specially
+                                if ($expense['Category'] === 'Adjustment') {
+                                    // If current expense is Adjustment, show it as an option
+                                    echo '<option value="Adjustment" selected>Adjustment</option>';
+                                }
+                                
+                                // Add all regular category options
+                                foreach($categories as $value => $label): ?>
                                     <option value="<?php echo $value; ?>" <?php echo ($value == $expense['Category']) ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($label); ?>
                                     </option>
@@ -679,14 +673,8 @@ if ($isPopup): ?>
                         </div>
                         <div class="form-group">
                             <label for="amount">Amount (Rs.)</label>
-                            <input type="number" id="amount" name="amount" class="form-control" value="<?php echo htmlspecialchars($expense['Amount']); ?>" min="0" step="0.01" <?php echo ($isLinked || $isAdjustment) ? 'disabled' : ''; ?> required>
-                            <div class="form-note" id="amount-note">
-                                <?php if ($expense['Category'] === 'Loan'): ?>
-                                    Maximum amount: Rs. <?php echo number_format($limits['loan'], 2); ?>
-                                <?php else: ?>
-                                    Maximum amount: Rs. <?php echo number_format($limits['general'], 2); ?>
-                                <?php endif; ?>
-                            </div>
+                            <input type="number" id="amount" name="amount" class="form-control" value="<?php echo htmlspecialchars($expense['Amount']); ?>" min="0" max="<?php echo $maxLoanLimit; ?>" step="0.01" <?php echo ($isLinked || $isAdjustment) ? 'disabled' : ''; ?> required>
+                            <div class="form-note">Maximum amount: Rs. <?php echo number_format($maxLoanLimit, 2); ?></div>
                             <?php if ($isLinked || $isAdjustment): ?>
                             <input type="hidden" name="amount" value="<?php echo $expense['Amount']; ?>">
                             <?php endif; ?>
@@ -807,11 +795,6 @@ if ($isPopup): ?>
         const amountInput = document.getElementById('amount');
         const dateInput = document.getElementById('date');
         const categorySelect = document.getElementById('category');
-        const amountNote = document.getElementById('amount-note');
-        
-        // Define limits
-        const loanLimit = <?php echo $limits['loan']; ?>;
-        const generalLimit = <?php echo $limits['general']; ?>;
         
         // Show/hide receipt upload based on payment method
         function toggleReceiptVisibility() {
@@ -822,22 +805,11 @@ if ($isPopup): ?>
             }
         }
         
-        // Update max amount note based on category
-        function updateAmountLimit() {
-            if (categorySelect.value === 'Loan') {
-                amountNote.textContent = 'Maximum amount: Rs. ' + loanLimit.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-            } else {
-                amountNote.textContent = 'Maximum amount: Rs. ' + generalLimit.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-            }
-        }
-        
-        // Initialize visibility and limits
+        // Initialize visibility
         toggleReceiptVisibility();
-        updateAmountLimit();
         
-        // Add event listeners for changes
+        // Add event listener for changes
         methodSelect.addEventListener('change', toggleReceiptVisibility);
-        categorySelect.addEventListener('change', updateAmountLimit);
         
         // Form validation before submission
         document.querySelector('form').addEventListener('submit', function(e) {
@@ -846,7 +818,7 @@ if ($isPopup): ?>
             
             // Validate amount
             const amount = parseFloat(amountInput.value);
-            const maxLimit = categorySelect.value === 'Loan' ? loanLimit : generalLimit;
+            const maxLimit = <?php echo $maxLoanLimit; ?>;
             
             if (isNaN(amount) || amount <= 0) {
                 isValid = false;
@@ -855,13 +827,15 @@ if ($isPopup): ?>
             
             if (amount > maxLimit) {
                 isValid = false;
-                errorMessage += 'Amount cannot exceed the maximum limit of Rs. ' + maxLimit.toLocaleString() + ' for ' + categorySelect.value + ' category. ';
+                errorMessage += 'Amount cannot exceed the maximum limit of Rs. ' + maxLimit.toLocaleString() + '. ';
             }
             
             // Validate date
             const expenseDate = new Date(dateInput.value);
+            expenseDate.setHours(0, 0, 0, 0);
+
             const today = new Date();
-            today.setHours(0, 0, 0, 0); // Reset time to beginning of day for accurate comparison
+            today.setHours(0, 0, 0, 0);
             
             if (expenseDate > today) {
                 isValid = false;

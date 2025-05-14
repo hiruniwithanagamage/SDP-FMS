@@ -4,7 +4,6 @@ require_once "../../config/database.php";
 
 function createExpenseRecord($loanId, $amount) {
     try {
-        // Use the existing functions from your database config
         // Get treasurer ID from User table using prepared statement
         $treasurerQuery = prepare("SELECT Treasurer_TreasurerID FROM User WHERE UserId = ?");
         $treasurerQuery->bind_param("s", $_SESSION['user_id']);
@@ -16,24 +15,40 @@ function createExpenseRecord($loanId, $amount) {
             throw new Exception("Invalid Treasurer ID");
         }
 
-        // Generate Expense ID
+        // Get current active term (year)
+        $termQuery = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+        $termResult = search($termQuery);
+        
+        if (!$termResult || $termResult->num_rows === 0) {
+            throw new Exception("Could not determine active term");
+        }
+        
+        $termData = $termResult->fetch_assoc();
+        $activeTerm = $termData['year'];
+        
+        // Get last 2 digits of the active term
+        $termSuffix = substr($activeTerm, -2);
+        
+        // Find the highest sequential number for the current term
         $sql = "SELECT ExpenseID FROM Expenses 
-                WHERE ExpenseID LIKE 'EXP%' 
+                WHERE ExpenseID LIKE 'EXP$termSuffix%' 
                 ORDER BY ExpenseID DESC LIMIT 1";
-        $result = search($sql); // Using your existing search function
+        $result = search($sql);
         
         if ($result && $result->num_rows > 0) {
             $lastId = $result->fetch_assoc()['ExpenseID'];
-            $lastNum = intval(substr($lastId, 3));
-            $newNum = $lastNum + 1;
-            $expenseId = 'EXP' . str_pad($newNum, 3, '0', STR_PAD_LEFT);
+            // Extract the sequential number (last 2 characters of the ID)
+            $lastSeq = intval(substr($lastId, -2));
+            $newSeq = $lastSeq + 1;
+            $expenseId = 'EXP' . $termSuffix . str_pad($newSeq, 2, '0', STR_PAD_LEFT);
         } else {
-            $expenseId = 'EXP001';
+            // If no existing IDs for this term, start with 01
+            $expenseId = 'EXP' . $termSuffix . '01';
         }
 
         // Set up expense data
         $date = date('Y-m-d');
-        $term = date('Y');
+        $term = $activeTerm; // Use the active term we retrieved
         $treasurerId = $treasurerData['Treasurer_TreasurerID'];
         $category = 'Loan';
         $method = 'System';
@@ -93,15 +108,6 @@ function processLoanUpdate() {
                     throw new Exception("Loan record not found");
                 }
 
-                // Get current interest rate from Static table
-                $interestQuery = "SELECT interest FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
-                $interestResult = search($interestQuery);
-                $interestRate = 3; // Default value if query fails
-                if ($interestResult && $interestResult->num_rows > 0) {
-                    $interestData = $interestResult->fetch_assoc();
-                    $interestRate = $interestData['interest'];
-                }
-                
                 // Get current interest rate from Static table
                 $interestQuery = "SELECT interest FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
                 $interestResult = search($interestQuery);
@@ -219,6 +225,21 @@ $result = getPendingLoans();
             color: #1e3c72;
             font-weight: 500;
             margin-bottom: 1rem;
+        }
+
+        .cancel-btn {
+            padding: 0.8rem 1.8rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            background-color: #e0e0e0;
+            color: #333;
+            transition: background-color 0.3s;
+        }
+
+        .cancel-btn:hover {
+            background-color: #d0d0d0;
         }
 
         .loan-amount {

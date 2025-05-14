@@ -59,7 +59,7 @@ function getExpenses($year, $category = '', $method = '', $fromDate = '', $toDat
         $sql .= " AND e.Date <= '$toDate'";
     }
     
-    $sql .= " ORDER BY e.Date DESC";
+    $sql .= " ORDER BY e.ExpenseID ASC";
     
     return search($sql);
 }
