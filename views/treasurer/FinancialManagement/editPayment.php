@@ -481,9 +481,9 @@ $paymentMethods = [
 
 // Payment status
 $paymentStatus = [
-    'cash' => 'Cash',
-    'online' => 'Online',
-    'transfer' => 'Bank Transfer'
+    'self' => 'self',
+    'system' => 'system',
+    'edited' => 'edited'
 ];
 
 // Now output the HTML based on popup mode

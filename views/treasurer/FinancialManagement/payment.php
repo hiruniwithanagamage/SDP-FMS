@@ -10,8 +10,8 @@ function getCurrentTerm() {
     return $row['year'] ?? date('Y');
 }
 
-// Get payments for all members
-function getMemberPayments($year, $month = null, $memberID = null) {
+// Get payments for all members with pagination
+function getMemberPayments($year, $month = null, $memberID = null, $page = 1, $recordsPerPage = 10) {
     $whereConditions = ["YEAR(p.Date) = $year"];
     
     if ($month !== null && $month > 0) {
@@ -23,6 +23,9 @@ function getMemberPayments($year, $month = null, $memberID = null) {
     }
     
     $whereClause = implode(" AND ", $whereConditions);
+    
+    // Calculate offset for pagination
+    $offset = ($page - 1) * $recordsPerPage;
     
     $sql = "SELECT 
             p.PaymentID,
@@ -37,9 +40,35 @@ function getMemberPayments($year, $month = null, $memberID = null) {
         FROM Payment p
         JOIN Member m ON p.Member_MemberID = m.MemberID
         WHERE $whereClause
-        ORDER BY p.Date DESC, m.Name";
+        ORDER BY p.PaymentID ASC
+        LIMIT $offset, $recordsPerPage";
     
     return search($sql);
+}
+
+// Get total count of records for pagination
+function getTotalPayments($year, $month = null, $memberID = null) {
+    $whereConditions = ["YEAR(p.Date) = $year"];
+    
+    if ($month !== null && $month > 0) {
+        $whereConditions[] = "MONTH(p.Date) = $month";
+    }
+    
+    if ($memberID !== null && $memberID !== '') {
+        $whereConditions[] = "m.MemberID = '$memberID'";
+    }
+    
+    $whereClause = implode(" AND ", $whereConditions);
+    
+    $sql = "SELECT 
+            COUNT(*) as total
+        FROM Payment p
+        JOIN Member m ON p.Member_MemberID = m.MemberID
+        WHERE $whereClause";
+    
+    $result = search($sql);
+    $row = $result->fetch_assoc();
+    return $row['total'];
 }
 
 // Get payment summary for the period
@@ -123,6 +152,21 @@ $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
 $selectedMonth = isset($_GET['month']) ? intval($_GET['month']) : 0; // 0 means all months
 $selectedMemberID = isset($_GET['member']) ? $_GET['member'] : '';
 
+// Pagination variables
+$recordsPerPage = 10;
+$currentPage = isset($_GET['page']) ? intval($_GET['page']) : 1;
+
+// Get total records and calculate total pages
+$totalRecords = getTotalPayments($selectedYear, $selectedMonth, $selectedMemberID);
+$totalPages = ceil($totalRecords / $recordsPerPage);
+
+// Ensure current page is valid
+if ($currentPage < 1) {
+    $currentPage = 1;
+} elseif ($currentPage > $totalPages && $totalPages > 0) {
+    $currentPage = $totalPages;
+}
+
 // Get all available terms/years
 function getAllTerms() {
     $sql = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
@@ -156,7 +200,6 @@ $methodTypes = [
     'Cash' => 'Cash',
     'Bank Transfer' => 'Bank Transfer',
     'Card' => 'Card',
-    'Check' => 'Check'
 ];
 
 // Handle Delete Payment
@@ -170,73 +213,178 @@ if(isset($_POST['delete_payment'])) {
         // Start transaction
         $conn->begin_transaction();
         
-        // First check if this payment is linked to any membership fees
-        $checkQuery = "SELECT * FROM MembershipFeePayment WHERE PaymentID = ?";
-        $stmt = $conn->prepare($checkQuery);
+        // First get all payment details to determine status and type
+        $getPaymentQuery = "SELECT * FROM Payment WHERE PaymentID = ?";
+        $stmt = $conn->prepare($getPaymentQuery);
         $stmt->bind_param("s", $paymentId);
         $stmt->execute();
-        $result = $stmt->get_result();
+        $paymentResult = $stmt->get_result();
         
-        // If there are links, remove them first
-        if($result->num_rows > 0) {
-            $deleteLinksQuery = "DELETE FROM MembershipFeePayment WHERE PaymentID = ?";
-            $stmt = $conn->prepare($deleteLinksQuery);
-            $stmt->bind_param("s", $paymentId);
-            $stmt->execute();
+        if ($paymentResult->num_rows == 0) {
+            throw new Exception("Payment not found");
+        }
+        
+        $paymentData = $paymentResult->fetch_assoc();
+        $paymentStatus = $paymentData['Status'] ?? 'self'; // Default to 'self' if status not set
+        $paymentMethod = $paymentData['Method'] ?? '';
+        $paymentType = $paymentData['Payment_Type'] ?? '';
+        $paymentAmount = $paymentData['Amount'] ?? 0;
+        $memberID = $paymentData['Member_MemberID'] ?? '';
+        
+        // 1. Check if status is 'edited', if so, cannot delete
+        if ($paymentStatus == 'edited') {
+            throw new Exception("Payments with 'edited' status cannot be deleted");
+        }
+        
+        // 2. If status is 'self', check method restrictions
+        if ($paymentStatus == 'self') {
+            if ($paymentMethod == 'online') {
+                throw new Exception("Online payments cannot be deleted");
+            }
             
-            // Also need to update related membership fees
-            $updateFeesQuery = "UPDATE MembershipFee SET IsPaid = 'No' 
-                              WHERE FeeID IN (
-                                  SELECT FeeID FROM MembershipFeePayment 
-                                  WHERE PaymentID = ?
-                              )";
-            $stmt = $conn->prepare($deleteLinksQuery);
-            $stmt->bind_param("s", $paymentId);
+            // For other payment methods like bank transfer or cash, continue with deletion
+        }
+        
+        // For both 'self' and 'system' status payments that can be deleted
+        // Create an adjustment expense entry to balance the books
+        if ($paymentStatus == 'self' || $paymentStatus == 'system') {
+            // Get current treasurer ID
+            $treasurerQuery = "SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1";
+            $treasurerResult = search($treasurerQuery);
+            $treasurerRow = $treasurerResult->fetch_assoc();
+            $treasurerId = $treasurerRow['TreasurerID'] ?? '';
+            
+            if (empty($treasurerId)) {
+                throw new Exception("Cannot find active treasurer to create adjustment entry");
+            }
+            
+            // Generate a new expense ID with the specified format
+            $newExpenseId = generateExpenseID($currentYear);
+            
+            // Create adjustment expense
+            $createExpenseQuery = "INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, Description, Treasurer_TreasurerID) 
+                                 VALUES (?, 'adjustment', 'system', ?, CURDATE(), ?, ?, ?)";
+            $description = "Deleted payment #$paymentId ($paymentType)";
+            
+            $stmt = $conn->prepare($createExpenseQuery);
+            $stmt->bind_param("ssdss", $newExpenseId, $paymentAmount, $currentYear, $description, $treasurerId);
             $stmt->execute();
         }
         
-        // Check if this payment is linked to any fines
-        $checkFineQuery = "SELECT * FROM FinePayment WHERE PaymentID = ?";
-        $stmt = $conn->prepare($checkFineQuery);
-        $stmt->bind_param("s", $paymentId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        
-        // If there are fine links, remove them first
-        if($result->num_rows > 0) {
-            // Get all fine IDs linked to this payment
-            $fineIds = [];
-            while($row = $result->fetch_assoc()) {
-                $fineIds[] = $row['FineID'];
+        // Now handle specific payment types
+        if ($paymentType == 'monthly' || $paymentType == 'registration') {
+            // For membership fees, need to update the related fees
+            // First get all membership fees linked to this payment
+            $feesQuery = "SELECT * FROM MembershipFeePayment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($feesQuery);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            $feesResult = $stmt->get_result();
+            
+            // Get the fees in descending order to handle in proper sequence
+            $feeIds = [];
+            while($feeRow = $feesResult->fetch_assoc()) {
+                $feeIds[] = $feeRow['FeeID'];
             }
             
-            // Delete the fine payment links
+            // Sort fee IDs in descending order (assuming IDs have a meaningful sequence)
+            rsort($feeIds);
+            
+            // Remove the membership fee payment links
+            $deleteFeePaymentsQuery = "DELETE FROM MembershipFeePayment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($deleteFeePaymentsQuery);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            
+            // Update all related fees to unpaid
+            foreach($feeIds as $feeId) {
+                $updateFeeQuery = "UPDATE MembershipFee SET IsPaid = 'No' WHERE FeeID = ?";
+                $stmt = $conn->prepare($updateFeeQuery);
+                $stmt->bind_param("s", $feeId);
+                $stmt->execute();
+            }
+            
+        } else if ($paymentType == 'Fine') {
+            // For fines, check and update related fine records
+            $fineQuery = "SELECT * FROM FinePayment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($fineQuery);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            $fineResult = $stmt->get_result();
+            
+            // Get all fine IDs linked to this payment
+            $fineIds = [];
+            while($fineRow = $fineResult->fetch_assoc()) {
+                $fineIds[] = $fineRow['FineID'];
+            }
+            
+            // Remove the fine payment links
             $deleteFinePaymentsQuery = "DELETE FROM FinePayment WHERE PaymentID = ?";
             $stmt = $conn->prepare($deleteFinePaymentsQuery);
             $stmt->bind_param("s", $paymentId);
             $stmt->execute();
             
-            // Update related fines to unpaid
-            if(!empty($fineIds)) {
-                foreach($fineIds as $fineId) {
-                    $updateFineQuery = "UPDATE Fine SET IsPaid = 'No' WHERE FineID = ?";
-                    $stmt = $conn->prepare($updateFineQuery);
-                    $stmt->bind_param("s", $fineId);
-                    $stmt->execute();
-                }
+            // Update all related fines to unpaid
+            foreach($fineIds as $fineId) {
+                $updateFineQuery = "UPDATE Fine SET IsPaid = 'No' WHERE FineID = ?";
+                $stmt = $conn->prepare($updateFineQuery);
+                $stmt->bind_param("s", $fineId);
+                $stmt->execute();
+            }
+            
+        } else if ($paymentType == 'Loan') {
+            // For loan payments, check and update loan balance
+            $loanQuery = "SELECT * FROM LoanPayment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($loanQuery);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            $loanResult = $stmt->get_result();
+            
+            if ($loanResult->num_rows > 0) {
+                $loanRow = $loanResult->fetch_assoc();
+                $loanId = $loanRow['LoanID'];
+                
+                // Remove loan payment link
+                $deleteLoanPaymentQuery = "DELETE FROM LoanPayment WHERE PaymentID = ?";
+                $stmt = $conn->prepare($deleteLoanPaymentQuery);
+                $stmt->bind_param("s", $paymentId);
+                $stmt->execute();
+                
+                // Update loan balance by adding back the payment amount
+                // Note: This is simplified and may need to be adjusted based on your actual loan payment logic
+                $updateLoanQuery = "UPDATE Loan 
+                                  SET Paid_Loan = Paid_Loan - ?, 
+                                      Remain_Loan = Remain_Loan + ? 
+                                  WHERE LoanID = ?";
+                $stmt = $conn->prepare($updateLoanQuery);
+                $stmt->bind_param("dds", $paymentAmount, $paymentAmount, $loanId);
+                $stmt->execute();
             }
         }
         
-        // Delete the payment
+        // Finally, delete the payment record
         $deleteQuery = "DELETE FROM Payment WHERE PaymentID = ?";
         $stmt = $conn->prepare($deleteQuery);
         $stmt->bind_param("s", $paymentId);
         $stmt->execute();
         
+        // Log the deletion
+        $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, UserID, TreasurerID, OldValues, NewValues, ChangeDetails) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)";
+        $recordType = "Payment";
+        $userId = $_SESSION['user_id'] ?? 'unknown';
+        $oldValues = json_encode($paymentData);
+        $newValues = "{}";
+        $changeDetails = "Deleted payment #$paymentId ($paymentType) for Member #$memberID";
+        
+        $stmt = $conn->prepare($logQuery);
+        $stmt->bind_param("sssssss", $recordType, $paymentId, $userId, $treasurerId, $oldValues, $newValues, $changeDetails);
+        $stmt->execute();
+        
         // Commit transaction
         $conn->commit();
         
-        $_SESSION['success_message'] = "Payment #$paymentId was successfully deleted.";
+        $_SESSION['success_message'] = "Payment #$paymentId was successfully deleted and appropriate adjustments were made.";
     } catch(Exception $e) {
         // Rollback on error
         $conn->rollback();
@@ -244,10 +392,71 @@ if(isset($_POST['delete_payment'])) {
     }
     
     // Redirect back to payment page
-    header("Location: payment.php?year=" . $currentYear . "&month=" . $selectedMonth);
+    header("Location: payment.php?year=" . $currentYear . "&month=" . $selectedMonth . "&page=" . $currentPage);
     exit();
 }
 
+function generateExpenseID($term) {
+    $conn = getConnection();
+    
+    // Get the last 2 digits of the term
+    $termSuffix = substr($term, -2);
+    
+    // Get the current highest expense ID for this term
+    $query = "SELECT ExpenseID FROM Expenses 
+              WHERE ExpenseID LIKE 'EXP{$termSuffix}%' 
+              ORDER BY ExpenseID DESC LIMIT 1";
+    
+    $result = $conn->query($query);
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        $lastID = $row['ExpenseID'];
+        
+        // Extract the numeric part (last 2 digits)
+        $lastNum = intval(substr($lastID, -2));
+        $newNum = $lastNum + 1;
+    } else {
+        // No existing expense for this term yet, start with 01
+        $newNum = 1;
+    }
+    
+    // Format the new ID with leading zeros for the sequence number
+    $expenseID = "EXP{$termSuffix}" . str_pad($newNum, 2, '0', STR_PAD_LEFT);
+    
+    return $expenseID;
+}
+
+function generatePaymentID($term) {
+    $conn = getConnection();
+    
+    // Get the last 2 digits of the term
+    $termSuffix = substr($term, -2);
+    
+    // Get the current highest payment ID for this term
+    $query = "SELECT PaymentID FROM Payment 
+              WHERE PaymentID LIKE 'PAY{$termSuffix}%' 
+              ORDER BY PaymentID DESC LIMIT 1";
+    
+    $result = $conn->query($query);
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        $lastID = $row['PaymentID'];
+        
+        // Extract the numeric part (last 2 digits)
+        $lastNum = intval(substr($lastID, -2));
+        $newNum = $lastNum + 1;
+    } else {
+        // No existing payment for this term yet, start with 01
+        $newNum = 1;
+    }
+    
+    // Format the new ID with leading zeros for the sequence number
+    $paymentID = "PAY{$termSuffix}" . str_pad($newNum, 2, '0', STR_PAD_LEFT);
+    
+    return $paymentID;
+}
 ?>
 
 <!DOCTYPE html>
@@ -403,6 +612,51 @@ if(isset($_POST['delete_payment'])) {
         background-color: #e2bcc0;
         color: rgb(234, 59, 59);
     }
+
+    /* Pagination styles */
+    .pagination {
+        display: flex;
+        justify-content: center;
+        margin: 20px 0;
+        flex-wrap: wrap;
+    }
+    
+    .pagination-info {
+        text-align: center;
+        margin-bottom: 10px;
+        color: #555;
+        font-size: 0.9rem;
+        width: 100%;
+    }
+    
+    .pagination button {
+        padding: 8px 16px;
+        margin: 0 4px;
+        background-color: #f8f8f8;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+    
+    .pagination button:hover {
+        background-color: #e0e0e0;
+    }
+    
+    .pagination button.active {
+        background-color: #4a6eb5;
+        color: white;
+        border-color: #4a6eb5;
+    }
+    
+    .pagination button.disabled {
+        color: #aaa;
+        cursor: not-allowed;
+    }
+    
+    .pagination button.disabled:hover {
+        background-color: #f8f8f8;
+    }
 </style>
 </head>
 <body>
@@ -490,7 +744,7 @@ if(isset($_POST['delete_payment'])) {
         </div>
 
         <div id="payments-view">
-            <div class="table-container">
+            <div class="table-container" style="max-height: 900px;">
                 <table id="paymentsTable">
                     <thead>
                         <tr>
@@ -506,7 +760,7 @@ if(isset($_POST['delete_payment'])) {
                     </thead>
                     <tbody>
                         <?php 
-                        $memberPayments = getMemberPayments($selectedYear, $selectedMonth, $selectedMemberID);
+                        $memberPayments = getMemberPayments($selectedYear, $selectedMonth, $selectedMemberID, $currentPage, $recordsPerPage);
                         while($row = $memberPayments->fetch_assoc()): 
                         ?>
                         <tr data-payment-type="<?php echo htmlspecialchars($row['Payment_Type']); ?>" data-method="<?php echo htmlspecialchars($row['Method']); ?>">
@@ -541,6 +795,63 @@ if(isset($_POST['delete_payment'])) {
                         <?php endwhile; ?>
                     </tbody>
                 </table>
+                
+                <!-- Pagination -->
+                <?php if ($totalPages > 0): ?>
+                <div class="pagination">
+                    <div class="pagination-info">
+                        Showing <?php echo ($currentPage-1)*$recordsPerPage+1; ?> to 
+                        <?php echo min($currentPage*$recordsPerPage, $totalRecords); ?> of 
+                        <?php echo $totalRecords; ?> records
+                    </div>
+                    
+                    <!-- First and Previous buttons -->
+                    <button onclick="goToPage(1)" 
+                            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+                            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+                        <i class="fas fa-angle-double-left"></i>
+                    </button>
+                    <button onclick="goToPage(<?php echo $currentPage-1; ?>)" 
+                            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+                            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+                        <i class="fas fa-angle-left"></i>
+                    </button>
+                    
+                    <!-- Page numbers -->
+                    <?php
+                    // Calculate range of page numbers to show
+                    $startPage = max(1, $currentPage - 2);
+                    $endPage = min($totalPages, $currentPage + 2);
+                    
+                    // Ensure we always show at least 5 pages when possible
+                    if ($endPage - $startPage + 1 < 5 && $totalPages >= 5) {
+                        if ($startPage == 1) {
+                            $endPage = min(5, $totalPages);
+                        } elseif ($endPage == $totalPages) {
+                            $startPage = max(1, $totalPages - 4);
+                        }
+                    }
+                    
+                    for ($i = $startPage; $i <= $endPage; $i++): ?>
+                        <button onclick="goToPage(<?php echo $i; ?>)" 
+                                class="<?php echo $i == $currentPage ? 'active' : ''; ?>">
+                            <?php echo $i; ?>
+                        </button>
+                    <?php endfor; ?>
+                    
+                    <!-- Next and Last buttons -->
+                    <button onclick="goToPage(<?php echo $currentPage+1; ?>)" 
+                            <?php echo $currentPage == $totalPages ? 'class="disabled"' : ''; ?> 
+                            <?php echo $currentPage == $totalPages ? 'disabled' : ''; ?>>
+                        <i class="fas fa-angle-right"></i>
+                    </button>
+                    <button onclick="goToPage(<?php echo $totalPages; ?>)" 
+                            <?php echo $currentPage == $totalPages ? 'class="disabled"' : ''; ?> 
+                            <?php echo $currentPage == $totalPages ? 'disabled' : ''; ?>>
+                        <i class="fas fa-angle-double-right"></i>
+                    </button>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -597,8 +908,8 @@ if(isset($_POST['delete_payment'])) {
             <p>Are you sure you want to delete this payment record? This action cannot be undone.</p>
             <form method="POST">
                 <input type="hidden" id="delete_payment_id" name="payment_id">
-                <input type="hidden" name="year" value="<?php echo $selectedYear; ?>">
                 <input type="hidden" name="month" value="<?php echo $selectedMonth; ?>">
+                <input type="hidden" name="page" value="<?php echo $currentPage; ?>">
                 <div class="delete-modal-buttons">
                     <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>
                     <button type="submit" name="delete_payment" class="confirm-delete-btn">Delete</button>
@@ -616,29 +927,20 @@ if(isset($_POST['delete_payment'])) {
     </div>
 
     <script>
+        // Pagination function
+        function goToPage(page) {
+            const year = document.getElementById('yearSelect').value;
+            const month = document.getElementById('monthSelect').value;
+            window.location.href = `payment.php?year=${year}&month=${month}&page=${page}`;
+        }
+        
         // Update filters using AJAX
         function updateFilters() {
             const year = document.getElementById('yearSelect').value;
             const month = document.getElementById('monthSelect').value;
             
             // refresh the page at the same location
-            history.pushState(null, '', `?year=${year}&month=${month}`);
-            
-            fetch(`payment.php?year=${year}&month=${month}`)
-                .then(response => response.text())
-                .then(html => {
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, 'text/html');
-                    
-                    // Update stats cards
-                    document.getElementById('stats-section').innerHTML = doc.getElementById('stats-section').innerHTML;
-                    
-                    // Update payments view
-                    document.getElementById('payments-view').innerHTML = doc.getElementById('payments-view').innerHTML;
-                    
-                    // Update monthly view
-                    document.getElementById('monthly-view').innerHTML = doc.getElementById('monthly-view').innerHTML;
-                });
+            window.location.href = `payment.php?year=${year}&month=${month}&page=1`;
         }
 
         // Switch between tabs
@@ -684,6 +986,12 @@ if(isset($_POST['delete_payment'])) {
 
             // Show/hide no results message
             updateNoResultsMessage(hasResults);
+            
+            // Hide pagination when searching
+            const pagination = document.querySelector('.pagination');
+            if (pagination) {
+                pagination.style.display = searchTerm ? 'none' : 'flex';
+            }
         }
 
         function updateNoResultsMessage(hasResults) {
@@ -707,6 +1015,12 @@ if(isset($_POST['delete_payment'])) {
             searchInput.value = '';
             performSearch();
             searchInput.focus();
+            
+            // Show pagination again
+            const pagination = document.querySelector('.pagination');
+            if (pagination) {
+                pagination.style.display = 'flex';
+            }
         }
 
         function printPaymentReceipt(paymentID) {
@@ -739,7 +1053,12 @@ if(isset($_POST['delete_payment'])) {
             document.getElementById('editPaymentModal').style.display = 'none';
             
             // After closing, refresh the payment list to see any changes
-            updateFilters();
+            const urlParams = new URLSearchParams(window.location.search);
+            const year = urlParams.get('year') || document.getElementById('yearSelect').value;
+            const month = urlParams.get('month') || document.getElementById('monthSelect').value;
+            const page = urlParams.get('page') || 1;
+            
+            window.location.href = `payment.php?year=${year}&month=${month}&page=${page}`;
         }
 
         function openDeleteModal(id) {
@@ -754,7 +1073,7 @@ if(isset($_POST['delete_payment'])) {
         // View month details
         function viewMonthDetails(month) {
             const year = document.getElementById('yearSelect').value;
-            window.location.href = `?year=${year}&month=${month}`;
+            window.location.href = `?year=${year}&month=${month}&page=1`;
         }
 
         // Export month report
@@ -831,4 +1150,5 @@ if(isset($_POST['delete_payment'])) {
         }
     </script>
 </body>
-</html>
+</html>year" value="<?php echo $selectedYear; ?>">
+                <input type="hidden" name="
