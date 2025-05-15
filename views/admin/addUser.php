@@ -138,6 +138,20 @@ if(isset($_POST['add'])) {
     if(!empty($email) && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = "Invalid email format";
     }
+
+    // Additional email validation
+    if(!empty($email)) {
+        // Check email length
+        if(strlen($email) > 100) {
+            $errors[] = "Email address is too long (maximum 100 characters)";
+        }
+        
+        // Check domain validity
+        $domain = substr(strrchr($email, "@"), 1);
+        if(!checkdnsrr($domain, "MX")) {
+            $errors[] = "Email domain appears to be invalid";
+        }
+    }
     
     // Validate password strength
     if(strlen($password) < 8) {

@@ -407,7 +407,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_officers'])) {
         <div class="container">
             <div class="welcome-card">
                 <h1 class="page-title">Add Treasurer and Auditor</h1>
-                <a href="manage-terms.php" class="back-btn">
+                <a href="addTerm.php" class="back-btn">
                     <i class="fas fa-arrow-left"></i> Back to Terms
                 </a>
             </div>
@@ -452,7 +452,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_officers'])) {
                     <div class="no-members-message">
                         <i class="fas fa-exclamation-triangle"></i>
                         <p>No active term available. Please create or activate a term first.</p>
-                        <a href="manage-terms.php" class="save-btn" style="display: inline-block; margin-top: 1rem;">Manage Terms</a>
+                        <a href="addTerm.php" class="save-btn" style="display: inline-block; margin-top: 1rem;">Manage Terms</a>
                     </div>
                 <?php else: ?>
                     <form method="POST">
@@ -485,7 +485,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_officers'])) {
                         </div>
                         
                         <div class="form-footer">
-                            <a href="manage-terms.php" class="cancel-btn">Cancel</a>
+                            <a href="addTerm.php" class="cancel-btn">Cancel</a>
                             <button type="submit" name="add_officers" class="save-btn">Assign Officers</button>
                         </div>
                     </form>

@@ -264,7 +264,7 @@ try {
     <title>Manage Terms</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="../../assets/css/adminActorDetails.css">
+    <!-- <link rel="stylesheet" href="../../assets/css/adminDetails.css"> -->
     <link rel="stylesheet" href="../../assets/css/alert.css">
     <script src="../../assets/js/alertHandler.js"></script>
     <style>
@@ -703,7 +703,7 @@ try {
                                                     </button>
                                                 <?php endif; ?>
                                             </form>
-                                            <button class="action-btn delete-btn" onclick="openDeleteModal(<?php echo $term['id']; ?>)">
+                                            <button class="action-btn delete-btn" onclick="openDeleteModal('<?php echo $term['id']; ?>')">
                                                 <i class="fas fa-trash"></i> Delete
                                             </button>
                                         </div>

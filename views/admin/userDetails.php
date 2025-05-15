@@ -67,64 +67,47 @@ $stmt = $conn->prepare($baseQuery);
 $stmt->execute();
 $result = $stmt->get_result();
 
-// Function to fetch role options with prepared statements
-function fetchRoleOptions($conn, $tableName, $idColumn, $nameColumn) {
-    $query = "SELECT $idColumn, $nameColumn FROM $tableName";
-    $stmt = $conn->prepare($query);
-    $stmt->execute();
-    return $stmt->get_result();
-}
-
-// Fetch role options for the edit modal
-$adminResult = fetchRoleOptions($conn, "Admin", "AdminID", "Name");
-$auditorResult = fetchRoleOptions($conn, "Auditor", "AuditorID", "Name");
-$treasurerResult = fetchRoleOptions($conn, "Treasurer", "TreasurerID", "Name");
-$memberResult = fetchRoleOptions($conn, "Member", "MemberID", "Name");
-
-// Handle Update
+// Handle Email Update
 if(isset($_POST['update'])) {
     $userId = $_POST['user_id'];
-    $username = trim($_POST['username']);
     $email = trim($_POST['email']);
-    $role = $_POST['role'];
-    $roleId = $_POST['role_id'];
     
-    // Set the appropriate role ID and null for others
-    $adminId = ($role === 'admin') ? $roleId : null;
-    $auditorId = ($role === 'auditor') ? $roleId : null;
-    $treasurerId = ($role === 'treasurer') ? $roleId : null;
-    $memberId = ($role === 'member') ? $roleId : null;
+    // Validate inputs
+    $errors = [];
+    
+    // Validate email format if provided
+    if(empty($email)) {
+        $errors[] = "Email is required";
+    } elseif(!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $errors[] = "Invalid email format";
+    }
 
-    // Validate email format
-    if(!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $error = "Invalid email format";
-    } else {
+    // Additional email validation
+    if(!empty($email)) {
+        // Check email length
+        if(strlen($email) > 100) {
+            $errors[] = "Email address is too long (maximum 100 characters)";
+        }
+        
+        // Check domain validity
+        $domain = substr(strrchr($email, "@"), 1);
+        if(!checkdnsrr($domain, "MX")) {
+            $errors[] = "Email domain appears to be invalid";
+        }
+    }
+    
+    if(empty($errors)) {
         try {
-            // Prepare the update statement
-            $updateQuery = "UPDATE User SET 
-                        Username = ?, 
-                        Email = ?,
-                        Admin_AdminID = ?,
-                        Auditor_AuditorID = ?,
-                        Treasurer_TreasurerID = ?,
-                        Member_MemberID = ?
-                        WHERE UserId = ?";
+            // Prepare the update statement - only update email field
+            $updateQuery = "UPDATE User SET Email = ? WHERE UserId = ?";
             
             $stmt = $conn->prepare($updateQuery);
-            $stmt->bind_param("sssssss", 
-                $username, 
-                $email, 
-                $adminId, 
-                $auditorId, 
-                $treasurerId, 
-                $memberId,
-                $userId
-            );
+            $stmt->bind_param("ss", $email, $userId);
             
             $stmt->execute();
             
             if($stmt->affected_rows > 0) {
-                $_SESSION['success_message'] = "User updated successfully";
+                $_SESSION['success_message'] = "Email updated successfully";
             } else {
                 $_SESSION['success_message'] = "No changes were made";
             }
@@ -132,8 +115,10 @@ if(isset($_POST['update'])) {
             header("Location: " . $_SERVER['PHP_SELF'] . ($sortBy !== 'all' ? "?sort=$sortBy" : ""));
             exit();
         } catch(Exception $e) {
-            $error = "Error updating user: " . $e->getMessage();
+            $error = "Error updating email: " . $e->getMessage();
         }
+    } else {
+        $error = implode("<br>", $errors);
     }
 }
 
@@ -171,69 +156,279 @@ if(isset($_POST['delete'])) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="../../assets/css/adminDetails.css">
     <link rel="stylesheet" href="../../assets/css/alert.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script src="../../assets/js/alertHandler.js"></script>
-    <script>
-        // Role-specific options
-        const roleOptions = {
-            admin: [
-                <?php 
-                $adminResult->data_seek(0); // Reset result pointer
-                while($admin = $adminResult->fetch_assoc()) {
-                    echo "{id: '" . addslashes($admin['AdminID']) . "', name: '" . addslashes($admin['Name']) . "'},";
-                }
-                ?>
-            ],
-            auditor: [
-                <?php 
-                $auditorResult->data_seek(0); // Reset result pointer
-                while($auditor = $auditorResult->fetch_assoc()) {
-                    echo "{id: '" . addslashes($auditor['AuditorID']) . "', name: '" . addslashes($auditor['Name']) . "'},";
-                }
-                ?>
-            ],
-            treasurer: [
-                <?php 
-                $treasurerResult->data_seek(0); // Reset result pointer
-                while($treasurer = $treasurerResult->fetch_assoc()) {
-                    echo "{id: '" . addslashes($treasurer['TreasurerID']) . "', name: '" . addslashes($treasurer['Name']) . "'},";
-                }
-                ?>
-            ],
-            member: [
-                <?php 
-                $memberResult->data_seek(0); // Reset result pointer
-                while($member = $memberResult->fetch_assoc()) {
-                    echo "{id: '" . addslashes($member['MemberID']) . "', name: '" . addslashes($member['Name']) . "'},";
-                }
-                ?>
-            ]
-        };
-
-        function updateRoleOptions() {
-            const role = document.getElementById('edit_role').value;
-            const roleIdSelect = document.getElementById('edit_role_id');
-            
-            // Clear existing options
-            roleIdSelect.innerHTML = '';
-            
-            // Populate with new options
-            if (roleOptions[role] && roleOptions[role].length > 0) {
-                roleOptions[role].forEach(option => {
-                    const optionElement = document.createElement('option');
-                    optionElement.value = option.id;
-                    optionElement.textContent = option.name;
-                    roleIdSelect.appendChild(optionElement);
-                });
-            } else {
-                // If no options are available for this role
-                const optionElement = document.createElement('option');
-                optionElement.value = "";
-                optionElement.textContent = "No options available";
-                roleIdSelect.appendChild(optionElement);
-            }
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f7fa;
         }
 
-        function openEditModal(userId, username, email, role, roleId) {
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .header-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            color: #1a237e;
+            margin: 0;
+        }
+
+        .add-btn {
+            background-color: #1a237e;
+            color: white;
+            padding: 0.7rem 1.5rem;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: background-color 0.3s;
+        }
+
+        .add-btn:hover {
+            background-color: #0d1757;
+        }
+
+        .filter-section {
+            margin-bottom: 1.5rem;
+        }
+
+        .filter-input {
+            padding: 0.7rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 4px;
+            width: 200px;
+            font-size: 0.9rem;
+        }
+
+        .table-responsive {
+            overflow-x: auto;
+        }
+
+        .auditor-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 2rem;
+        }
+
+        .auditor-table th {
+            background-color: #f5f7fa;
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            color: #1a237e;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .auditor-table td {
+            padding: 1rem;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .auditor-table tr:hover {
+            background-color: #f5f7fa;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .action-btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            transition: background-color 0.3s;
+        }
+
+        .edit-btn {
+            background-color: #e3f2fd;
+            color: #0d47a1;
+        }
+
+        .edit-btn:hover {
+            background-color: #bbdefb;
+        }
+
+        .delete-btn {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+
+        .delete-btn:hover {
+            background-color: #ffcdd2;
+        }
+
+        /* Modal Styles */
+        .modal, .delete-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.4);
+        }
+
+        .modal-content, .delete-modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            width: 80%;
+            max-width: 500px;
+        }
+
+        .modal-content h2, .delete-modal-content h2 {
+            color: #1a237e;
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 1.5rem;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: #1a237e;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.8rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            border-color: #1a237e;
+            outline: none;
+        }
+
+        .form-group small {
+            display: block;
+            margin-top: 0.3rem;
+            color: #666;
+            font-size: 0.8rem;
+        }
+
+        .form-group .readonly-field {
+            background-color: #f5f7fa;
+            cursor: not-allowed;
+        }
+
+        .modal-footer {
+            margin-top: 2rem;
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+        }
+
+        .save-btn, .confirm-delete-btn {
+            background-color: #1a237e;
+            color: white;
+            padding: 0.8rem 2rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background-color 0.3s;
+        }
+
+        .save-btn:hover, .confirm-delete-btn:hover {
+            background-color: #0d1757;
+        }
+
+        .cancel-btn {
+            background-color: #e0e0e0;
+            color: #333;
+            padding: 0.8rem 2rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background-color 0.3s;
+        }
+
+        .cancel-btn:hover {
+            background-color: #bdbdbd;
+        }
+
+        .delete-modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .confirm-delete-btn {
+            background-color: #c62828;
+        }
+
+        .confirm-delete-btn:hover {
+            background-color: #b71c1c;
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1.5rem;
+        }
+
+        .alert-success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+
+        .alert-danger {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+    </style>
+    <script>
+        function openEditModal(userId, username, email) {
             const modal = document.getElementById('editModal');
             modal.style.display = 'block';
             
@@ -241,19 +436,6 @@ if(isset($_POST['delete'])) {
             document.getElementById('edit_user_id').value = userId;
             document.getElementById('edit_username').value = username;
             document.getElementById('edit_email').value = email;
-            
-            // Set role and trigger update of role options
-            const roleSelect = document.getElementById('edit_role');
-            roleSelect.value = role;
-            updateRoleOptions();
-            
-            // Set associated role ID
-            setTimeout(() => {
-                const roleIdSelect = document.getElementById('edit_role_id');
-                if (roleIdSelect.querySelector(`option[value="${roleId}"]`)) {
-                    roleIdSelect.value = roleId;
-                }
-            }, 100); // Small delay to ensure options are loaded
         }
 
         function closeModal() {
@@ -283,9 +465,6 @@ if(isset($_POST['delete'])) {
                 closeDeleteModal();
             }
         }
-
-        // Initialize role options on page load
-        document.addEventListener('DOMContentLoaded', updateRoleOptions);
     </script>
 </head>
 <body>
@@ -380,17 +559,9 @@ if(isset($_POST['delete'])) {
                                     <button class="action-btn edit-btn" onclick="openEditModal(
                                         '<?php echo htmlspecialchars($row['UserId']); ?>',
                                         '<?php echo htmlspecialchars(addslashes($row['Username'])); ?>',
-                                        '<?php echo htmlspecialchars($row['Email']); ?>',
-                                        '<?php echo $row['Admin_AdminID'] ? 'admin' : 
-                                                 ($row['Auditor_AuditorID'] ? 'auditor' : 
-                                                 ($row['Treasurer_TreasurerID'] ? 'treasurer' : 
-                                                 ($row['Member_MemberID'] ? 'member' : ''))); ?>',
-                                        '<?php echo htmlspecialchars($row['Admin_AdminID'] ?: 
-                                                 ($row['Auditor_AuditorID'] ?: 
-                                                 ($row['Treasurer_TreasurerID'] ?: 
-                                                 ($row['Member_MemberID'] ?: '')))); ?>'
+                                        '<?php echo htmlspecialchars($row['Email']); ?>'
                                     )">
-                                        <i class="fas fa-edit"></i> Edit
+                                        <i class="fas fa-edit"></i> Edit Email
                                     </button>
                                     <button class="action-btn delete-btn" onclick="openDeleteModal('<?php echo htmlspecialchars($row['UserId']); ?>')">
                                         <i class="fas fa-trash"></i> Delete
@@ -411,46 +582,31 @@ if(isset($_POST['delete'])) {
             </div>
         </div>
 
-        <!-- Edit Modal -->
+        <!-- Edit Email Modal -->
         <div id="editModal" class="modal">
             <div class="modal-content">
                 <span class="close" onclick="closeModal()">&times;</span>
-                <h2>Edit User</h2>
+                <h2>Edit User Email</h2>
                 <?php if(isset($updateError)): ?>
                     <div class="alert alert-danger"><?php echo htmlspecialchars($updateError); ?></div>
                 <?php endif; ?>
-                <form id="editForm" method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
+                <form id="editForm" method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF'] . ($sortBy !== 'all' ? "?sort=$sortBy" : "")); ?>">
                     <input type="hidden" id="edit_user_id" name="user_id">
                     
                     <div class="form-group">
                         <label for="edit_username">Username</label>
-                        <input type="text" id="edit_username" name="username" required>
+                        <input type="text" id="edit_username" class="readonly-field" readonly>
+                        <small>Username cannot be changed</small>
                     </div>
 
                     <div class="form-group">
                         <label for="edit_email">Email</label>
                         <input type="email" id="edit_email" name="email" required>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="edit_role">Role</label>
-                        <select id="edit_role" name="role" required onchange="updateRoleOptions()">
-                            <option value="admin">Admin</option>
-                            <option value="auditor">Auditor</option>
-                            <option value="treasurer">Treasurer</option>
-                            <option value="member">Member</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="edit_role_id">Associated Name</label>
-                        <select id="edit_role_id" name="role_id" required>
-                            <!-- Options will be dynamically populated -->
-                        </select>
+                        <small>Enter a valid email address with proper domain</small>
                     </div>
 
                     <div class="modal-footer">
-                        <button type="submit" name="update" class="save-btn">Save Changes</button>
+                        <button type="submit" name="update" class="save-btn">Update Email</button>
                         <button type="button" class="cancel-btn" onclick="closeModal()">Cancel</button>
                     </div>
                 </form>
@@ -462,7 +618,7 @@ if(isset($_POST['delete'])) {
             <div class="delete-modal-content">
                 <h2>Confirm Delete</h2>
                 <p>Are you sure you want to delete this user? This action cannot be undone.</p>
-                <form method="POST" id="deleteForm">
+                <form method="POST" id="deleteForm" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF'] . ($sortBy !== 'all' ? "?sort=$sortBy" : "")); ?>">
                     <input type="hidden" id="delete_user_id" name="user_id">
                     <div class="delete-modal-buttons">
                         <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>

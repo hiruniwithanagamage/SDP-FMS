@@ -107,10 +107,11 @@ function sendEmailToSMS($phone, $message) {
     return true;
 }
 
-// Modified function to initiate password reset via SMS directly with username
+// Function to initiate password reset via SMS for all user types
 function initiatePasswordReset($username) {
     // Check if username exists
-    $query = "SELECT UserId, Username, Member_MemberID FROM User WHERE Username = ?";
+    $query = "SELECT UserId, Username, Member_MemberID, Admin_AdminID, Treasurer_TreasurerID, Auditor_AuditorID 
+              FROM User WHERE Username = ?";
     $stmt = prepare($query);
     $stmt->bind_param("s", $username);
     $stmt->execute();
@@ -121,49 +122,115 @@ function initiatePasswordReset($username) {
         $token = generatePasswordResetToken();
         $expiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
         
-        // Get member's phone number
-        $phoneQuery = "SELECT Mobile_Number FROM Member WHERE MemberID = ?";
-        $phoneStmt = prepare($phoneQuery);
-        $phoneStmt->bind_param("s", $user['Member_MemberID']);
-        $phoneStmt->execute();
-        $phoneResult = $phoneStmt->get_result();
+        // Determine user type and get corresponding phone number
+        $phone = null;
         
-        if ($phoneResult->num_rows == 1) {
-            $memberData = $phoneResult->fetch_assoc();
-            $phone = $memberData['Mobile_Number'];
+        if (!empty($user['Member_MemberID'])) {
+            // Get member's phone number
+            $phoneQuery = "SELECT Mobile_Number FROM Member WHERE MemberID = ?";
+            $phoneStmt = prepare($phoneQuery);
+            $phoneStmt->bind_param("s", $user['Member_MemberID']);
+            $phoneStmt->execute();
+            $phoneResult = $phoneStmt->get_result();
             
-            if (!empty($phone)) {
-                // Store token and expiry
-                $updateQuery = "UPDATE User SET reset_token = ?, reset_expires = ? WHERE UserId = ?";
-                $updateStmt = prepare($updateQuery);
-                $updateStmt->bind_param("sss", $token, $expiry, $user['UserId']);
+            if ($phoneResult->num_rows == 1) {
+                $userData = $phoneResult->fetch_assoc();
+                $phone = $userData['Mobile_Number'];
+            }
+        } 
+        elseif (!empty($user['Admin_AdminID'])) {
+            // Get admin's phone number
+            $phoneQuery = "SELECT Contact_Number FROM Admin WHERE AdminID = ?";
+            $phoneStmt = prepare($phoneQuery);
+            $phoneStmt->bind_param("s", $user['Admin_AdminID']);
+            $phoneStmt->execute();
+            $phoneResult = $phoneStmt->get_result();
+            
+            if ($phoneResult->num_rows == 1) {
+                $userData = $phoneResult->fetch_assoc();
+                $phone = $userData['Contact_Number'];
+            }
+        }
+        elseif (!empty($user['Treasurer_TreasurerID'])) {
+            // For Treasurer, we need to get their MemberID first, then get the phone number
+            $memberQuery = "SELECT MemberID FROM Treasurer WHERE TreasurerID = ?";
+            $memberStmt = prepare($memberQuery);
+            $memberStmt->bind_param("s", $user['Treasurer_TreasurerID']);
+            $memberStmt->execute();
+            $memberResult = $memberStmt->get_result();
+            
+            if ($memberResult->num_rows == 1) {
+                $treasurerData = $memberResult->fetch_assoc();
+                $memberID = $treasurerData['MemberID'];
                 
-                if ($updateStmt->execute()) {
-                    // Enable debug mode for testing
-                    $_SESSION['debug_mode'] = true;
-                    
-                    // Create SMS message with token
-                    $smsMessage = "Password Reset Request\n";
-                    $smsMessage .= "Username: " . $user['Username'] . "\n";
-                    $smsMessage .= "Reset Code: " . substr($token, 0, 8) . "\n";
-                    $smsMessage .= "Valid for: 1 hour\n";
-                    $smsMessage .= "From: Society Management System";
-                    
-                    // Send SMS
-                    if (sendEmailToSMS($phone, $smsMessage)) {
-                        return [
-                            'status' => 'success',
-                            'message' => 'Password reset code sent to your mobile number'
-                        ];
-                    } else {
-                        return ['status' => 'error', 'message' => 'Failed to send SMS. Please try again.'];
-                    }
+                // Now get the phone number using the MemberID
+                $phoneQuery = "SELECT Mobile_Number FROM Member WHERE MemberID = ?";
+                $phoneStmt = prepare($phoneQuery);
+                $phoneStmt->bind_param("s", $memberID);
+                $phoneStmt->execute();
+                $phoneResult = $phoneStmt->get_result();
+                
+                if ($phoneResult->num_rows == 1) {
+                    $userData = $phoneResult->fetch_assoc();
+                    $phone = $userData['Mobile_Number'];
                 }
-            } else {
-                return ['status' => 'error', 'message' => 'No phone number found for this account'];
+            }
+        }
+        elseif (!empty($user['Auditor_AuditorID'])) {
+            // For Auditor, we need to get their MemberID first, then get the phone number
+            $memberQuery = "SELECT MemberID FROM Auditor WHERE AuditorID = ?";
+            $memberStmt = prepare($memberQuery);
+            $memberStmt->bind_param("s", $user['Auditor_AuditorID']);
+            $memberStmt->execute();
+            $memberResult = $memberStmt->get_result();
+            
+            if ($memberResult->num_rows == 1) {
+                $auditorData = $memberResult->fetch_assoc();
+                $memberID = $auditorData['MemberID'];
+                
+                // Now get the phone number using the MemberID
+                $phoneQuery = "SELECT Mobile_Number FROM Member WHERE MemberID = ?";
+                $phoneStmt = prepare($phoneQuery);
+                $phoneStmt->bind_param("s", $memberID);
+                $phoneStmt->execute();
+                $phoneResult = $phoneStmt->get_result();
+                
+                if ($phoneResult->num_rows == 1) {
+                    $userData = $phoneResult->fetch_assoc();
+                    $phone = $userData['Mobile_Number'];
+                }
+            }
+        }
+        
+        if (!empty($phone)) {
+            // Store token and expiry
+            $updateQuery = "UPDATE User SET reset_token = ?, reset_expires = ? WHERE UserId = ?";
+            $updateStmt = prepare($updateQuery);
+            $updateStmt->bind_param("sss", $token, $expiry, $user['UserId']);
+            
+            if ($updateStmt->execute()) {
+                // Enable debug mode for testing
+                $_SESSION['debug_mode'] = true;
+                
+                // Create SMS message with token
+                $smsMessage = "Password Reset Request\n";
+                $smsMessage .= "Username: " . $user['Username'] . "\n";
+                $smsMessage .= "Reset Code: " . substr($token, 0, 8) . "\n";
+                $smsMessage .= "Valid for: 1 hour\n";
+                $smsMessage .= "From: Society Management System";
+                
+                // Send SMS
+                if (sendEmailToSMS($phone, $smsMessage)) {
+                    return [
+                        'status' => 'success',
+                        'message' => 'Password reset code sent to your mobile number'
+                    ];
+                } else {
+                    return ['status' => 'error', 'message' => 'Failed to send SMS. Please try again.'];
+                }
             }
         } else {
-            return ['status' => 'error', 'message' => 'Member information not found'];
+            return ['status' => 'error', 'message' => 'No phone number found for this account'];
         }
     }
     

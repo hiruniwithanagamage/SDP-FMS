@@ -11,3 +11,36 @@ Date: 2025-05-15
 From: Society Management System
 --------------------------------------------------
 
+--------------------------------------------------
+Time: 2025-05-15 14:28:13
+Phone: 0703804216 (Mobitel)
+Email: 0703804216@sms.mobitel.lk
+Message: Password Reset Request
+Username: samoda
+Reset Code: 4d051cf6
+Valid for: 1 hour
+From: Society Management System
+--------------------------------------------------
+
+--------------------------------------------------
+Time: 2025-05-15 16:32:02
+Phone: 0703804216 (Mobitel)
+Email: 0703804216@sms.mobitel.lk
+Message: Password Reset Request
+Username: treasurer
+Reset Code: 6fe64960
+Valid for: 1 hour
+From: Society Management System
+--------------------------------------------------
+
+--------------------------------------------------
+Time: 2025-05-15 16:32:30
+Phone: 0715620806 (Dialog)
+Email: 0715620806@sms.dialog.lk
+Message: Password Reset Request
+Username: hiruni
+Reset Code: c65e1d5c
+Valid for: 1 hour
+From: Society Management System
+--------------------------------------------------
+
