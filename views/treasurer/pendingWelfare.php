@@ -3,23 +3,34 @@ session_start();
 require_once "../../config/database.php";
 
 function generateExpenseId() {
-    // Get the latest expense ID
+    global $conn;
+    
+    // Get current year for the term
+    $term = date('Y');
+    
+    // Get the last 2 digits of the term
+    $termSuffix = substr($term, -2);
+    
+    // Get the current highest expense ID for this term
     $sql = "SELECT ExpenseID FROM Expenses 
-            WHERE ExpenseID LIKE 'EXP%' 
+            WHERE ExpenseID LIKE 'EXP{$termSuffix}%' 
             ORDER BY ExpenseID DESC LIMIT 1";
+    
     $result = search($sql);
     
-    if ($result->num_rows > 0) {
+    if ($result && $result->num_rows > 0) {
         $lastId = $result->fetch_assoc()['ExpenseID'];
-        // Extract the number part and increment
-        $lastNum = intval(substr($lastId, 3)); // Remove 'EXP' and convert to integer
+        
+        // Extract the numeric part (last 2 digits)
+        $lastNum = intval(substr($lastId, -2));
         $newNum = $lastNum + 1;
-        // Format with leading zeros
-        $expenseId = 'EXP' . str_pad($newNum, 3, '0', STR_PAD_LEFT);
     } else {
-        // If no existing records, start with EXP001
-        $expenseId = 'EXP001';
+        // No existing expense for this term yet, start with 01
+        $newNum = 1;
     }
+    
+    // Format the new ID with leading zeros for the sequence number
+    $expenseId = "EXP{$termSuffix}" . str_pad($newNum, 2, '0', STR_PAD_LEFT);
     
     return $expenseId;
 }
@@ -39,13 +50,13 @@ function createExpenseRecord($welfareId, $amount) {
     $treasurerId = $treasurerData['Treasurer_TreasurerID'];
     
     $sql = "INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, Description, Image, Treasurer_TreasurerID) 
-            VALUES ('$expenseId', 'Death Welfare', 'System', $amount, '$date', $term, 'Death Welfare Payment (WelfareID: $welfareId)', NULL, '$treasurerId')";
+            VALUES ('$expenseId', 'Death Welfare', 'cash', $amount, '$date', $term, 'Death Welfare Payment (WelfareID: $welfareId)', NULL, '$treasurerId')";
     
-    Database::iud($sql);
+    iud($sql);
     
     // Update DeathWelfare record with the expense ID
     $updateSql = "UPDATE DeathWelfare SET Expense_ExpenseID = '$expenseId' WHERE WelfareID = '$welfareId'";
-    Database::iud($updateSql);
+    iud($updateSql);
     
     return $expenseId;
 }
@@ -76,7 +87,7 @@ if(isset($_POST['update_status'])) {
                 
                 // Update welfare status
                 $updateQuery = "UPDATE DeathWelfare SET Status = '$status' WHERE WelfareID = '$welfareId'";
-                Database::iud($updateQuery);
+                iud($updateQuery);
                 
                 $_SESSION['success_message'] = "Death welfare approved and expense recorded successfully!";
             } else {
@@ -85,7 +96,7 @@ if(isset($_POST['update_status'])) {
         } else {
             // Just update status for rejection
             $updateQuery = "UPDATE DeathWelfare SET Status = '$status' WHERE WelfareID = '$welfareId'";
-            Database::iud($updateQuery);
+            iud($updateQuery);
             $_SESSION['success_message'] = "Death welfare application has been rejected.";
         }
     } catch(Exception $e) {
@@ -152,6 +163,21 @@ if(isset($_POST['update_status'])) {
             color: #1e3c72;
             font-weight: 500;
             margin-bottom: 1rem;
+        }
+        
+        .cancel-btn {
+            padding: 0.8rem 1.8rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            background-color: #e0e0e0;
+            color: #333;
+            transition: background-color 0.3s;
+        }
+
+        .cancel-btn:hover {
+            background-color: #d0d0d0;
         }
 
         .status-badge {

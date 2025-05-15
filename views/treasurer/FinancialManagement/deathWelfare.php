@@ -174,7 +174,7 @@ if(isset($_POST['delete_welfare'])) {
                 
                 // 2. Add a new payment entry of type cash with status 'cash'
                 $paymentId = generatePaymentID($currentTerm);
-                $paymentType = "Death Welfare";
+                $paymentType = "Refund";
                 $method = "Cash";
                 $date = date('Y-m-d');
                 $notes = "Refund for deleted welfare claim #$welfareId";
@@ -440,7 +440,6 @@ $isReportApproved = isReportApproved($selectedTerm);
             </select>
         </div>
 
-        <!-- Add this right after the header-card div for alerts -->
         <div class="alerts-container">
             <?php if(isset($_SESSION['success_message'])): ?>
                 <div class="alert alert-success">

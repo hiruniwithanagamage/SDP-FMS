@@ -198,7 +198,7 @@ function createPaymentRecord($amount, $date, $memberID) {
             PaymentID, Payment_Type, Method, Amount, Date, Term, 
             Notes, Member_MemberID, status
         ) VALUES (
-            ?, 'Death Welfare Refund', 'Cash', ?, ?, ?, 'Death welfare status changed from approved to rejected', ?, 'cash'
+            ?, 'Refund', 'Cash', ?, ?, ?, 'Death welfare status changed from approved to rejected', ?, 'cash'
         )
     ");
     
