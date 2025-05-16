@@ -298,19 +298,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_officers'])) {
         }
         
         .cancel-btn {
-            background-color: #f8f9fa;
+            padding: 0.8rem 1.8rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            background-color: #e0e0e0;
             color: #333;
-            border: 1px solid #ddd;
+            transition: background-color 0.3s;
+        }
+
+        .cancel-btn:hover {
+            background-color: #d0d0d0;
         }
         
         .save-btn {
             background-color: #1e3c72;
             color: white;
             border: none;
-        }
-        
-        .cancel-btn:hover {
-            background-color: #e9ecef;
         }
         
         .save-btn:hover {

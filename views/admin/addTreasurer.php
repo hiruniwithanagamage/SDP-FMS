@@ -184,6 +184,20 @@ if ($membersResult->num_rows == 0) {
             font-size: 0.8em;
             color: #6c757d;
         }
+        .cancel-btn {
+            padding: 0.8rem 1.8rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            background-color: #e0e0e0;
+            color: #333;
+            transition: background-color 0.3s;
+        }
+
+        .cancel-btn:hover {
+            background-color: #d0d0d0;
+        }
     </style>
 </head>
 <body>

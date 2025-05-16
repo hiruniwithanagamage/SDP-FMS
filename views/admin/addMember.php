@@ -341,16 +341,20 @@ if (isset($_POST['add'])) {
             background-color: #0d1757;
         }
 
-        .btn-cancel {
-            background-color: white;
-            color: #1a237e;
-            border: 2px solid #1a237e;
+        .cancel-btn {
+            padding: 0.8rem 1.8rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            background-color: #e0e0e0;
+            color: #333;
+            transition: background-color 0.3s;
         }
 
-        .btn-cancel:hover {
-            background-color: #f5f7fa;
+        .cancel-btn:hover {
+            background-color: #d0d0d0;
         }
-
         .error-message {
             color: #dc3545;
             font-size: 0.85rem;
@@ -559,8 +563,8 @@ if (isset($_POST['add'])) {
                 </div>
 
                 <div class="button-group">
+                    <a href="memberDetails.php" class="btn cancel-btn">Cancel</a>
                     <button type="submit" name="add" class="btn btn-submit">Submit</button>
-                    <a href="memberDetails.php" class="btn btn-cancel">Cancel</a>
                 </div>
             </form>
         </div>
