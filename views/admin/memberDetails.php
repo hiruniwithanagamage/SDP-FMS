@@ -18,6 +18,42 @@ if($successMessage) {
     unset($_SESSION['success_message']);
 }
 
+// AJAX handler for getting member photo - responds to memberDetails.php?action=getPhoto&id=X
+if(isset($_GET['action']) && $_GET['action'] === 'getPhoto' && isset($_GET['id'])) {
+    $photoMemberId = trim($_GET['id']);
+    
+    // Fetch member's photo information
+    $photoQuery = "SELECT Image FROM Member WHERE MemberID = ?";
+    $photoStmt = $conn->prepare($photoQuery);
+    $photoStmt->bind_param("s", $photoMemberId);
+    $photoStmt->execute();
+    $photoResult = $photoStmt->get_result();
+    
+    if ($photoResult->num_rows === 0) {
+        echo json_encode(['hasPhoto' => false]);
+        exit();
+    }
+    
+    $photoData = $photoResult->fetch_assoc();
+    $photoName = $photoData['Image'];
+    
+    if (empty($photoName)) {
+        echo json_encode(['hasPhoto' => false]);
+        exit();
+    }
+    
+    // Check if the file exists on the server
+    $uploadPath = "../../uploads/profilePictures/" . $photoName;
+    $photoExists = file_exists($uploadPath);
+    
+    echo json_encode([
+        'hasPhoto' => $photoExists,
+        'photoName' => $photoExists ? $photoName : null,
+        'fullPath' => $photoExists ? $uploadPath : null
+    ]);
+    exit();
+}
+
 // Handle Search
 $searchTerm = isset($_GET['search']) ? trim($_GET['search']) : '';
 $searchCondition = '';
@@ -69,27 +105,6 @@ if(empty($searchTerm)) {
 $stmt->execute();
 $result = $stmt->get_result();
 
-// Function to check if member has associated records
-function memberHasAssociations($conn, $memberId) {
-    // Check for loans
-    $checkLoans = "SELECT COUNT(*) as count FROM Loan WHERE Member_MemberID = ?";
-    $stmt = $conn->prepare($checkLoans);
-    $stmt->bind_param("s", $memberId);
-    $stmt->execute();
-    $loanResult = $stmt->get_result();
-    $hasLoans = $loanResult->fetch_assoc()['count'] > 0;
-    
-    // Check for payments
-    $checkPayments = "SELECT COUNT(*) as count FROM Payment WHERE Member_MemberID = ?";
-    $stmt = $conn->prepare($checkPayments);
-    $stmt->bind_param("s", $memberId);
-    $stmt->execute();
-    $paymentResult = $stmt->get_result();
-    $hasPayments = $paymentResult->fetch_assoc()['count'] > 0;
-    
-    return $hasLoans || $hasPayments;
-}
-
 // Handle Update
 if(isset($_POST['update'])) {
     $memberId = trim($_POST['member_id']);
@@ -104,110 +119,144 @@ if(isset($_POST['update'])) {
     $otherMembers = empty($_POST['other_members']) ? 0 : (int)$_POST['other_members'];
     $status = $_POST['status'];
     
-    try {
-        // Start transaction
-        $conn->begin_transaction();
-        
-        // Update basic member info with prepared statement
-        $updateQuery = "UPDATE Member SET 
-                       Name = ?,
-                       NIC = ?,
-                       DoB = ?,
-                       Address = ?,
-                       Mobile_Number = ?,
-                       No_of_Family_Members = ?,
-                       Other_Members = ?,
-                       Status = ?
-                       WHERE MemberID = ?";
-                       
-        $stmt = $conn->prepare($updateQuery);
-        $stmt->bind_param("ssssiisss", 
-            $name, 
-            $nic, 
-            $dob, 
-            $address, 
-            $mobile, 
-            $familyMembers, 
-            $otherMembers, 
-            $status, 
-            $memberId
-        );
-        
-        $stmt->execute();
-        
-        // Handle file upload if exists
-        if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === 0) {
-            $allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
-            $maxSize = 20 * 1024 * 1024; // 20MB
-            
-            if (!in_array($_FILES['profile_photo']['type'], $allowedTypes)) {
-                throw new Exception("Only JPG, JPEG & PNG files are allowed");
-            } elseif ($_FILES['profile_photo']['size'] > $maxSize) {
-                throw new Exception("File size must be less than 20MB");
-            }
-            
-            $fileName = $memberId . '_' . time() . '.' . pathinfo($_FILES['profile_photo']['name'], PATHINFO_EXTENSION);
-            $uploadPath = "../uploads/" . $fileName;
-            
-            if (move_uploaded_file($_FILES['profile_photo']['tmp_name'], $uploadPath)) {
-                // Update member record with new image path
-                $updateImageQuery = "UPDATE Member SET Image = ? WHERE MemberID = ?";
-                $stmt = $conn->prepare($updateImageQuery);
-                $stmt->bind_param("ss", $fileName, $memberId);
-                $stmt->execute();
-            } else {
-                throw new Exception("Failed to upload image");
-            }
-        }
-        
-        // Commit transaction
-        $conn->commit();
-        
-        $_SESSION['success_message'] = "Member updated successfully";
-        header("Location: " . $_SERVER['PHP_SELF'] . "?update=success" . ($searchTerm ? "&search=" . urlencode($searchTerm) : ""));
-        exit();
-    } catch(Exception $e) {
-        // Rollback on error
-        $conn->rollback();
-        $updateError = "Error updating member: " . $e->getMessage();
-    }
-}
-
-// Handle Delete
-if(isset($_POST['delete'])) {
-    $memberId = trim($_POST['member_id']);
+    // Validate inputs
+    $errors = [];
     
-    // Check for associated records
-    if(memberHasAssociations($conn, $memberId)) {
-        $deleteError = "Cannot delete this member. They have associated loans or payments.";
-    } else {
+    // Validate NIC (Sri Lanka format)
+    if (!empty($nic)) {
+        // Old format: 9 digits followed by V or X
+        // New format: 12 digits
+        if (!(preg_match('/^\d{9}[vVxX]$/', $nic) || preg_match('/^\d{12}$/', $nic))) {
+            $errors[] = "Invalid NIC format. Must be 9 digits followed by V/X or 12 digits.";
+        }
+    }
+    
+    // Validate mobile number (Sri Lanka format)
+    if (!empty($mobile)) {
+        // Sri Lankan mobile numbers: 07XXXXXXXX or +947XXXXXXXX
+        if (!preg_match('/^(07\d{8}|\+947\d{8})$/', $mobile)) {
+            $errors[] = "Invalid mobile number format. Must be 07XXXXXXXX or +947XXXXXXXX.";
+        }
+    }
+    
+    // Validate numeric fields are not negative
+    if ($familyMembers < 0) {
+        $errors[] = "Number of family members cannot be negative.";
+    }
+    
+    if ($otherMembers < 0) {
+        $errors[] = "Number of other members cannot be negative.";
+    }
+    
+    if (empty($errors)) {
         try {
             // Start transaction
             $conn->begin_transaction();
             
-            // First delete the user record
-            $deleteUserQuery = "DELETE FROM User WHERE Member_MemberID = ?";
-            $stmt = $conn->prepare($deleteUserQuery);
-            $stmt->bind_param("s", $memberId);
+            // Update basic member info with prepared statement
+            $updateQuery = "UPDATE Member SET 
+                           Name = ?,
+                           NIC = ?,
+                           DoB = ?,
+                           Address = ?,
+                           Mobile_Number = ?,
+                           No_of_Family_Members = ?,
+                           Other_Members = ?,
+                           Status = ?
+                           WHERE MemberID = ?";
+                           
+            $stmt = $conn->prepare($updateQuery);
+            $stmt->bind_param("ssssiisss", 
+                $name, 
+                $nic, 
+                $dob, 
+                $address, 
+                $mobile, 
+                $familyMembers, 
+                $otherMembers, 
+                $status, 
+                $memberId
+            );
+            
             $stmt->execute();
             
-            // Then delete the member
-            $deleteMemberQuery = "DELETE FROM Member WHERE MemberID = ?";
-            $stmt = $conn->prepare($deleteMemberQuery);
-            $stmt->bind_param("s", $memberId);
-            $stmt->execute();
+            // Handle file upload if exists
+            if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === 0) {
+                $allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
+                $maxSize = 20 * 1024 * 1024; // 20MB
+                
+                if (!in_array($_FILES['profile_photo']['type'], $allowedTypes)) {
+                    throw new Exception("Only JPG, JPEG & PNG files are allowed");
+                } elseif ($_FILES['profile_photo']['size'] > $maxSize) {
+                    throw new Exception("File size must be less than 20MB");
+                }
+                
+                // Create directory if it doesn't exist
+                $uploadDir = "../../uploads/profilePictures/";
+                if (!file_exists($uploadDir)) {
+                    mkdir($uploadDir, 0777, true);
+                }
+                
+                $fileName = $memberId . '_' . time() . '.' . pathinfo($_FILES['profile_photo']['name'], PATHINFO_EXTENSION);
+                $uploadPath = $uploadDir . $fileName;
+                
+                if (move_uploaded_file($_FILES['profile_photo']['tmp_name'], $uploadPath)) {
+                    // Update member record with new image path
+                    $updateImageQuery = "UPDATE Member SET Image = ? WHERE MemberID = ?";
+                    $stmt = $conn->prepare($updateImageQuery);
+                    $stmt->bind_param("ss", $fileName, $memberId);
+                    $stmt->execute();
+                } else {
+                    throw new Exception("Failed to upload image");
+                }
+            }
             
             // Commit transaction
             $conn->commit();
             
-            $_SESSION['success_message'] = "Member deleted successfully";
-            header("Location: " . $_SERVER['PHP_SELF'] . ($searchTerm ? "?search=" . urlencode($searchTerm) : ""));
+            $_SESSION['success_message'] = "Member updated successfully";
+            header("Location: " . $_SERVER['PHP_SELF'] . "?update=success" . ($searchTerm ? "&search=" . urlencode($searchTerm) : ""));
             exit();
         } catch(Exception $e) {
             // Rollback on error
             $conn->rollback();
-            $deleteError = "Error deleting member: " . $e->getMessage();
+            $updateError = "Error updating member: " . $e->getMessage();
         }
+    } else {
+        $updateError = implode("<br>", $errors);
+    }
+}
+
+// Handle Delete - Modified to delete without checking associations
+if(isset($_POST['delete'])) {
+    $memberId = trim($_POST['member_id']);
+    
+    try {
+        // Start transaction
+        $conn->begin_transaction();
+        
+        // First delete the user record
+        $deleteUserQuery = "DELETE FROM User WHERE Member_MemberID = ?";
+        $stmt = $conn->prepare($deleteUserQuery);
+        $stmt->bind_param("s", $memberId);
+        $stmt->execute();
+        
+        // Then delete the member
+        $deleteMemberQuery = "DELETE FROM Member WHERE MemberID = ?";
+        $stmt = $conn->prepare($deleteMemberQuery);
+        $stmt->bind_param("s", $memberId);
+        $stmt->execute();
+        
+        // Commit transaction
+        $conn->commit();
+        
+        $_SESSION['success_message'] = "Member deleted successfully";
+        header("Location: " . $_SERVER['PHP_SELF'] . ($searchTerm ? "?search=" . urlencode($searchTerm) : ""));
+        exit();
+    } catch(Exception $e) {
+        // Rollback on error
+        $conn->rollback();
+        $deleteError = "Error deleting member: " . $e->getMessage();
     }
 }
 ?>
@@ -224,6 +273,186 @@ if(isset($_POST['delete'])) {
     <script src="../../assets/js/alertHandler.js"></script>
     <script src="../../assets/js/memberDetails.js"></script>
     <style>
+    /* Improved styling based on UserDetails.php */
+    body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f5f7fa;
+    }
+
+    .main-container {
+        min-height: 100vh; 
+        background: #f5f7fa; 
+        padding: 2rem;
+    }
+
+    .container {
+        max-width: 1200px;
+        margin: 2rem auto;
+        padding: 2rem;
+        background-color: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .header-section {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+    }
+
+    h1 {
+        color: #1a237e;
+        margin: 0;
+    }
+
+    .search-section {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+    }
+
+    .search-input {
+        padding: 0.7rem;
+        border: 2px solid #e0e0e0;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        width: 250px;
+    }
+
+    .btn {
+        padding: 0.7rem 1.5rem;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 500;
+        text-align: center;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: background-color 0.3s;
+    }
+
+    .btn-primary {
+        background-color: #1a237e;
+        color: white;
+    }
+
+    .btn-primary:hover {
+        background-color: #0d1757;
+    }
+
+    .member-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 2rem;
+    }
+
+    .member-table th {
+        background-color: #f5f7fa;
+        padding: 1rem;
+        text-align: left;
+        font-weight: 600;
+        color: #1a237e;
+        border-bottom: 2px solid #e0e0e0;
+    }
+
+    .member-table td {
+        padding: 1rem;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .member-row:hover {
+        background-color: #f5f7fa;
+    }
+
+    .status-badge {
+        display: inline-block;
+        padding: 0.3rem 0.8rem;
+        font-size: 0.8rem;
+        font-weight: 500;
+        border-radius: 20px;
+    }
+
+    .status-active {
+        background-color: #e8f5e9;
+        color: #2e7d32;
+    }
+
+    .status-pending {
+        background-color: #fff8e1;
+        color: #ff8f00;
+    }
+
+    .status-left {
+        background-color: #ffebee;
+        color: #c62828;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .action-btn {
+        padding: 0.5rem 1rem;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        transition: background-color 0.3s;
+    }
+
+    .edit-btn {
+        background-color: #e3f2fd;
+        color: #0d47a1;
+    }
+
+    .edit-btn:hover {
+        background-color: #bbdefb;
+    }
+
+    .delete-btn {
+        background-color: #ffebee;
+        color: #c62828;
+    }
+
+    .delete-btn:hover {
+        background-color: #ffcdd2;
+    }
+
+    .pagination {
+        display: flex;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-top: 2rem;
+    }
+
+    .pagination a {
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        text-decoration: none;
+        color: #333;
+        transition: all 0.3s;
+    }
+
+    .pagination a.active {
+        background-color: #1a237e;
+        color: white;
+        border-color: #1a237e;
+    }
+
+    .pagination a:hover:not(.active) {
+        background-color: #f5f7fa;
+    }
+
     .member-details {
         display: flex;
         flex-wrap: wrap;
@@ -273,9 +502,18 @@ if(isset($_POST['delete'])) {
         padding: 20px;
         color: #666;
     }
-    
-    .member-row:hover {
-        background-color: #f5f5f5;
+
+    /* Modal Styles */
+    .modal, .delete-modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0, 0, 0, 0.4);
     }
 
     .modal-content, .delete-modal-content {
@@ -288,33 +526,143 @@ if(isset($_POST['delete'])) {
         max-width: 600px;
         box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     }
-    
+
+    .modal-content h2, .delete-modal-content h2 {
+        color: #1a237e;
+        margin-top: 0;
+        margin-bottom: 1.5rem;
+    }
+
+    .close {
+        color: #aaa;
+        float: right;
+        font-size: 1.5rem;
+        font-weight: bold;
+        cursor: pointer;
+    }
+
+    .close:hover {
+        color: #1a237e;
+    }
+
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+        color: #333;
+    }
+
+    .form-group input, .form-group select {
+        width: 100%;
+        padding: 0.8rem;
+        border: 2px solid #e0e0e0;
+        border-radius: 4px;
+        font-size: 1rem;
+        transition: border-color 0.3s;
+    }
+
+    .form-group input:focus, .form-group select:focus {
+        border-color: #1a237e;
+        outline: none;
+    }
+
+    .form-group small, .hint-text {
+        display: block;
+        margin-top: 0.3rem;
+        color: #666;
+        font-size: 0.8rem;
+    }
+
+    .modal-footer {
+        margin-top: 2rem;
+        display: flex;
+        justify-content: flex-end;
+        gap: 1rem;
+    }
+
     /* Button styling fix for mobile */
     .button-group {
         display: flex;
         gap: 1rem;
         margin-top: 2rem;
         flex-wrap: wrap;
-        width: 100%;
     }
 
-    .btn {
-        padding: 1rem 2rem;
+    .save-btn {
+        background-color: #1a237e;
+        color: white;
+        padding: 0.8rem 2rem;
         border: none;
-        border-radius: 6px;
-        font-size: 1rem;
+        border-radius: 4px;
         cursor: pointer;
-        font-weight: 500;
-        text-align: center;
-        text-decoration: none;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        flex: 1;
-        max-width: 100%;
-        box-sizing: border-box;
+        font-size: 0.9rem;
+        transition: background-color 0.3s;
+    }
+
+    .save-btn:hover {
+        background-color: #0d1757;
+    }
+
+    .cancel-btn {
+        background-color: #e0e0e0;
+        color: #333;
+        padding: 0.8rem 2rem;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: background-color 0.3s;
+    }
+
+    .cancel-btn:hover {
+        background-color: #bdbdbd;
+    }
+
+    .delete-modal-buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 1rem;
+        margin-top: 2rem;
+    }
+
+    .confirm-delete-btn {
+        background-color: #c62828;
+        color: white;
+        padding: 0.8rem 2rem;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: background-color 0.3s;
+    }
+
+    .confirm-delete-btn:hover {
+        background-color: #b71c1c;
+    }
+
+    .alert {
+        padding: 1rem;
+        border-radius: 4px;
+        margin-bottom: 1.5rem;
+    }
+
+    .alert-success {
+        background-color: #e8f5e9;
+        color: #2e7d32;
+        border: 1px solid #c8e6c9;
+    }
+
+    .alert-danger {
+        background-color: #ffebee;
+        color: #c62828;
+        border: 1px solid #ffcdd2;
     }
     
+    /* Responsive design */
     @media (max-width: 768px) {
         .modal-content, .delete-modal-content {
             width: 90%;
@@ -332,6 +680,7 @@ if(isset($_POST['delete'])) {
         
         .search-input {
             flex: 1;
+            width: 100%;
         }
         
         .button-group {
@@ -342,10 +691,10 @@ if(isset($_POST['delete'])) {
             width: 100%;
         }
     }
-</style>
+    </style>
 </head>
 <body>
-    <div class="main-container" style="min-height: 100vh; background: #f5f7fa; padding: 2rem;">
+    <div class="main-container">
     <?php include '../templates/navbar-admin.php'; ?>
     <div class="container">
         <div class="header-section">
@@ -397,6 +746,16 @@ if(isset($_POST['delete'])) {
                     <?php 
                     if($result->num_rows > 0):
                         while($row = $result->fetch_assoc()): 
+                            // Determine status class
+                            $statusClass = '';
+                            
+                            if($row['Status'] === 'Full Member') {
+                                $statusClass = 'active';
+                            } elseif($row['Status'] === 'Pending') {
+                                $statusClass = 'pending';
+                            } elseif($row['Status'] === 'Left') {
+                                $statusClass = 'left';
+                            }
                     ?>
                     <tr data-id="<?php echo htmlspecialchars($row['MemberID']); ?>" class="member-row" style="cursor: pointer;" onclick="viewMemberDetails('<?php echo htmlspecialchars($row['MemberID']); ?>')">
                         <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
@@ -406,8 +765,8 @@ if(isset($_POST['delete'])) {
                         <td><?php echo htmlspecialchars($row['Address']); ?></td>
                         <td><?php echo htmlspecialchars(date('Y-m-d', strtotime($row['Joined_Date']))); ?></td>
                         <td>
-                            <span class="status-badge status-<?php echo $row['Status'] === 'TRUE' ? 'active' : 'pending'; ?>">
-                                <?php echo $row['Status'] === 'TRUE' ? 'Full Member' : 'Pending'; ?>
+                            <span class="status-badge status-<?php echo $statusClass; ?>">
+                                <?php echo $row['Status']; ?>
                             </span>
                         </td>
                         <td>
@@ -486,7 +845,8 @@ if(isset($_POST['delete'])) {
 
                 <div class="form-group">
                     <label for="edit_nic">NIC</label>
-                    <input type="text" id="edit_nic" name="nic" required>
+                    <input type="text" id="edit_nic" name="nic" required pattern="^\d{9}[vVxX]$|^\d{12}$">
+                    <small>Format: 9 digits + V/X or 12 digits (e.g., 123456789V or 123456789012)</small>
                 </div>
 
                 <div class="form-group">
@@ -501,7 +861,8 @@ if(isset($_POST['delete'])) {
 
                 <div class="form-group">
                     <label for="edit_mobile">Mobile Number</label>
-                    <input type="text" id="edit_mobile" name="mobile" placeholder="07XXXXXXXX">
+                    <input type="text" id="edit_mobile" name="mobile" placeholder="07XXXXXXXX" pattern="^(07\d{8}|\+947\d{8})$">
+                    <small>Format: 07XXXXXXXX or +947XXXXXXXX</small>
                 </div>
 
                 <div class="form-group">
@@ -517,18 +878,19 @@ if(isset($_POST['delete'])) {
                 <div class="form-group">
                     <label for="edit_status">Status</label>
                     <select id="edit_status" name="status" required>
-                        <option value="TRUE">Full Member</option>
-                        <option value="FAIL">Pending</option>
+                        <option value="Full Member">Full Member</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Left">Left</option>
                     </select>
                 </div>
 
                 <div class="form-group">
                     <label for="edit_profile_photo">Update Profile Photo</label>
-                    <input type="file" id="edit_profile_photo" name="profile_photo" accept="image/*">
+                    <input type="file" id="edit_profile_photo" name="profile_photo" accept="image/jpeg,image/jpg,image/png">
                     <p class="hint-text">(jpeg / jpg / png, 20MB max)</p>
                     
-                    <div id="current_photo_container" style="margin-top: 10px; display: none;">
-                        <label>Current Photo:</label>
+                    <div id="current_photo_container" style="margin-top: 10px;">
+                        <p id="photo_status_text">Current Photo: <span id="load_status">(Loading...)</span></p>
                         <div id="current_photo" style="margin-top: 5px;"></div>
                     </div>
                 </div>
@@ -574,7 +936,108 @@ if(isset($_POST['delete'])) {
             document.getElementById('edit_mobile').value = mobile || '';
             document.getElementById('edit_family_members').value = familyMembers || 0;
             document.getElementById('edit_other_members').value = otherMembers || 0;
-            document.getElementById('edit_status').value = status;
+            
+            // Set the correct status in the dropdown
+            const statusSelect = document.getElementById('edit_status');
+            for (let i = 0; i < statusSelect.options.length; i++) {
+                if (statusSelect.options[i].value === status) {
+                    statusSelect.selectedIndex = i;
+                    break;
+                }
+            }
+            
+            // Client-side validation for numbers
+            const familyMembersInput = document.getElementById('edit_family_members');
+            const otherMembersInput = document.getElementById('edit_other_members');
+            
+            // Ensure non-negative values for numeric fields
+            familyMembersInput.addEventListener('input', function() {
+                if (this.value < 0) this.value = 0;
+            });
+            
+            otherMembersInput.addEventListener('input', function() {
+                if (this.value < 0) this.value = 0;
+            });
+            
+            // NIC validation
+            const nicInput = document.getElementById('edit_nic');
+            nicInput.addEventListener('input', function() {
+                const nicValue = this.value;
+                const isOldFormat = /^\d{9}[vVxX]$/.test(nicValue);
+                const isNewFormat = /^\d{12}$/.test(nicValue);
+                
+                if (nicValue && !(isOldFormat || isNewFormat)) {
+                    this.setCustomValidity('Invalid NIC format. Must be 9 digits followed by V/X or 12 digits.');
+                } else {
+                    this.setCustomValidity('');
+                }
+            });
+            
+            // Mobile number validation
+            const mobileInput = document.getElementById('edit_mobile');
+            mobileInput.addEventListener('input', function() {
+                const mobileValue = this.value;
+                if (mobileValue && !/^(07\d{8}|\+947\d{8})$/.test(mobileValue)) {
+                    this.setCustomValidity('Invalid mobile number format. Must be 07XXXXXXXX or +947XXXXXXXX.');
+                } else {
+                    this.setCustomValidity('');
+                }
+            });
+            
+            // Check if there's a current photo and display it
+            fetch(`getMemberPhoto.php?id=${memberId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.hasPhoto) {
+                        const photoContainer = document.getElementById('current_photo_container');
+                        const photoElement = document.getElementById('current_photo');
+                        
+                        photoElement.innerHTML = `<img src="../uploads/${data.photoName}" alt="Current Profile Photo" style="max-width: 120px; max-height: 120px; border-radius: 5px;">`;
+                        photoContainer.style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching photo information:', error);
+                });
+        }
+            
+            // Client-side validation for numbers
+            const familyMembersInput = document.getElementById('edit_family_members');
+            const otherMembersInput = document.getElementById('edit_other_members');
+            
+            // Ensure non-negative values for numeric fields
+            familyMembersInput.addEventListener('input', function() {
+                if (this.value < 0) this.value = 0;
+            });
+            
+            otherMembersInput.addEventListener('input', function() {
+                if (this.value < 0) this.value = 0;
+            });
+            
+            // NIC validation
+            const nicInput = document.getElementById('edit_nic');
+            nicInput.addEventListener('input', function() {
+                const nicValue = this.value;
+                const isOldFormat = /^\d{9}[vVxX]$/.test(nicValue);
+                const isNewFormat = /^\d{12}$/.test(nicValue);
+                
+                if (nicValue && !(isOldFormat || isNewFormat)) {
+                    this.setCustomValidity('Invalid NIC format. Must be 9 digits followed by V/X or 12 digits.');
+                } else {
+                    this.setCustomValidity('');
+                }
+            });
+            
+            // Mobile number validation
+            const mobileInput = document.getElementById('edit_mobile');
+            mobileInput.addEventListener('input', function() {
+                const mobileValue = this.value;
+                if (mobileValue && !/^(07\d{8}|\+947\d{8})$/.test(mobileValue)) {
+                    this.setCustomValidity('Invalid mobile number format. Must be 07XXXXXXXX or +947XXXXXXXX.');
+                } else {
+                    this.setCustomValidity('');
+                }
+            });
             
             // Check if there's a current photo
             // You would need to implement an AJAX call to fetch this information
@@ -600,6 +1063,47 @@ if(isset($_POST['delete'])) {
             document.getElementById('viewDetailsModal').style.display = 'none';
         }
 
+        // Function to view member details
+        function viewMemberDetails(memberId) {
+            const modal = document.getElementById('viewDetailsModal');
+            const contentContainer = document.getElementById('memberDetailsContent');
+            
+            // Show loading state
+            contentContainer.innerHTML = '<div class="loading">Loading details...</div>';
+            modal.style.display = 'block';
+            
+            // Here you would typically fetch member details via AJAX
+            // Simulating content for demo purposes
+            setTimeout(() => {
+                // You would replace this with actual AJAX call
+                fetchMemberDetails(memberId);
+            }, 500);
+        }
+        
+        // Function to fetch member details via AJAX
+        function fetchMemberDetails(memberId) {
+            // In a real implementation, this would be an AJAX call
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', `getMemberDetails.php?id=${memberId}`, true);
+            xhr.onload = function() {
+                if (this.status === 200) {
+                    document.getElementById('memberDetailsContent').innerHTML = this.responseText;
+                    
+                    // Check if photo display needs to be updated based on the response
+                    const photoElement = document.querySelector('#memberDetailsContent img');
+                    if (photoElement && photoElement.src.includes('noimage.png')) {
+                        photoElement.parentElement.innerHTML = '<div class="no-photo">No Photo Available</div>';
+                    }
+                } else {
+                    document.getElementById('memberDetailsContent').innerHTML = '<div class="error">Failed to load member details.</div>';
+                }
+            };
+            xhr.onerror = function() {
+                document.getElementById('memberDetailsContent').innerHTML = '<div class="error">Error connecting to server.</div>';
+            };
+            xhr.send();
+        }
+
         // Close modals when clicking outside
         window.onclick = function(event) {
             const viewModal = document.getElementById('viewDetailsModal');
@@ -618,6 +1122,48 @@ if(isset($_POST['delete'])) {
                 closeDeleteModal();
             }
         }
+        
+        // Additional validation on form submission
+        document.getElementById('editForm').addEventListener('submit', function(event) {
+            const nicInput = document.getElementById('edit_nic');
+            const mobileInput = document.getElementById('edit_mobile');
+            const familyMembersInput = document.getElementById('edit_family_members');
+            const otherMembersInput = document.getElementById('edit_other_members');
+            
+            let isValid = true;
+            
+            // Validate NIC format
+            const nicValue = nicInput.value;
+            const isOldFormat = /^\d{9}[vVxX]$/.test(nicValue);
+            const isNewFormat = /^\d{12}$/.test(nicValue);
+            
+            if (!(isOldFormat || isNewFormat)) {
+                alert('Invalid NIC format. Must be 9 digits followed by V/X or 12 digits.');
+                isValid = false;
+            }
+            
+            // Validate mobile number if provided
+            const mobileValue = mobileInput.value;
+            if (mobileValue && !/^(07\d{8}|\+947\d{8})$/.test(mobileValue)) {
+                alert('Invalid mobile number format. Must be 07XXXXXXXX or +947XXXXXXXX.');
+                isValid = false;
+            }
+            
+            // Ensure non-negative values for numeric fields
+            if (parseInt(familyMembersInput.value) < 0) {
+                alert('Number of family members cannot be negative.');
+                isValid = false;
+            }
+            
+            if (parseInt(otherMembersInput.value) < 0) {
+                alert('Number of other members cannot be negative.');
+                isValid = false;
+            }
+            
+            if (!isValid) {
+                event.preventDefault();
+            }
+        });
     </script>
 </body>
 </html>

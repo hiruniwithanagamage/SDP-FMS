@@ -45,7 +45,7 @@ if (isset($userData['Auditor_AuditorID'])) {
         $memberName = $memberData['Name'];
         // Use member's image if available, otherwise keep default
         if (!empty($memberData['Image'])) {
-            $memberImage = $basePath . "uploads/" . $memberData['Image'];
+            $memberImage = $basePath . "uploads/profilePictures/" . $memberData['Image'];
         }
     }
 }
@@ -54,6 +54,8 @@ if (isset($userData['Auditor_AuditorID'])) {
 <!DOCTYPE html>
 <html>
 <head>
+   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
    <style>
       body {
          font-family: Arial, sans-serif;
