@@ -15,7 +15,7 @@ $errors = [];
 
 // Validation helper functions
 function validateNIC($nic) {
-    // Old or New NIC format validation
+    // Old or New NIC format validation for Sri Lanka
     return preg_match("/^([0-9]{9}[vVxX]|[0-9]{12})$/", $nic);
 }
 
@@ -25,8 +25,13 @@ function validateMobile($mobile) {
 }
 
 function validateName($name) {
-    // Name should be at least 3 characters and contain only letters and spaces
-    return preg_match("/^[a-zA-Z\s]{3,}$/", $name);
+    // Name should be at least 3 characters, max 50, and contain only letters and spaces
+    return preg_match("/^[a-zA-Z\s]{3,50}$/", $name);
+}
+
+function validateAddress($address) {
+    // Address should be max 50 characters
+    return strlen($address) <= 50;
 }
 
 function validateDOB($dob) {
@@ -80,14 +85,14 @@ if (isset($_POST['add'])) {
     if (empty($name)) {
         $errors['name'] = "Name is required";
     } elseif (!validateName($name)) {
-        $errors['name'] = "Name should contain only letters and spaces";
+        $errors['name'] = "Name should contain only letters and spaces (3-50 characters)";
     }
 
     // Validate NIC
     if (empty($nic)) {
         $errors['nic'] = "NIC is required";
     } elseif (!validateNIC($nic)) {
-        $errors['nic'] = "Invalid NIC format";
+        $errors['nic'] = "Invalid NIC format. Use 9 digits + V/X or 12 digits";
     }
 
     // Validate DOB
@@ -100,12 +105,14 @@ if (isset($_POST['add'])) {
     // Validate address
     if (empty($address)) {
         $errors['address'] = "Address is required";
+    } elseif (!validateAddress($address)) {
+        $errors['address'] = "Address must be 50 characters or less";
     }
 
     // Validate mobile number if provided
     if (!empty($mobile)) {
         if (!validateMobile($mobile)) {
-            $errors['mobile'] = "Invalid mobile number format";
+            $errors['mobile'] = "Invalid Sri Lankan mobile number format (e.g., 07XXXXXXXX)";
         } else {
             // Clean the mobile number
             $mobile = preg_replace('/[^0-9]/', '', $mobile);
@@ -408,12 +415,13 @@ if (isset($_POST['add'])) {
                     <div class="form-column">
                         <label for="name">Name</label>
                         <div class="input-container">
-                            <input type="text" id="name" name="name" 
+                            <input type="text" id="name" name="name" maxlength="50"
                                    value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>" 
                                    class="<?php echo isset($errors['name']) ? 'error' : ''; ?>" required>
                             <?php if (isset($errors['name'])): ?>
                                 <span class="error-message"><?php echo htmlspecialchars($errors['name']); ?></span>
                             <?php endif; ?>
+                            <span class="hint-text">Maximum 50 characters</span>
                         </div>
                     </div>
                     <div class="form-column">
@@ -434,6 +442,7 @@ if (isset($_POST['add'])) {
                             <?php if (isset($errors['nic'])): ?>
                                 <span class="error-message"><?php echo htmlspecialchars($errors['nic']); ?></span>
                             <?php endif; ?>
+                            <span class="hint-text">9 digits + V/X or 12 digits</span>
                         </div>
                     </div>
                     <div class="form-column">
@@ -446,6 +455,7 @@ if (isset($_POST['add'])) {
                             <?php if (isset($errors['mobile'])): ?>
                                 <span class="error-message"><?php echo htmlspecialchars($errors['mobile']); ?></span>
                             <?php endif; ?>
+                            <span class="hint-text">Sri Lankan mobile format (e.g., 07XXXXXXXX)</span>
                         </div>
                     </div>
                 </div>
@@ -476,12 +486,13 @@ if (isset($_POST['add'])) {
                     <div class="form-column">
                         <label for="address">Address</label>
                         <div class="input-container">
-                            <input type="text" id="address" name="address" 
+                            <input type="text" id="address" name="address" maxlength="50"
                                    value="<?php echo isset($_POST['address']) ? htmlspecialchars($_POST['address']) : ''; ?>"
                                    class="<?php echo isset($errors['address']) ? 'error' : ''; ?>" required>
                             <?php if (isset($errors['address'])): ?>
                                 <span class="error-message"><?php echo htmlspecialchars($errors['address']); ?></span>
                             <?php endif; ?>
+                            <span class="hint-text">Maximum 50 characters</span>
                         </div>
                     </div>
                     <div class="form-column">
@@ -568,15 +579,52 @@ if (isset($_POST['add'])) {
 
                 // Validate name
                 const name = document.getElementById('name').value.trim();
-                if (!/^[a-zA-Z\s]{3,}$/.test(name)) {
-                    showError('name', 'Name should contain only letters and spaces');
+                if (name === '') {
+                    showError('name', 'Name is required');
+                    hasError = true;
+                } else if (!/^[a-zA-Z\s]{3,50}$/.test(name)) {
+                    showError('name', 'Name should contain only letters and spaces (3-50 characters)');
                     hasError = true;
                 }
 
                 // Validate NIC
                 const nic = document.getElementById('nic').value.trim();
-                if (!/^([0-9]{9}[vVxX]|[0-9]{12})$/.test(nic)) {
-                    showError('nic', 'Invalid NIC format');
+                if (nic === '') {
+                    showError('nic', 'NIC is required');
+                    hasError = true;
+                } else if (!/^([0-9]{9}[vVxX]|[0-9]{12})$/.test(nic)) {
+                    showError('nic', 'Invalid NIC format. Use 9 digits + V/X or 12 digits');
+                    hasError = true;
+                }
+
+                // Validate Address
+                const address = document.getElementById('address').value.trim();
+                if (address === '') {
+                    showError('address', 'Address is required');
+                    hasError = true;
+                } else if (address.length > 50) {
+                    showError('address', 'Address must be 50 characters or less');
+                    hasError = true;
+                }
+
+                // Validate mobile if provided
+                const mobile = document.getElementById('mobile').value.trim();
+                if (mobile !== '' && !/^(?:0|94|\+94)?(?:7[0-9]{8})$/.test(mobile)) {
+                    showError('mobile', 'Invalid Sri Lankan mobile number format (e.g., 07XXXXXXXX)');
+                    hasError = true;
+                }
+
+                // Validate family members
+                const familyMembers = parseInt(document.getElementById('family_members').value);
+                if (isNaN(familyMembers) || familyMembers < 0) {
+                    showError('family_members', 'Number of family members cannot be negative');
+                    hasError = true;
+                }
+                
+                // Validate other members
+                const otherMembers = parseInt(document.getElementById('other_members').value);
+                if (isNaN(otherMembers) || otherMembers < 0) {
+                    showError('other_members', 'Number of other members cannot be negative');
                     hasError = true;
                 }
 

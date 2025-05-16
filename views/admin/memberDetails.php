@@ -922,126 +922,98 @@ if(isset($_POST['delete'])) {
     <script>
         // Enhanced openEditModal function to handle escaped quotes properly
         function openEditModal(memberId, name, nic, dob, address, mobile, familyMembers, otherMembers, status) {
-            console.log("Opening edit modal for member:", memberId);
-            
-            const modal = document.getElementById('editModal');
-            modal.style.display = 'block';
-            
-            // Set form values
-            document.getElementById('edit_member_id').value = memberId;
-            document.getElementById('edit_name').value = name.replace(/\\'/g, "'").replace(/\\"/g, '"');
-            document.getElementById('edit_nic').value = nic;
-            document.getElementById('edit_dob').value = dob;
-            document.getElementById('edit_address').value = address.replace(/\\'/g, "'").replace(/\\"/g, '"');
-            document.getElementById('edit_mobile').value = mobile || '';
-            document.getElementById('edit_family_members').value = familyMembers || 0;
-            document.getElementById('edit_other_members').value = otherMembers || 0;
-            
-            // Set the correct status in the dropdown
-            const statusSelect = document.getElementById('edit_status');
-            for (let i = 0; i < statusSelect.options.length; i++) {
-                if (statusSelect.options[i].value === status) {
-                    statusSelect.selectedIndex = i;
-                    break;
-                }
+    console.log("Opening edit modal for member:", memberId);
+    
+    const modal = document.getElementById('editModal');
+    modal.style.display = 'block';
+    
+    // Set form values
+    document.getElementById('edit_member_id').value = memberId;
+    document.getElementById('edit_name').value = name.replace(/\\'/g, "'").replace(/\\"/g, '"');
+    document.getElementById('edit_nic').value = nic;
+    document.getElementById('edit_dob').value = dob;
+    document.getElementById('edit_address').value = address.replace(/\\'/g, "'").replace(/\\"/g, '"');
+    document.getElementById('edit_mobile').value = mobile || '';
+    document.getElementById('edit_family_members').value = familyMembers || 0;
+    document.getElementById('edit_other_members').value = otherMembers || 0;
+    
+    // Set the correct status in the dropdown
+    const statusSelect = document.getElementById('edit_status');
+    for (let i = 0; i < statusSelect.options.length; i++) {
+        if (statusSelect.options[i].value === status) {
+            statusSelect.selectedIndex = i;
+            break;
+        }
+    }
+    
+    // Client-side validation for numbers
+    const familyMembersInput = document.getElementById('edit_family_members');
+    const otherMembersInput = document.getElementById('edit_other_members');
+    
+    // Ensure non-negative values for numeric fields
+    familyMembersInput.addEventListener('input', function() {
+        if (this.value < 0) this.value = 0;
+    });
+    
+    otherMembersInput.addEventListener('input', function() {
+        if (this.value < 0) this.value = 0;
+    });
+    
+    // NIC validation
+    const nicInput = document.getElementById('edit_nic');
+    nicInput.addEventListener('input', function() {
+        const nicValue = this.value;
+        const isOldFormat = /^\d{9}[vVxX]$/.test(nicValue);
+        const isNewFormat = /^\d{12}$/.test(nicValue);
+        
+        if (nicValue && !(isOldFormat || isNewFormat)) {
+            this.setCustomValidity('Invalid NIC format. Must be 9 digits followed by V/X or 12 digits.');
+        } else {
+            this.setCustomValidity('');
+        }
+    });
+    
+    // Mobile number validation
+    const mobileInput = document.getElementById('edit_mobile');
+    mobileInput.addEventListener('input', function() {
+        const mobileValue = this.value;
+        if (mobileValue && !/^(07\d{8}|\+947\d{8})$/.test(mobileValue)) {
+            this.setCustomValidity('Invalid mobile number format. Must be 07XXXXXXXX or +947XXXXXXXX.');
+        } else {
+            this.setCustomValidity('');
+        }
+    });
+    
+    // Check if there's a current photo and display it
+    // FIXED: Use the correct endpoint as defined in the PHP file
+    const photoContainer = document.getElementById('current_photo_container');
+    const photoElement = document.getElementById('current_photo');
+    const loadStatus = document.getElementById('load_status');
+    
+    // Show loading state
+    loadStatus.textContent = "(Loading...)";
+    
+    // FIXED: Use the correct endpoint URL format with proper action parameter
+    fetch(`memberDetails.php?action=getPhoto&id=${memberId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.hasPhoto) {
+                // FIXED: Use the correct path structure from the data returned
+                photoElement.innerHTML = `<img src="../../uploads/profilePictures/${data.photoName}" alt="Current Profile Photo" style="max-width: 120px; max-height: 120px; border-radius: 5px;">`;
+                loadStatus.textContent = "Available";
+                photoContainer.style.display = 'block';
+            } else {
+                photoElement.innerHTML = `<div class="no-photo" style="width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; border: 1px dashed #ccc; color: #999;">No Photo</div>`;
+                loadStatus.textContent = "None";
+                photoContainer.style.display = 'block';
             }
-            
-            // Client-side validation for numbers
-            const familyMembersInput = document.getElementById('edit_family_members');
-            const otherMembersInput = document.getElementById('edit_other_members');
-            
-            // Ensure non-negative values for numeric fields
-            familyMembersInput.addEventListener('input', function() {
-                if (this.value < 0) this.value = 0;
-            });
-            
-            otherMembersInput.addEventListener('input', function() {
-                if (this.value < 0) this.value = 0;
-            });
-            
-            // NIC validation
-            const nicInput = document.getElementById('edit_nic');
-            nicInput.addEventListener('input', function() {
-                const nicValue = this.value;
-                const isOldFormat = /^\d{9}[vVxX]$/.test(nicValue);
-                const isNewFormat = /^\d{12}$/.test(nicValue);
-                
-                if (nicValue && !(isOldFormat || isNewFormat)) {
-                    this.setCustomValidity('Invalid NIC format. Must be 9 digits followed by V/X or 12 digits.');
-                } else {
-                    this.setCustomValidity('');
-                }
-            });
-            
-            // Mobile number validation
-            const mobileInput = document.getElementById('edit_mobile');
-            mobileInput.addEventListener('input', function() {
-                const mobileValue = this.value;
-                if (mobileValue && !/^(07\d{8}|\+947\d{8})$/.test(mobileValue)) {
-                    this.setCustomValidity('Invalid mobile number format. Must be 07XXXXXXXX or +947XXXXXXXX.');
-                } else {
-                    this.setCustomValidity('');
-                }
-            });
-            
-            // Check if there's a current photo and display it
-            fetch(`getMemberPhoto.php?id=${memberId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.hasPhoto) {
-                        const photoContainer = document.getElementById('current_photo_container');
-                        const photoElement = document.getElementById('current_photo');
-                        
-                        photoElement.innerHTML = `<img src="../uploads/${data.photoName}" alt="Current Profile Photo" style="max-width: 120px; max-height: 120px; border-radius: 5px;">`;
-                        photoContainer.style.display = 'block';
-                    }
-                })
-                .catch(error => {
-                    console.error('Error fetching photo information:', error);
-                });
-        }
-            
-            // Client-side validation for numbers
-            const familyMembersInput = document.getElementById('edit_family_members');
-            const otherMembersInput = document.getElementById('edit_other_members');
-            
-            // Ensure non-negative values for numeric fields
-            familyMembersInput.addEventListener('input', function() {
-                if (this.value < 0) this.value = 0;
-            });
-            
-            otherMembersInput.addEventListener('input', function() {
-                if (this.value < 0) this.value = 0;
-            });
-            
-            // NIC validation
-            const nicInput = document.getElementById('edit_nic');
-            nicInput.addEventListener('input', function() {
-                const nicValue = this.value;
-                const isOldFormat = /^\d{9}[vVxX]$/.test(nicValue);
-                const isNewFormat = /^\d{12}$/.test(nicValue);
-                
-                if (nicValue && !(isOldFormat || isNewFormat)) {
-                    this.setCustomValidity('Invalid NIC format. Must be 9 digits followed by V/X or 12 digits.');
-                } else {
-                    this.setCustomValidity('');
-                }
-            });
-            
-            // Mobile number validation
-            const mobileInput = document.getElementById('edit_mobile');
-            mobileInput.addEventListener('input', function() {
-                const mobileValue = this.value;
-                if (mobileValue && !/^(07\d{8}|\+947\d{8})$/.test(mobileValue)) {
-                    this.setCustomValidity('Invalid mobile number format. Must be 07XXXXXXXX or +947XXXXXXXX.');
-                } else {
-                    this.setCustomValidity('');
-                }
-            });
-            
-            // Check if there's a current photo
-            // You would need to implement an AJAX call to fetch this information
-        }
+        })
+        .catch(error => {
+            console.error('Error fetching photo information:', error);
+            loadStatus.textContent = "Error loading";
+            photoElement.innerHTML = '<div class="error">Could not load photo information</div>';
+        });
+}
 
         function closeModal() {
             document.getElementById('editModal').style.display = 'none';
