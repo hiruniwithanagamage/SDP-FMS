@@ -73,7 +73,10 @@ try {
     $cardNumber = isset($_POST['card_number']) ? $_POST['card_number'] : null;
     $expireDate = isset($_POST['expire_date']) ? $_POST['expire_date'] : null;
     $cvv = isset($_POST['cvv']) ? $_POST['cvv'] : null;
-    
+
+    // Set status based on payment method
+    $status = ($method === 'transfer') ? 'pending' : 'self';
+
     $paymentQuery = "INSERT INTO Payment (
         PaymentID, 
         Payment_Type, 
@@ -85,7 +88,8 @@ try {
         card_number, 
         expire_date, 
         cvv, 
-        Member_MemberID
+        Member_MemberID,
+        Status
     ) VALUES (
         '$paymentId',
         '$paymentType',
@@ -97,89 +101,36 @@ try {
         " . ($cardNumber ? "'$cardNumber'" : "NULL") . ",
         " . ($expireDate ? "'$expireDate'" : "NULL") . ",
         " . ($cvv ? "'$cvv'" : "NULL") . ",
-        '$memberId'
+        '$memberId',
+        '$status'
     )";
-    
+
     iud($paymentQuery);
 
-    // Process different payment types
-    switch($paymentType) {
-        case 'registration':
-            // Validate maximum payment amount
-            $regFeePaidQuery = "SELECT COALESCE(SUM(P.Amount), 0) as total_paid
-                                FROM MembershipFee MF
-                                JOIN MembershipFeePayment MFP ON MF.FeeID = MFP.FeeID
-                                JOIN Payment P ON MFP.PaymentID = P.PaymentID
-                                WHERE MF.Member_MemberID = '$memberId'
-                                AND MF.Type = 'registration'
-                                AND MF.Term = $year";
-            $regFeePaidResult = search($regFeePaidQuery);
-            $regFeePaid = $regFeePaidResult->fetch_assoc()['total_paid'];
-            $remainingRegFee = $feeStructure['registration_fee'] - $regFeePaid;
+    // ONLY process other tables if payment method is NOT transfer
+    if ($method !== 'transfer') {
+        // Process different payment types
+        switch($paymentType) {
+            case 'registration':
+                // Validate maximum payment amount
+                $regFeePaidQuery = "SELECT COALESCE(SUM(P.Amount), 0) as total_paid
+                                    FROM MembershipFee MF
+                                    JOIN MembershipFeePayment MFP ON MF.FeeID = MFP.FeeID
+                                    JOIN Payment P ON MFP.PaymentID = P.PaymentID
+                                    WHERE MF.Member_MemberID = '$memberId'
+                                    AND MF.Type = 'registration'
+                                    AND MF.Term = $year";
+                $regFeePaidResult = search($regFeePaidQuery);
+                $regFeePaid = $regFeePaidResult->fetch_assoc()['total_paid'];
+                $remainingRegFee = $feeStructure['registration_fee'] - $regFeePaid;
 
-            if ($amount > $remainingRegFee) {
-                throw new Exception("Payment amount cannot exceed remaining registration fee");
-            }
+                if ($amount > $remainingRegFee) {
+                    throw new Exception("Payment amount cannot exceed remaining registration fee");
+                }
 
-            // Create a new registration fee record for this payment
-            $feeId = generateFeeId();
-            $feeQuery = "INSERT INTO MembershipFee (
-                FeeID, 
-                Amount, 
-                Date, 
-                Term, 
-                Type, 
-                Member_MemberID, 
-                IsPaid
-            ) VALUES (
-                '$feeId', 
-                $amount, 
-                '$date', 
-                $year, 
-                'registration', 
-                '$memberId', 
-                'Yes'
-            )";
-            iud($feeQuery);
-
-            // Link payment to membership fee
-            $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
-                        VALUES ('$feeId', '$paymentId')";
-            iud($linkQuery);
-
-            // Check if registration fee is fully paid
-            $newTotalPaid = $regFeePaid + $amount;
-            if ($newTotalPaid >= $feeStructure['registration_fee']) {
-                // Update member status
-                $updateMemberQuery = "UPDATE Member 
-                                    SET Status = 'Full Member' 
-                                    WHERE MemberID = '$memberId'";
-                iud($updateMemberQuery);
-            }
-            break;
-
-        case 'monthly':
-            if (!isset($_POST['selected_months']) || empty($_POST['selected_months'])) {
-                throw new Exception("No months selected for monthly fee");
-            }
-        
-            $selectedMonths = $_POST['selected_months'];
-            $expectedAmount = count($selectedMonths) * floatval($feeStructure['monthly_fee']);
-            
-            if ($amount != $expectedAmount) {
-                throw new Exception("Invalid monthly fee amount");
-            }
-        
-            // Process each selected month
-            foreach ($selectedMonths as $month) {
+                // Create a new registration fee record for this payment
                 $feeId = generateFeeId();
-                $monthDate = date('Y-m-d', strtotime("$year-$month-01"));
-                
-                // Calculate monthly fee amount with proper float conversion
-                $monthlyFeeAmount = floatval($feeStructure['monthly_fee']);
-                
-                // Insert membership fee record
-                $monthlyFeeQuery = "INSERT INTO MembershipFee (
+                $feeQuery = "INSERT INTO MembershipFee (
                     FeeID, 
                     Amount, 
                     Date, 
@@ -189,98 +140,155 @@ try {
                     IsPaid
                 ) VALUES (
                     '$feeId', 
-                    $monthlyFeeAmount, 
-                    '$monthDate', 
+                    $amount, 
+                    '$date', 
                     $year, 
-                    'monthly', 
+                    'registration', 
                     '$memberId', 
                     'Yes'
                 )";
-                iud($monthlyFeeQuery);
-                
-                // Link the fee to the payment
+                iud($feeQuery);
+
+                // Link payment to membership fee
                 $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
                             VALUES ('$feeId', '$paymentId')";
                 iud($linkQuery);
-            }
-            break;
 
-        case 'fine':
-            if (!isset($_POST['fine_id'])) {
-                throw new Exception("Fine ID is required");
-            }
+                // Check if registration fee is fully paid
+                $newTotalPaid = $regFeePaid + $amount;
+                if ($newTotalPaid >= $feeStructure['registration_fee']) {
+                    // Update member status
+                    $updateMemberQuery = "UPDATE Member 
+                                        SET Status = 'Full Member' 
+                                        WHERE MemberID = '$memberId'";
+                    iud($updateMemberQuery);
+                }
+                break;
 
-            $fineId = $_POST['fine_id'];
+            case 'monthly':
+                if (!isset($_POST['selected_months']) || empty($_POST['selected_months'])) {
+                    throw new Exception("No months selected for monthly fee");
+                }
             
-            // Validate fine payment
-            $query = "SELECT Amount FROM Fine 
-                     WHERE FineID = '$fineId' 
-                     AND Member_MemberID = '$memberId' 
-                     AND IsPaid = 'No'";
-            $result = search($query);
+                $selectedMonths = $_POST['selected_months'];
+                $expectedAmount = count($selectedMonths) * floatval($feeStructure['monthly_fee']);
+                
+                if ($amount != $expectedAmount) {
+                    throw new Exception("Invalid monthly fee amount");
+                }
             
-            if ($result->num_rows === 0) {
-                throw new Exception("Invalid fine payment");
-            }
+                // Process each selected month
+                foreach ($selectedMonths as $month) {
+                    $feeId = generateFeeId();
+                    $monthDate = date('Y-m-d', strtotime("$year-$month-01"));
+                    
+                    // Calculate monthly fee amount with proper float conversion
+                    $monthlyFeeAmount = floatval($feeStructure['monthly_fee']);
+                    
+                    // Insert membership fee record
+                    $monthlyFeeQuery = "INSERT INTO MembershipFee (
+                        FeeID, 
+                        Amount, 
+                        Date, 
+                        Term, 
+                        Type, 
+                        Member_MemberID, 
+                        IsPaid
+                    ) VALUES (
+                        '$feeId', 
+                        $monthlyFeeAmount, 
+                        '$monthDate', 
+                        $year, 
+                        'monthly', 
+                        '$memberId', 
+                        'Yes'
+                    )";
+                    iud($monthlyFeeQuery);
+                    
+                    // Link the fee to the payment
+                    $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
+                                VALUES ('$feeId', '$paymentId')";
+                    iud($linkQuery);
+                }
+                break;
 
-            $fineData = $result->fetch_assoc();
-            if ($amount != $fineData['Amount']) {
-                throw new Exception("Invalid fine amount");
-            }
+            case 'fine':
+                if (!isset($_POST['fine_id'])) {
+                    throw new Exception("Fine ID is required");
+                }
 
-            // Update fine record
-            $query = "UPDATE Fine SET 
-                     IsPaid = 'Yes',
-                     Payment_PaymentID = '$paymentId' 
-                     WHERE FineID = '$fineId'";
-            iud($query);
-            break;
+                $fineId = $_POST['fine_id'];
+                
+                // Validate fine payment
+                $query = "SELECT Amount FROM Fine 
+                         WHERE FineID = '$fineId' 
+                         AND Member_MemberID = '$memberId' 
+                         AND IsPaid = 'No'";
+                $result = search($query);
+                
+                if ($result->num_rows === 0) {
+                    throw new Exception("Invalid fine payment");
+                }
 
-        case 'loan':
-            if (!isset($_POST['loan_id'])) {
-                throw new Exception("Loan ID is required");
-            }
+                $fineData = $result->fetch_assoc();
+                if ($amount != $fineData['Amount']) {
+                    throw new Exception("Invalid fine amount");
+                }
 
-            $loanId = $_POST['loan_id'];
+                // Update fine record
+                $query = "UPDATE Fine SET 
+                         IsPaid = 'Yes',
+                         Payment_PaymentID = '$paymentId' 
+                         WHERE FineID = '$fineId'";
+                iud($query);
+                break;
 
-            // Validate loan payment
-            $query = "SELECT Amount, Remain_Loan, Remain_Interest FROM Loan 
-                     WHERE LoanID = '$loanId' 
-                     AND Member_MemberID = '$memberId' 
-                     AND Status = 'approved'";
-            $result = search($query);
-            
-            if ($result->num_rows === 0) {
-                throw new Exception("Invalid loan payment");
-            }
+            case 'loan':
+                if (!isset($_POST['loan_id'])) {
+                    throw new Exception("Loan ID is required");
+                }
 
-            $loanData = $result->fetch_assoc();
-            $totalRemaining = $loanData['Remain_Loan'] + $loanData['Remain_Interest'];
-            
-            if ($amount <= 0 || $amount > $totalRemaining) {
-                throw new Exception("Invalid payment amount");
-            }
+                $loanId = $_POST['loan_id'];
 
-            // Calculate interest and principal portions
-            $interestPayment = min($amount, $loanData['Remain_Interest']);
-            $principalPayment = $amount - $interestPayment;
+                // Validate loan payment
+                $query = "SELECT Amount, Remain_Loan, Remain_Interest FROM Loan 
+                         WHERE LoanID = '$loanId' 
+                         AND Member_MemberID = '$memberId' 
+                         AND Status = 'approved'";
+                $result = search($query);
+                
+                if ($result->num_rows === 0) {
+                    throw new Exception("Invalid loan payment");
+                }
 
-            // Update loan record
-            $query = "UPDATE Loan SET 
-                     Paid_Loan = Paid_Loan + $principalPayment,
-                     Remain_Loan = Remain_Loan - $principalPayment,
-                     Paid_Interest = Paid_Interest + $interestPayment,
-                     Remain_Interest = Remain_Interest - $interestPayment
-                     WHERE LoanID = '$loanId'";
-            iud($query);
+                $loanData = $result->fetch_assoc();
+                $totalRemaining = $loanData['Remain_Loan'] + $loanData['Remain_Interest'];
+                
+                if ($amount <= 0 || $amount > $totalRemaining) {
+                    throw new Exception("Invalid payment amount");
+                }
 
-            // Insert into LoanPayment table
-            $query = "INSERT INTO LoanPayment (LoanID, PaymentID) VALUES ('$loanId', '$paymentId')";
-            iud($query);
-            break;
+                // Calculate interest and principal portions
+                $interestPayment = min($amount, $loanData['Remain_Interest']);
+                $principalPayment = $amount - $interestPayment;
 
-        default:
-            throw new Exception("Invalid payment type");
+                // Update loan record
+                $query = "UPDATE Loan SET 
+                         Paid_Loan = Paid_Loan + $principalPayment,
+                         Remain_Loan = Remain_Loan - $principalPayment,
+                         Paid_Interest = Paid_Interest + $interestPayment,
+                         Remain_Interest = Remain_Interest - $interestPayment
+                         WHERE LoanID = '$loanId'";
+                iud($query);
+
+                // Insert into LoanPayment table
+                $query = "INSERT INTO LoanPayment (LoanID, PaymentID) VALUES ('$loanId', '$paymentId')";
+                iud($query);
+                break;
+
+            default:
+                throw new Exception("Invalid payment type");
+        }
     }
 
     // Commit transaction

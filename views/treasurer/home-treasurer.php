@@ -57,6 +57,14 @@ function getPendingWelfareCount() {
     return $row['count'] ?? 0;
 }
 
+// Function to get pending payments count
+function getPendingPaymentsCount() {
+    $sql = "SELECT COUNT(*) as count FROM Payment WHERE Status = 'pending'";
+    $result = search($sql);
+    $row = $result->fetch_assoc();
+    return $row['count'] ?? 0;
+}
+
 // Function to get recent transactions
 function getRecentTransactions() {
     $sql = "SELECT 
@@ -105,6 +113,7 @@ function getPaymentStatusCounts() {
 $totalBalance = getTotalBalance();
 $pendingLoans = getPendingLoansCount();
 $pendingWelfare = getPendingWelfareCount();
+$pendingPayments = getPendingPaymentsCount();
 $recentTransactions = getRecentTransactions();
 $paymentStatus = getPaymentStatusCounts();
 $currentTerm = getCurrentTerm();
@@ -254,12 +263,12 @@ $currentTerm = getCurrentTerm();
        .status-cards {
            display: flex;
            flex-direction: column;
-           gap: 1rem;
+           gap: 0.7rem;
        }
 
        .status-card {
            background: white;
-           padding: 1.2rem;
+           padding: 0.8rem;
            border-radius: 12px;
            transition: all 0.3s ease;
            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
@@ -276,7 +285,7 @@ $currentTerm = getCurrentTerm();
        }
 
        .status-icon {
-           font-size: 2em;
+           font-size: 1.6em;
            color: #1e3c72;
        }
 
@@ -285,7 +294,7 @@ $currentTerm = getCurrentTerm();
        }
 
        .status-card .stat-number {
-           font-size: 1.8rem;
+           font-size: 1.5rem;
            margin: 0;
        }
 
@@ -608,6 +617,16 @@ $currentTerm = getCurrentTerm();
                         <div class="status-content">
                             <div class="stat-number"><?php echo $pendingWelfare; ?></div>
                             <div class="stat-label">Pending Death Welfare
+                                <i class="fas fa-chevron-right"></i>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="status-card" onclick="window.location.href='pendingPayments.php'">
+                        <i class="fas fa-credit-card status-icon"></i>
+                        <div class="status-content">
+                            <div class="stat-number"><?php echo $pendingPayments; ?></div>
+                            <div class="stat-label">Pending Payments
                                 <i class="fas fa-chevron-right"></i>
                             </div>
                         </div>
