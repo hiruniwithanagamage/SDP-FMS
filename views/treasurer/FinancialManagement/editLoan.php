@@ -291,7 +291,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     INSERT INTO Expenses (
                         ExpenseID, Category, Method, Amount, Date, Term, 
                         Description, Treasurer_TreasurerID
-                    ) VALUES (?, 'Loan', 'System', ?, ?, ?, ?, ?)
+                    ) VALUES (?, 'Loan', 'Cash', ?, ?, ?, ?, ?)
                 ");
                 
                 $expenseStmt->bind_param("sdssss", 

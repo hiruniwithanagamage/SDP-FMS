@@ -78,10 +78,37 @@ function getLinkedDeathWelfare($expenseID) {
     return $stmt->get_result();
 }
 
+// Check if the expense is linked to a Loan record
+function getLinkedLoan($expenseID) {
+    $conn = getConnection();
+    $stmt = $conn->prepare("
+        SELECT 
+            l.LoanID,
+            l.Amount,
+            l.Term,
+            l.Reason,
+            l.Issued_Date,
+            l.Due_Date,
+            l.Status,
+            m.MemberID,
+            m.Name as MemberName
+        FROM Loan l
+        JOIN Member m ON l.Member_MemberID = m.MemberID
+        WHERE l.Expenses_ExpenseID = ?
+    ");
+    
+    $stmt->bind_param("s", $expenseID);
+    $stmt->execute();
+    return $stmt->get_result();
+}
+
 // Get linked Death Welfare data if exists
 $linkedWelfare = getLinkedDeathWelfare($expenseID);
 
-// Format the status with appropriate class for Death Welfare
+// Get linked Loan data if exists
+$linkedLoan = getLinkedLoan($expenseID);
+
+// Format the status with appropriate class for Death Welfare or Loan
 function getStatusClass($status) {
     switch($status) {
         case 'approved': return 'status-approved';
@@ -176,7 +203,7 @@ if ($isPopup): ?>
                 color: #1e3c72;
                 font-size: 0.9rem;
             }
-            .welfare-block {
+            .welfare-block, .loan-block {
                 margin-bottom: 8px;
                 padding: 5px;
                 background-color: #f0f4f9;
@@ -314,7 +341,7 @@ if ($isPopup): ?>
                 color: #1e3c72;
                 font-size: 1.1rem;
             }
-            .welfare-block {
+            .welfare-block, .loan-block {
                 margin-bottom: 15px;
                 padding: 10px;
                 background-color: #f0f4f9;
@@ -531,6 +558,57 @@ if ($isPopup): ?>
                             <div class="detail-value">
                                 <span class="status-badge <?php echo $statusClass; ?>">
                                     <?php echo ucfirst(htmlspecialchars($welfare['Status'])); ?>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if($linkedLoan && $linkedLoan->num_rows > 0): 
+                    $loan = $linkedLoan->fetch_assoc();
+                    $statusClass = getStatusClass($loan['Status']);
+                ?>
+                <div class="expense-details-section">
+                    <div class="section-title">Linked Loan Information</div>
+                    <div class="loan-block">
+                        <div class="detail-row">
+                            <div class="detail-label">Loan ID:</div>
+                            <div class="detail-value"><?php echo htmlspecialchars($loan['LoanID']); ?></div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Member ID:</div>
+                            <div class="detail-value"><?php echo htmlspecialchars($loan['MemberID']); ?></div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Member Name:</div>
+                            <div class="detail-value"><?php echo htmlspecialchars($loan['MemberName']); ?></div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Amount:</div>
+                            <div class="detail-value">Rs. <?php echo number_format($loan['Amount'], 2); ?></div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Term:</div>
+                            <div class="detail-value"><?php echo htmlspecialchars($loan['Term']); ?></div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Reason:</div>
+                            <div class="detail-value"><?php echo htmlspecialchars($loan['Reason']); ?></div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Issued Date:</div>
+                            <div class="detail-value"><?php echo date('Y-m-d', strtotime($loan['Issued_Date'])); ?></div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Due Date:</div>
+                            <div class="detail-value"><?php echo date('Y-m-d', strtotime($loan['Due_Date'])); ?></div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Status:</div>
+                            <div class="detail-value">
+                                <span class="status-badge <?php echo $statusClass; ?>">
+                                    <?php echo ucfirst(htmlspecialchars($loan['Status'])); ?>
                                 </span>
                             </div>
                         </div>

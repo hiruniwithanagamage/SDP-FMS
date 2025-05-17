@@ -378,9 +378,7 @@ if(isset($_GET['cancel'])) {
                 <select id="method" name="method" required>
                     <option value="">Select Method</option>
                     <option value="Cash">Cash</option>
-                    <option value="Check">Check</option>
                     <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="Digital Payment">Digital Payment</option>
                 </select>
             </div>
 

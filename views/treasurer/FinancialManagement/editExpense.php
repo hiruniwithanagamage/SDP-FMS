@@ -72,6 +72,89 @@ function getMaxLoanLimit() {
     return $row['max_loan_limit'] ?? 50000; // Default fallback value if not found
 }
 
+// Function to log changes in the ChangeLog table
+function logExpenseChanges($expenseID, $oldValues, $newValues, $treasurerID) {
+    $conn = getConnection();
+    
+    // Serialize old and new values for storage
+    $oldValuesJson = json_encode($oldValues);
+    $newValuesJson = json_encode($newValues);
+    
+    // Generate change details by comparing old and new values
+    $changeDetails = [];
+    foreach ($newValues as $key => $value) {
+        // Skip Image field as it's a path, not a meaningful value to track
+        if ($key === 'Image') continue;
+        
+        // If the value has changed, add to change details
+        if (isset($oldValues[$key]) && $oldValues[$key] != $value) {
+            // Format the change details based on field type
+            if ($key === 'Amount') {
+                $changeDetails[] = "Changed $key from Rs. " . number_format($oldValues[$key], 2) . " to Rs. " . number_format($value, 2);
+            } else if ($key === 'Date') {
+                $changeDetails[] = "Changed $key from " . date('Y-m-d', strtotime($oldValues[$key])) . " to " . date('Y-m-d', strtotime($value));
+            } else {
+                $changeDetails[] = "Changed $key from {$oldValues[$key]} to $value";
+            }
+        }
+    }
+    
+    // If no changes were made, don't log
+    if (empty($changeDetails)) {
+        return;
+    }
+    
+    $changeDetailsText = implode(", ", $changeDetails);
+    
+    // Get MemberID associated with the Treasurer
+    $memberID = getMemberIDFromTreasurer($treasurerID);
+    
+    // Insert into ChangeLog table
+    $stmt = $conn->prepare("
+        INSERT INTO ChangeLog 
+        (RecordType, RecordID, TreasurerID, OldValues, NewValues, ChangeDetails, MemberID, Status) 
+        VALUES 
+        (?, ?, ?, ?, ?, ?, ?, ?)
+    ");
+    
+    $recordType = 'Expense';
+    $status = 'Not Read';
+    
+    // Bind all parameters in the correct order
+    $stmt->bind_param(
+        "ssssssss", 
+        $recordType,
+        $expenseID, 
+        $treasurerID, 
+        $oldValuesJson, 
+        $newValuesJson, 
+        $changeDetailsText,
+        $memberID,
+        $status
+    );
+    
+    $stmt->execute();
+    
+    return $stmt->affected_rows > 0;
+}
+
+// Function to get MemberID from Treasurer
+function getMemberIDFromTreasurer($treasurerID) {
+    $conn = getConnection();
+    $stmt = $conn->prepare("SELECT MemberID FROM Treasurer WHERE TreasurerID = ?");
+    $stmt->bind_param("s", $treasurerID);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['MemberID'];
+    }
+    
+    // If no MemberID found, return a default or placeholder value
+    return "UNKNOWN";
+}
+
 // Check if this expense is linked to a Death Welfare
 function isLinkedToDeathWelfare($expenseID) {
     $conn = getConnection();
@@ -209,6 +292,30 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             // Start transaction
             $conn->begin_transaction();
             
+            // Save old values for change logging
+            $oldValues = [
+                'Category' => $expense['Category'],
+                'Method' => $expense['Method'],
+                'Amount' => $expense['Amount'],
+                'Date' => $expense['Date'],
+                'Term' => $expense['Term'],
+                'Description' => $expense['Description'],
+                'Image' => $expense['Image'],
+                'Treasurer_TreasurerID' => $expense['Treasurer_TreasurerID']
+            ];
+            
+            // Prepare new values for change logging
+            $newValues = [
+                'Category' => $category,
+                'Method' => $method,
+                'Amount' => $amount,
+                'Date' => $date,
+                'Term' => $term,
+                'Description' => $description,
+                'Image' => $imagePath,
+                'Treasurer_TreasurerID' => $treasurerID
+            ];
+            
             // Check if expense is linked to Death Welfare
             if ($isLinked) {
                 // If linked, can only update description and image
@@ -224,6 +331,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $imagePath,
                     $expenseID
                 );
+                
+                // Update new values to only reflect what actually changed
+                $newValues = [
+                    'Category' => $oldValues['Category'],
+                    'Method' => $oldValues['Method'],
+                    'Amount' => $oldValues['Amount'],
+                    'Date' => $oldValues['Date'],
+                    'Term' => $oldValues['Term'],
+                    'Description' => $description,
+                    'Image' => $imagePath,
+                    'Treasurer_TreasurerID' => $oldValues['Treasurer_TreasurerID']
+                ];
             } else {
                 // If not linked, update all fields
                 $stmt = $conn->prepare("
@@ -254,6 +373,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             
             $stmt->execute();
             
+            // Log the changes to ChangeLog table
+            logExpenseChanges($expenseID, $oldValues, $newValues, $treasurerID);
+            
             // Commit transaction
             $conn->commit();
             
@@ -278,6 +400,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
 // Category options - removed Adjustment from selectable options
 $categories = [
+    'Loan' => 'Loan',
     'Death Welfare' => 'Death Welfare',
     'Administrative' => 'Administrative',
     'Utility' => 'Utility',
@@ -289,7 +412,9 @@ $categories = [
 // Payment method options
 $paymentMethods = [
     'Cash' => 'Cash',
-    'Bank Transfer' => 'Bank Transfer',
+    'Online' => 'Online',
+    'System' => 'System',
+    'Bank Transfer' => 'Bank Transfer'
 ];
 
 // Now output the HTML based on popup mode

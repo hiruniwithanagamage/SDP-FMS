@@ -51,7 +51,7 @@ function createExpenseRecord($loanId, $amount) {
         $term = $activeTerm; // Use the active term we retrieved
         $treasurerId = $treasurerData['Treasurer_TreasurerID'];
         $category = 'Loan';
-        $method = 'System';
+        $method = 'Cash';
         $description = "Loan Payment (LoanID: $loanId)";
         
         // Insert expense record using prepared statement

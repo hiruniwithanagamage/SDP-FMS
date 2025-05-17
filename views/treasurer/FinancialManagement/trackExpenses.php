@@ -137,10 +137,43 @@ if(isset($_GET['delete']) && isset($_GET['id'])) {
             if($result->num_rows > 0) {
                 $_SESSION['error_message'] = "Cannot delete this expense as it is linked to a Death Welfare record.";
             } else {
+                // Get the original expense data before deletion (for logging)
+                $getExpenseQuery = "SELECT * FROM Expenses WHERE ExpenseID = ?";
+                $stmt = $conn->prepare($getExpenseQuery);
+                $stmt->bind_param("s", $expenseId);
+                $stmt->execute();
+                $expenseResult = $stmt->get_result();
+                $expenseData = $expenseResult->fetch_assoc();
+                
+                // Get current treasurer ID (assuming it's stored in session)
+                $treasurerId = $_SESSION['user_id'] ?? $expenseData['Treasurer_TreasurerID'];
+                
+                // Get member ID (from the treasurer table, linked by treasurer ID)
+                $getMemberQuery = "SELECT MemberID FROM Treasurer WHERE TreasurerID = ?";
+                $stmt = $conn->prepare($getMemberQuery);
+                $stmt->bind_param("s", $treasurerId);
+                $stmt->execute();
+                $memberResult = $stmt->get_result();
+                $memberData = $memberResult->fetch_assoc();
+                $memberId = $memberData['MemberID'] ?? 'UNKNOWN';
+                
+                // Convert expense data to JSON for logging
+                $oldValues = json_encode($expenseData);
+                $newValues = "{}"; // Empty JSON object for deletion
+                $changeDetails = "Expense #$expenseId was deleted";
+                
                 // Delete the expense
                 $deleteQuery = "DELETE FROM Expenses WHERE ExpenseID = ?";
                 $stmt = $conn->prepare($deleteQuery);
                 $stmt->bind_param("s", $expenseId);
+                $stmt->execute();
+                
+                // Log the deletion to ChangeLog table
+                $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, MemberID, OldValues, NewValues, ChangeDetails, TreasurerID, Status) 
+                             VALUES (?, ?, ?, ?, ?, ?, ?, 'Not Read')";
+                $stmt = $conn->prepare($logQuery);
+                $recordType = "Expense";
+                $stmt->bind_param("sssssss", $recordType, $expenseId, $memberId, $oldValues, $newValues, $changeDetails, $treasurerId);
                 $stmt->execute();
                 
                 $conn->commit();
