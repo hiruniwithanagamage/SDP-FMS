@@ -482,7 +482,7 @@ $paymentMethods = [
 // Payment status
 $paymentStatus = [
     'self' => 'self',
-    'system' => 'system',
+    'treasurer' => 'treasurer',
     'edited' => 'edited'
 ];
 
@@ -583,11 +583,18 @@ if ($isPopup): ?>
                 background-color: #16305c;
             }
             .btn-secondary {
-                background-color: #6c757d;
-                color: white;
+                padding: 0.8rem 1.8rem;
+                border: none;
+                border-radius: 6px;
+                font-size: 1rem;
+                cursor: pointer;
+                background-color: #e0e0e0;
+                color: #333;
+                transition: background-color 0.3s;
             }
+
             .btn-secondary:hover {
-                background-color: #5a6268;
+                background-color: #d0d0d0;
             }
             .member-info {
                 background-color: #f9f9f9;
@@ -713,12 +720,18 @@ if ($isPopup): ?>
             }
 
             .btn-secondary {
-                background-color: #6c757d;
-                color: white;
+                padding: 0.8rem 1.8rem;
+                border: none;
+                border-radius: 6px;
+                font-size: 1rem;
+                cursor: pointer;
+                background-color: #e0e0e0;
+                color: #333;
+                transition: background-color 0.3s;
             }
 
             .btn-secondary:hover {
-                background-color: #5a6268;
+                background-color: #d0d0d0;
             }
 
             .member-info {
@@ -853,9 +866,9 @@ if ($isPopup): ?>
 
 <div class="btn-container">
     <?php if ($isPopup): ?>
-        <button type="button" class="btn btn-secondary" onclick="window.parent.closeEditModal()">Cancel</button>
+        <button type="button" class="btn-secondary" onclick="window.parent.closeEditModal()">Cancel</button>
     <?php else: ?>
-        <a href="payment.php" class="btn btn-secondary">Cancel</a>
+        <a href="payment.php" class="btn-secondary">Cancel</a>
     <?php endif; ?>
     <button type="submit" class="btn btn-primary">Update Payment</button>
 </div>

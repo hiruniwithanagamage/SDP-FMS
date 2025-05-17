@@ -84,7 +84,7 @@ if(isset($_POST['delete_fee'])) {
     
     try {
         // Start transaction
-        begin_transaction();
+        $GLOBALS['db_connection']->begin_transaction();
         
         // Get fee details first
         $feeQuery = "SELECT f.Member_MemberID, f.Amount, f.Term, f.Type, f.IsPaid FROM MembershipFee f WHERE f.FeeID = ?";
@@ -184,12 +184,12 @@ if(isset($_POST['delete_fee'])) {
         $stmt->execute();
         
         // Commit transaction
-        commit();
+        $GLOBALS['db_connection']->commit();
         
         $_SESSION['success_message'] = "Membership Fee #$feeId was successfully deleted.";
     } catch(Exception $e) {
         // Rollback on error
-        rollback();
+        $GLOBALS['db_connection']->rollback();
         $_SESSION['error_message'] = "Error deleting fee: " . $e->getMessage();
     }
     

@@ -36,7 +36,7 @@ function getMemberPayments($year, $month = null, $memberID = null, $page = 1, $r
             p.Amount,
             p.Date,
             p.Term,
-            p.Notes
+            p.Status
         FROM Payment p
         JOIN Member m ON p.Member_MemberID = m.MemberID
         WHERE $whereClause
@@ -263,7 +263,7 @@ if(isset($_POST['delete_payment'])) {
             
             // Create adjustment expense
             $createExpenseQuery = "INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, Description, Treasurer_TreasurerID) 
-                                 VALUES (?, 'adjustment', 'system', ?, CURDATE(), ?, ?, ?)";
+                                 VALUES (?, 'Adjustment', 'system', ?, CURDATE(), ?, ?, ?)";
             $description = "Deleted payment #$paymentId ($paymentType)";
             
             $stmt = $conn->prepare($createExpenseQuery);
@@ -749,12 +749,12 @@ function generatePaymentID($term) {
                     <thead>
                         <tr>
                             <th>Payment ID</th>
-                            <th>Member ID</th>
                             <th>Name</th>
                             <th>Payment Type</th>
                             <th>Method</th>
                             <th>Amount</th>
                             <th>Date</th>
+                            <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -765,12 +765,12 @@ function generatePaymentID($term) {
                         ?>
                         <tr data-payment-type="<?php echo htmlspecialchars($row['Payment_Type']); ?>" data-method="<?php echo htmlspecialchars($row['Method']); ?>">
                             <td><?php echo htmlspecialchars($row['PaymentID']); ?></td>
-                            <td><?php echo htmlspecialchars($row['MemberID']); ?></td>
                             <td><?php echo htmlspecialchars($row['Name']); ?></td>
                             <td><?php echo htmlspecialchars($row['Payment_Type']); ?></td>
                             <td><?php echo htmlspecialchars($row['Method']); ?></td>
                             <td>Rs. <?php echo number_format($row['Amount'], 2); ?></td>
                             <td><?php echo date('Y-m-d', strtotime($row['Date'])); ?></td>
+                            <td><?php echo htmlspecialchars($row['Status']); ?></td>
                             <td class="actions">
                                 <button onclick="viewPayment('<?php echo $row['PaymentID']; ?>')" class="action-btn small">
                                     <i class="fas fa-eye"></i>
