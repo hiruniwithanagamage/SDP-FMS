@@ -5,7 +5,8 @@ require_once "../../config/database.php";
 // Initialize variables with default values
 $memberData = null;
 $totalDues = 0;
-$transactions = [];
+$notifications = [];
+$unreadCount = 0;
 
 // Get database connection
 $conn = getConnection();
@@ -100,24 +101,27 @@ if (isset($_SESSION['u'])) {
                     'fines' => $unpaidFines
                 ];
                 
-                // Get recent transactions
-                $transQuery = "SELECT 
-                              transaction_date as date, 
-                              transaction_type as type, 
-                              amount 
-                              FROM Transactions 
-                              WHERE Member_MemberID = ? 
-                              ORDER BY transaction_date DESC 
-                              LIMIT 5";
-                $transStmt = $conn->prepare($transQuery);
-                $transStmt->bind_param("s", $memberID);
-                $transStmt->execute();
-                $transResult = $transStmt->get_result();
+                // Get unread notifications from ChangeLog
+                $notificationQuery = "SELECT 
+                                     LogID,
+                                     RecordType,
+                                     RecordID,
+                                     ChangeDetails,
+                                     DATE_FORMAT(ChangeDate, '%Y-%m-%d %H:%i') as FormattedDate
+                                     FROM ChangeLog 
+                                     WHERE MemberID = ? AND Status = 'Not Read' 
+                                     ORDER BY ChangeDate DESC 
+                                     LIMIT 5";
+                $notificationStmt = $conn->prepare($notificationQuery);
+                $notificationStmt->bind_param("s", $memberID);
+                $notificationStmt->execute();
+                $notificationResult = $notificationStmt->get_result();
                 
-                if ($transResult && $transResult->num_rows > 0) {
-                    while ($row = $transResult->fetch_assoc()) {
-                        $transactions[] = $row;
+                if ($notificationResult && $notificationResult->num_rows > 0) {
+                    while ($row = $notificationResult->fetch_assoc()) {
+                        $notifications[] = $row;
                     }
+                    $unreadCount = $notificationResult->num_rows;
                 }
             }
         } catch (Exception $e) {
@@ -255,17 +259,37 @@ $formattedDues = number_format($totalDues, 2);
            border-bottom: 1px solid #eee;
        }
 
-       .transaction-item {
-           display: grid;
-           grid-template-columns: 1fr 1.5fr 1fr;
-           padding: 1rem 0;
+       .notification-item {
+           display: flex;
+           flex-direction: column;
+           padding: 1rem;
            border-bottom: 1px solid #eee;
+           cursor: pointer;
+           transition: background-color 0.2s;
+       }
+       
+       .notification-item:hover {
+           background-color: #f5f7fa;
        }
 
-       .transaction-amount {
-           text-align: right;
+       .notification-header {
+           display: flex;
+           justify-content: space-between;
+           margin-bottom: 0.5rem;
+       }
+
+       .notification-title {
            font-weight: bold;
-           color: #2a5298;
+           color: #1e3c72;
+       }
+
+       .notification-date {
+           color: #777;
+           font-size: 0.9rem;
+       }
+
+       .notification-content {
+           color: #333;
        }
 
        h1 {
@@ -276,6 +300,8 @@ $formattedDues = number_format($totalDues, 2);
        h2 {
            color: #1e3c72;
            margin-bottom: 1.5rem;
+           display: flex;
+           align-items: center;
        }
        
        .icon {
@@ -294,6 +320,54 @@ $formattedDues = number_format($totalDues, 2);
             opacity: 1;
             transition: opacity 0.5s ease;
         }
+        
+        .alert-danger {
+            background-color: #fee2e2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: 6px;
+            opacity: 1;
+            transition: opacity 0.5s ease;
+        }
+        
+        .alert-info {
+            background-color: #dbeafe;
+            color: #1e40af;
+            border: 1px solid #bfdbfe;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: 6px;
+            opacity: 1;
+            transition: opacity 0.5s ease;
+        }
+        
+        .notification-alert {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .notification-alert-content {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .notification-alert-button {
+            background-color: #1e40af;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: background-color 0.2s;
+        }
+        
+        .notification-alert-button:hover {
+            background-color: #1e3a8a;
+        }
 
         .fade-out {
             opacity: 0;
@@ -310,72 +384,112 @@ $formattedDues = number_format($totalDues, 2);
         }
 
         /* Modal styles */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    background-color: rgba(0,0,0,0.4);
-}
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+        }
 
-.modal-content {
-    background-color: #fefefe;
-    margin: 10% auto;
-    padding: 2rem;
-    border-radius: 15px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    width: 80%;
-    max-width: 700px;
-}
+        .modal-content {
+            background-color: #fefefe;
+            margin: 10% auto;
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            width: 80%;
+            max-width: 700px;
+        }
 
-.close {
-    color: #aaa;
-    float: right;
-    font-size: 28px;
-    font-weight: bold;
-    cursor: pointer;
-}
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
 
-.close:hover,
-.close:focus {
-    color: black;
-    text-decoration: none;
-}
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+        }
 
-.report-options {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1.5rem;
-    margin-top: 1.5rem;
-}
+        .report-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
 
-.report-option {
-    background: #f5f7fa;
-    padding: 1.5rem;
-    border-radius: 12px;
-    text-align: center;
-    cursor: pointer;
-    transition: transform 0.2s, box-shadow 0.2s;
-}
+        .report-option {
+            background: #f5f7fa;
+            padding: 1.5rem;
+            border-radius: 12px;
+            text-align: center;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
 
-.report-option:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 6px 12px rgba(0,0,0,0.1);
-}
+        .report-option:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+        }
 
-.report-option h3 {
-    margin: 0.5rem 0;
-    color: #1e3c72;
-}
+        .report-option h3 {
+            margin: 0.5rem 0;
+            color: #1e3c72;
+        }
 
-.report-option p {
-    color: #555;
-    margin-top: 0.5rem;
-}
+        .report-option p {
+            color: #555;
+            margin-top: 0.5rem;
+        }
+        
+        .notification-badge {
+            background-color: #e53e3e;
+            color: white;
+            border-radius: 50%;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+            margin-left: 0.5rem;
+        }
+        
+        .notification-empty {
+            padding: 2rem;
+            text-align: center;
+            color: #777;
+        }
+        
+        .view-all-link {
+            display: block;
+            text-align: center;
+            margin-top: 1rem;
+            padding: 0.5rem;
+            background-color: #f5f7fa;
+            border-radius: 8px;
+            color: #1e3c72;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        
+        .view-all-link:hover {
+            background-color: #e5e7eb;
+        }
+        
+        .unread-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: #e53e3e;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
    </style>
 </head>
 <body>
@@ -400,13 +514,22 @@ $formattedDues = number_format($totalDues, 2);
             <?php endif; ?>
             
             <?php if(isset($_SESSION['error_message'])): ?>
-                    <div class="alert alert-danger">
-                        <?php 
-                            echo $_SESSION['error_message'];
-                            unset($_SESSION['error_message']);
-                        ?>
+                <div class="alert alert-danger">
+                    <?php 
+                        echo $_SESSION['error_message'];
+                        unset($_SESSION['error_message']);
+                    ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($unreadCount > 0): ?>
+                <div class="alert alert-info notification-alert">
+                    <div class="notification-alert-content">
+                        <i class="fas fa-bell"></i> You have <?php echo $unreadCount; ?> unread notification<?php echo $unreadCount > 1 ? 's' : ''; ?>
                     </div>
-                <?php endif; ?>
+                    <a href="notifications.php" class="notification-alert-button">View All</a>
+                </div>
+            <?php endif; ?>
 
            <div class="action-cards">
                <div class="action-card" onclick="window.location.href='memberSummary.php'">
@@ -421,7 +544,7 @@ $formattedDues = number_format($totalDues, 2);
                    <i class="fas fa-heart icon"></i>
                    <h3>Apply Death Welfare</h3>
                </div>
-               <div class="action-card" onclick="window.location.href='../treasurer/financialManagement/viewLoan.php'">
+               <div class="action-card" id="viewReportsCard">
                    <i class="fas fa-chart-bar icon"></i>
                    <h3>View Reports</h3>
                </div>
@@ -462,19 +585,33 @@ $formattedDues = number_format($totalDues, 2);
                     <?php endif; ?>
                </div>
 
-               <div class="info-card transactions">
-                   <h2>Recent Transactions</h2>
-                   <div class="transaction-list">
-                       <?php if (empty($transactions)): ?>
-                           <p>No recent transactions found.</p>
+               <div class="info-card notifications">
+                   <h2>
+                       Notifications
+                       <?php if ($unreadCount > 0): ?>
+                       <span class="notification-badge"><?php echo $unreadCount; ?></span>
+                       <?php endif; ?>
+                   </h2>
+                   <div class="notification-list">
+                       <?php if (empty($notifications)): ?>
+                           <div class="notification-empty">
+                               <p>No new notifications</p>
+                           </div>
                        <?php else: ?>
-                           <?php foreach ($transactions as $t): ?>
-                           <div class="transaction-item">
-                               <div class="transaction-date"><?php echo htmlspecialchars(date('Y-m-d', strtotime($t['date']))); ?></div>
-                               <div class="transaction-type"><?php echo htmlspecialchars($t['type']); ?></div>
-                               <div class="transaction-amount">Rs.<?php echo htmlspecialchars($t['amount']); ?></div>
+                           <?php foreach ($notifications as $notification): ?>
+                           <div class="notification-item" onclick="window.location.href='notifications.php'">
+                               <div class="notification-header">
+                                   <div class="notification-title">
+                                       <?php echo htmlspecialchars($notification['RecordType']); ?> Update
+                                   </div>
+                                   <div class="notification-date"><?php echo htmlspecialchars($notification['FormattedDate']); ?></div>
+                               </div>
+                               <div class="notification-content">
+                                   <?php echo htmlspecialchars($notification['ChangeDetails']); ?>
+                               </div>
                            </div>
                            <?php endforeach; ?>
+                           <a href="notifications.php" class="view-all-link">View All Notifications</a>
                        <?php endif; ?>
                    </div>
                </div>
@@ -506,56 +643,46 @@ $formattedDues = number_format($totalDues, 2);
    <!-- Use the common alert handler script -->
    <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Initialize alerts if alertHandler.js is available
-            if (typeof initAlerts === 'function') {
-                initAlerts();
-            } else {
-                // Fallback if the script isn't loaded
-                const alertElements = document.querySelectorAll('.alert');
-                alertElements.forEach(function(alert) {
+            // Initialize alerts EXCEPT notification alerts
+            const alertElements = document.querySelectorAll('.alert:not(.notification-alert)');
+            alertElements.forEach(function(alert) {
+                setTimeout(function() {
+                    alert.style.transition = 'opacity 0.5s ease';
+                    alert.style.opacity = '0';
+                    
                     setTimeout(function() {
-                        alert.style.transition = 'opacity 0.5s ease';
-                        alert.style.opacity = '0';
-                        
-                        setTimeout(function() {
-                            alert.remove();
-                        }, 500);
-                    }, 4000);
-                });
+                        alert.remove();
+                    }, 500);
+                }, 4000);
+            });
+
+            // Get the modal element
+            var modal = document.getElementById("reportModal");
+
+            // Update the action card to open the modal instead of direct navigation
+            var viewReportsCard = document.getElementById("viewReportsCard");
+            if (viewReportsCard) {
+                // Remove the existing onclick handler
+                viewReportsCard.onclick = function() {
+                    modal.style.display = "block";
+                };
+            }
+            
+            // Get the <span> element that closes the modal
+            var span = document.getElementsByClassName("close")[0];
+            
+            // When the user clicks on <span> (x), close the modal
+            span.onclick = function() {
+                modal.style.display = "none";
+            }
+            
+            // When the user clicks anywhere outside of the modal, close it
+            window.onclick = function(event) {
+                if (event.target == modal) {
+                    modal.style.display = "none";
+                }
             }
         });
-
-        // Get the modal element
-var modal = document.getElementById("reportModal");
-
-// Update the action card to open the modal instead of direct navigation
-document.addEventListener('DOMContentLoaded', function() {
-    var viewReportsCard = document.querySelector('.action-card:nth-child(4)');
-    if (viewReportsCard) {
-        // Remove the existing onclick handler
-        viewReportsCard.removeAttribute('onclick');
-        
-        // Add new event listener
-        viewReportsCard.addEventListener('click', function() {
-            modal.style.display = "block";
-        });
-    }
-    
-    // Get the <span> element that closes the modal
-    var span = document.getElementsByClassName("close")[0];
-    
-    // When the user clicks on <span> (x), close the modal
-    span.onclick = function() {
-        modal.style.display = "none";
-    }
-    
-    // When the user clicks anywhere outside of the modal, close it
-    window.onclick = function(event) {
-        if (event.target == modal) {
-            modal.style.display = "none";
-        }
-    }
-});
    </script>
 </body>
 </html>
