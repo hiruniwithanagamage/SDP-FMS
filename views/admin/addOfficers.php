@@ -9,38 +9,123 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     exit();
 }
 
-// Get the active term or the most recently created term
-$termData = null;
-try {
-    // Check if we have a specific term year in session (from creating a new term)
-    if (isset($_SESSION['new_term_year'])) {
-        $year = $_SESSION['new_term_year'];
-        $termQuery = "SELECT id, year FROM Static WHERE year = ?";
-        $stmt = prepare($termQuery);
-        $stmt->bind_param("i", $year);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        if ($result && $result->num_rows > 0) {
-            $termData = $result->fetch_assoc();
-        }
-    } else {
-        // Otherwise, get the active term
-        $termQuery = "SELECT id, year FROM Static WHERE status = 'active'";
-        $result = search($termQuery);
-        if ($result && $result->num_rows > 0) {
-            $termData = $result->fetch_assoc();
+// Function to get the active term or the latest term if no active term is found
+function getActiveTerm() {
+    try {
+        // Check if we have a specific term year in session (from creating a new term)
+        if (isset($_SESSION['new_term_year'])) {
+            $year = $_SESSION['new_term_year'];
+            $termQuery = "SELECT id, year FROM Static WHERE year = ?";
+            $stmt = prepare($termQuery);
+            $stmt->bind_param("i", $year);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result && $result->num_rows > 0) {
+                return $result->fetch_assoc();
+            }
         } else {
-            // If no active term, get the latest term
-            $termQuery = "SELECT id, year FROM Static ORDER BY year DESC LIMIT 1";
+            // Otherwise, get the active term
+            $termQuery = "SELECT id, year FROM Static WHERE status = 'active'";
             $result = search($termQuery);
             if ($result && $result->num_rows > 0) {
-                $termData = $result->fetch_assoc();
+                return $result->fetch_assoc();
+            } else {
+                // If no active term, get the latest term
+                $termQuery = "SELECT id, year FROM Static ORDER BY year DESC LIMIT 1";
+                $result = search($termQuery);
+                if ($result && $result->num_rows > 0) {
+                    return $result->fetch_assoc();
+                }
             }
         }
+    } catch(Exception $e) {
+        $_SESSION['error_message'] = "Error retrieving term data: " . $e->getMessage();
     }
-} catch(Exception $e) {
-    $_SESSION['error_message'] = "Error retrieving term data: " . $e->getMessage();
+    return null;
 }
+
+// Function to get current active officers
+function getCurrentActiveOfficers() {
+    try {
+        $activeTerm = getActiveTerm();
+        if (!$activeTerm) {
+            return null;
+        }
+        
+        $termYear = $activeTerm['year'];
+        
+        $query = "SELECT t.MemberID as treasurerMemberID, a.MemberID as auditorMemberID 
+                 FROM Treasurer t 
+                 LEFT JOIN Auditor a ON a.Term = t.Term AND a.isActive = 1
+                 WHERE t.Term = ? AND t.isActive = 1";
+        
+        $stmt = prepare($query);
+        $stmt->bind_param("i", $termYear);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result && $result->num_rows > 0) {
+            return $result->fetch_assoc();
+        }
+        
+        return ['treasurerMemberID' => null, 'auditorMemberID' => null];
+    } catch(Exception $e) {
+        $_SESSION['error_message'] = "Error retrieving current officers: " . $e->getMessage();
+        return null;
+    }
+}
+
+// Function to generate a new ID for Auditor in the format AUDI01, AUDI02, etc.
+function generateAuditorID($conn) {
+    try {
+        // Get the last used auditor ID
+        $stmt = $conn->prepare("SELECT AuditorID FROM Auditor ORDER BY AuditorID DESC LIMIT 1");
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows > 0) {
+            $lastID = $result->fetch_assoc()['AuditorID'];
+            // Extract numeric part, increment it, and format with leading zeros
+            $numericPart = intval(substr($lastID, 4)); // Extract after "AUDI"
+            $nextNumeric = $numericPart + 1;
+            return 'AUDI' . str_pad($nextNumeric, 2, '0', STR_PAD_LEFT);
+        } else {
+            // First auditor
+            return 'AUDI01';
+        }
+    } catch(Exception $e) {
+        throw new Exception("Error generating Auditor ID: " . $e->getMessage());
+    }
+}
+
+// Function to generate a new ID for Treasurer in the format TRES01, TRES02, etc.
+function generateTreasurerID($conn) {
+    try {
+        // Get the last used treasurer ID
+        $stmt = $conn->prepare("SELECT TreasurerID FROM Treasurer ORDER BY TreasurerID DESC LIMIT 1");
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows > 0) {
+            $lastID = $result->fetch_assoc()['TreasurerID'];
+            // Extract numeric part, increment it, and format with leading zeros
+            $numericPart = intval(substr($lastID, 4)); // Extract after "TRES"
+            $nextNumeric = $numericPart + 1;
+            return 'TRES' . str_pad($nextNumeric, 2, '0', STR_PAD_LEFT);
+        } else {
+            // First treasurer
+            return 'TRES01';
+        }
+    } catch(Exception $e) {
+        throw new Exception("Error generating Treasurer ID: " . $e->getMessage());
+    }
+}
+
+// Get the active term
+$termData = getActiveTerm();
+
+// Get current active officers to check for conflicts
+$currentOfficers = getCurrentActiveOfficers();
 
 // Get all current members who could be treasurer or auditor
 $members = [];
@@ -89,21 +174,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_officers'])) {
             $deactivateTreasurerStmt->bind_param("i", $termYear);
             $deactivateTreasurerStmt->execute();
             
-            // Get the last used treasurer ID to determine the next number
-            $getLastTreasurerIDStmt = $conn->prepare("SELECT TreasurerID FROM Treasurer ORDER BY TreasurerID DESC LIMIT 1");
-            $getLastTreasurerIDStmt->execute();
-            $lastTreasurerResult = $getLastTreasurerIDStmt->get_result();
-
-            // Determine the next treasurer number
-            if ($lastTreasurerResult->num_rows > 0) {
-                $lastTreasurerID = $lastTreasurerResult->fetch_assoc()['TreasurerID'];
-                $lastNumber = intval(str_replace('tres', '', $lastTreasurerID));
-                $nextNumber = $lastNumber + 1;
-                $treasurerID = 'tres' . $nextNumber;
-            } else {
-                // First treasurer
-                $treasurerID = 'tres1';
-            }
+            // Generate new Treasurer ID
+            $treasurerID = generateTreasurerID($conn);
             
             // Add new treasurer
             $addTreasurerStmt = $conn->prepare("INSERT INTO Treasurer (TreasurerID, Name, Term, isActive, MemberID) VALUES (?, ?, ?, 1, ?)");
@@ -115,21 +187,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_officers'])) {
             $deactivateAuditorStmt->bind_param("i", $termYear);
             $deactivateAuditorStmt->execute();
             
-            // Get the last used auditor ID to determine the next number
-            $getLastAuditorIDStmt = $conn->prepare("SELECT AuditorID FROM Auditor ORDER BY AuditorID DESC LIMIT 1");
-            $getLastAuditorIDStmt->execute();
-            $lastAuditorResult = $getLastAuditorIDStmt->get_result();
-
-            // Determine the next auditor number
-            if ($lastAuditorResult->num_rows > 0) {
-                $lastAuditorID = $lastAuditorResult->fetch_assoc()['AuditorID'];
-                $lastNumber = intval(str_replace('auditor', '', $lastAuditorID));
-                $nextNumber = $lastNumber + 1;
-                $auditorID = 'auditor' . $nextNumber;
-            } else {
-                // First auditor
-                $auditorID = 'auditor1';
-            }
+            // Generate new Auditor ID
+            $auditorID = generateAuditorID($conn);
             
             // Add new auditor
             $addAuditorStmt = $conn->prepare("INSERT INTO Auditor (AuditorID, Name, Term, isActive, MemberID) VALUES (?, ?, ?, 1, ?)");
@@ -174,7 +233,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_officers'])) {
     <title>Add Treasurer and Auditor</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="../../assets/css/adminActorDetails.css">
     <link rel="stylesheet" href="../../assets/css/alert.css">
     <!-- Add jQuery and Select2 libraries -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -444,7 +502,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_officers'])) {
                 <div class="info-card">
                     <i class="fas fa-info-circle"></i> 
                     You're assigning key officers for the term. The treasurer will manage all financial aspects, 
-                    while the auditor will ensure financial accountability.
+                    while the auditor will ensure financial accountability. A member can be assigned as long as they aren't 
+                    already serving in the same role in the current active term.
                 </div>
                 
                 <?php if (empty($members)): ?>
@@ -468,8 +527,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_officers'])) {
                             <select id="treasurer_id" name="treasurer_id" class="member-select" required>
                                 <option value="">-- Select Treasurer --</option>
                                 <?php foreach ($members as $member): ?>
-                                    <option value="<?php echo $member['MemberID']; ?>">
+                                    <?php 
+                                    // Skip if member is already the current treasurer
+                                    $isCurrentTreasurer = isset($currentOfficers['treasurerMemberID']) && $currentOfficers['treasurerMemberID'] == $member['MemberID'];
+                                    ?>
+                                    <option value="<?php echo $member['MemberID']; ?>" <?php echo $isCurrentTreasurer ? 'disabled' : ''; ?>>
                                         <?php echo htmlspecialchars($member['Name'] . " (ID: " . $member['MemberID'] . ")"); ?>
+                                        <?php echo $isCurrentTreasurer ? ' - Current Treasurer' : ''; ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -481,8 +545,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_officers'])) {
                             <select id="auditor_id" name="auditor_id" class="member-select" required>
                                 <option value="">-- Select Auditor --</option>
                                 <?php foreach ($members as $member): ?>
-                                    <option value="<?php echo $member['MemberID']; ?>">
+                                    <?php 
+                                    // Skip if member is already the current auditor
+                                    $isCurrentAuditor = isset($currentOfficers['auditorMemberID']) && $currentOfficers['auditorMemberID'] == $member['MemberID'];
+                                    ?>
+                                    <option value="<?php echo $member['MemberID']; ?>" <?php echo $isCurrentAuditor ? 'disabled' : ''; ?>>
                                         <?php echo htmlspecialchars($member['Name'] . " (ID: " . $member['MemberID'] . ")"); ?>
+                                        <?php echo $isCurrentAuditor ? ' - Current Auditor' : ''; ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>

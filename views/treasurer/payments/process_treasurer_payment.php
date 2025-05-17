@@ -7,6 +7,146 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit();
 }
 
+// Function to get the current active year from Static table
+function getCurrentActiveYear() {
+    $conn = getConnection();
+    
+    // Query to get the active year from the Static table
+    $query = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $result = $conn->query($query);
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['year'];
+    }
+    
+    // Fallback to the most recent year if no active record
+    $query = "SELECT year FROM Static ORDER BY year DESC LIMIT 1";
+    $result = $conn->query($query);
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['year'];
+    }
+    
+    // If no records in Static table, return current year as last resort
+    return date('Y');
+}
+
+// Function to generate a unique payment ID
+function generatePaymentId() {
+    try {
+        $conn = getConnection();
+        $conn->begin_transaction(MYSQLI_TRANS_START_WITH_CONSISTENT_SNAPSHOT);
+        
+        // Get current active year
+        $currentYear = getCurrentActiveYear();
+        $yearSuffix = substr($currentYear, -2); // Last two digits of year
+        $paymentPrefix = "PAY" . $yearSuffix;
+        
+        // Get highest sequential number for the current year prefix
+        $query = "SELECT MAX(CAST(SUBSTRING(PaymentID, 6) AS UNSIGNED)) as max_num 
+                 FROM Payment 
+                 WHERE PaymentID LIKE '$paymentPrefix%'
+                 FOR UPDATE";
+        
+        $result = $conn->query($query);
+        
+        // Determine the next number
+        if ($result && $result->num_rows > 0) {
+            $row = $result->fetch_assoc();
+            $nextNum = $row['max_num'] ? $row['max_num'] + 1 : 1;
+        } else {
+            $nextNum = 1;
+        }
+        
+        // Ensure sequential numbers are always at least 2 digits
+        $newId = $paymentPrefix . str_pad($nextNum, 2, '0', STR_PAD_LEFT);
+        
+        // Verify it doesn't exist (double check)
+        $verifyQuery = "SELECT COUNT(*) as count FROM Payment WHERE PaymentID = ?";
+        $stmt = $conn->prepare($verifyQuery);
+        $stmt->bind_param("s", $newId);
+        $stmt->execute();
+        $verifyResult = $stmt->get_result();
+        
+        if ($verifyResult->fetch_assoc()['count'] > 0) {
+            $conn->rollback();
+            throw new Exception("Generated Payment ID already exists: " . $newId);
+        }
+        
+        $stmt->close();
+        
+        // Commit the transaction
+        $conn->commit();
+        
+        return $newId;
+        
+    } catch (Exception $e) {
+        if (isset($conn) && $conn instanceof mysqli) {
+            $conn->rollback();
+        }
+        throw new Exception("Error generating payment ID: " . $e->getMessage());
+    }
+}
+
+// generateFeeId function
+function generateFeeId() {
+    try {
+        $conn = getConnection();
+        $conn->begin_transaction(MYSQLI_TRANS_START_WITH_CONSISTENT_SNAPSHOT);
+        
+        // Get current active year
+        $currentYear = getCurrentActiveYear();
+        $yearSuffix = substr($currentYear, -2); // Last two digits of year
+        $feePrefix = "FEE" . $yearSuffix;
+        
+        // Get highest sequential number for the current year prefix
+        $query = "SELECT MAX(CAST(SUBSTRING(FeeID, 6) AS UNSIGNED)) as max_num 
+                 FROM MembershipFee 
+                 WHERE FeeID LIKE '$feePrefix%'
+                 FOR UPDATE";
+        
+        $result = $conn->query($query);
+        
+        // Determine the next number
+        if ($result && $result->num_rows > 0) {
+            $row = $result->fetch_assoc();
+            $nextNum = $row['max_num'] ? $row['max_num'] + 1 : 1;
+        } else {
+            $nextNum = 1;
+        }
+        
+        // Ensure sequential numbers are always at least 2 digits
+        $newId = $feePrefix . str_pad($nextNum, 2, '0', STR_PAD_LEFT);
+        
+        // Verify it doesn't exist (double check)
+        $verifyQuery = "SELECT COUNT(*) as count FROM MembershipFee WHERE FeeID = ?";
+        $stmt = $conn->prepare($verifyQuery);
+        $stmt->bind_param("s", $newId);
+        $stmt->execute();
+        $verifyResult = $stmt->get_result();
+        
+        if ($verifyResult->fetch_assoc()['count'] > 0) {
+            $conn->rollback();
+            throw new Exception("Generated Fee ID already exists: " . $newId);
+        }
+        
+        $stmt->close();
+        
+        // Commit the transaction
+        $conn->commit();
+        
+        return $newId;
+        
+    } catch (Exception $e) {
+        if (isset($conn) && $conn instanceof mysqli) {
+            $conn->rollback();
+        }
+        throw new Exception("Error generating fee ID: " . $e->getMessage());
+    }
+}
+
 try {
     // Validate inputs
     $required_fields = ['member_id', 'payment_type', 'amount', 'payment_method', 'year'];
@@ -22,14 +162,14 @@ try {
     $amount = floatval($_POST['amount']);
     $year = intval($_POST['year']);
     $date = date('Y-m-d');
-    $method = 'onhand'; // Fixed payment method for treasurer
+    $method = 'cash'; // Fixed payment method for treasurer
     $treasurerId = $_SESSION['treasurer_id'];
 
     // Start transaction
     $conn = getConnection();
     $conn->begin_transaction();
 
-    // Generate payment ID
+    // Generate payment ID using our new function
     $paymentId = generatePaymentId();
 
     // Get fee structure for the year
@@ -53,11 +193,14 @@ try {
         Amount, 
         Date, 
         Term, 
-        Member_MemberID
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        Member_MemberID,
+        Status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    
+    $status = 'treasurer'; // Set status to 'treasurer' for treasurer-processed payments
     
     $stmt = $conn->prepare($paymentQuery);
-    $stmt->bind_param("sssdsss", $paymentId, $paymentType, $method, $amount, $date, $year, $memberId);
+    $stmt->bind_param("sssdsiss", $paymentId, $paymentType, $method, $amount, $date, $year, $memberId, $status);
     $stmt->execute();
     $stmt->close();
 
@@ -210,6 +353,13 @@ try {
             $stmt->bind_param("sss", $isPaid, $paymentId, $fineId);
             $stmt->execute();
             $stmt->close();
+            
+            // Insert into FinePayment table
+            $finePaymentQuery = "INSERT INTO FinePayment (FineID, PaymentID) VALUES (?, ?)";
+            $stmt = $conn->prepare($finePaymentQuery);
+            $stmt->bind_param("ss", $fineId, $paymentId);
+            $stmt->execute();
+            $stmt->close();
             break;
 
         case 'loan':
@@ -271,6 +421,35 @@ try {
         default:
             throw new Exception("Invalid payment type");
     }
+
+    // Log the payment in ChangeLog table
+    $logQuery = "INSERT INTO ChangeLog (
+        RecordType,
+        RecordID,
+        UserID,
+        TreasurerID,
+        OldValues,
+        NewValues,
+        ChangeDetails
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    
+    $recordType = 'Payment';
+    $userId = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : $treasurerId;
+    $oldValues = json_encode(['status' => 'new']);
+    $newValues = json_encode([
+        'payment_id' => $paymentId,
+        'payment_type' => $paymentType,
+        'amount' => $amount,
+        'member_id' => $memberId,
+        'date' => $date,
+        'year' => $year
+    ]);
+    $changeDetails = "Treasurer processed $paymentType payment of Rs. $amount";
+    
+    $stmt = $conn->prepare($logQuery);
+    $stmt->bind_param("sssssss", $recordType, $paymentId, $userId, $treasurerId, $oldValues, $newValues, $changeDetails);
+    $stmt->execute();
+    $stmt->close();
 
     // Commit transaction
     $conn->commit();
@@ -338,90 +517,3 @@ function validateFileUpload($file) {
         throw new Exception("Only JPG, PNG and GIF files are allowed");
     }
 }
-
-function generatePaymentId() {
-    try {
-        $conn = getConnection();
-        $conn->begin_transaction(MYSQLI_TRANS_START_WITH_CONSISTENT_SNAPSHOT);
-        
-        // Get the highest ID with a lock
-        $query = "SELECT CAST(SUBSTRING(PaymentID, 4) AS UNSIGNED) as max_num 
-                 FROM Payment 
-                 WHERE PaymentID LIKE 'PAY%'
-                 ORDER BY PaymentID DESC 
-                 LIMIT 1 FOR UPDATE";
-        
-        $result = $conn->query($query);
-        
-        // Determine the next number
-        if ($result && $result->num_rows > 0) {
-            $row = $result->fetch_assoc();
-            $nextNum = $row['max_num'] + 1;
-        } else {
-            $nextNum = 1;
-        }
-        
-        // Generate the new ID
-        $newId = "PAY" . str_pad($nextNum, 3, '0', STR_PAD_LEFT);
-        
-        // Verify it doesn't exist (double check)
-        $verifyQuery = "SELECT COUNT(*) as count FROM Payment WHERE PaymentID = ?";
-        $stmt = $conn->prepare($verifyQuery);
-        $stmt->bind_param("s", $newId);
-        $stmt->execute();
-        $verifyResult = $stmt->get_result();
-        
-        if ($verifyResult->fetch_assoc()['count'] > 0) {
-            $conn->rollback();
-            throw new Exception("Generated ID already exists: " . $newId);
-        }
-        
-        $stmt->close();
-        
-        // Commit the transaction
-        $conn->commit();
-        
-        return $newId;
-        
-    } catch (Exception $e) {
-        if (isset($conn) && $conn instanceof mysqli) {
-            $conn->rollback();
-        }
-        throw new Exception("Error generating payment ID: " . $e->getMessage());
-    }
-}
-
-function generateFeeId() {
-    $conn = getConnection();
-    $query = "SELECT FeeID FROM MembershipFee ORDER BY FeeID DESC LIMIT 1";
-    $result = $conn->query($query);
-    
-    if ($result && $result->num_rows > 0) {
-        $row = $result->fetch_assoc();
-        $lastId = $row['FeeID'];
-        $numericPart = intval(substr($lastId, 3)) + 1;
-        return "FEE" . str_pad($numericPart, 3, '0', STR_PAD_LEFT);
-    }
-    
-    return "FEE001";
-}
-
-function checkDuplicatePayment($memberId, $paymentType, $year) {
-    $conn = getConnection();
-    $query = "SELECT COUNT(*) as count FROM Payment 
-              WHERE Member_MemberID = ? 
-              AND Payment_Type = ?
-              AND Term = ?";
-    
-    $stmt = $conn->prepare($query);
-    $stmt->bind_param("ssi", $memberId, $paymentType, $year);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
-    $stmt->close();
-    
-    if ($row['count'] > 0) {
-        throw new Exception("Payment already exists for this period");
-    }
-}
-?>

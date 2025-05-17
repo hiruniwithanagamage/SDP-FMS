@@ -2,110 +2,147 @@
 session_start();
 require_once "../../config/database.php";
 
-// Handle form submission
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $amount = $_POST['amount'];
-    $date = $_POST['date'];
-    $term = $_POST['term'];
-    $description = $_POST['description'];
-    $memberID = $_POST['memberID'];
-    // Set IsPaid to 'No' by default
-    $isPaid = 'No';
-
-    // Generate sequential Fine ID (Fine001, Fine002, etc.)
-    $countStmt = prepare("SELECT COUNT(*) as count FROM Fine");
-    $countStmt->execute();
-    $countResult = $countStmt->get_result();
-    $fineCount = $countResult->fetch_assoc()['count'] + 1;
-    $countStmt->close();
-
-    // Format the ID based on count (add leading zero for single digits)
-    if ($fineCount < 10) {
-        $sequentialNumber = "0" . $fineCount;
-    } else {
-        $sequentialNumber = $fineCount;
+// Function to generate a new welfare ID
+function generateFineID() {
+    global $conn; // Using the global connection from database.php
+    
+    // Get the current active term from static table
+    $termStmt = prepare("SELECT year FROM Static WHERE status = 'active'");
+    $termStmt->execute();
+    $termResult = $termStmt->get_result();
+    
+    if (!$termResult || $termResult->num_rows === 0) {
+        throw new Exception("No active term found in the system");
     }
-
-    $fineID = "FN" . $term . $sequentialNumber;
-
-    // Check if this ID already exists (in case of concurrent operations)
+    
+    $termData = $termResult->fetch_assoc();
+    $term = $termData['year'];
+    $termStmt->close();
+    
+    // Extract last 2 digits of the term
+    $termSuffix = substr($term, -2);
+    
+    // Check for existing FineIDs with the same term prefix to determine next sequence
+    $prefix = "FIN" . $termSuffix;
+    $likePattern = $prefix . "%";
+    
+    // Get the maximum sequential number used for this term
+    $maxIdStmt = prepare("SELECT MAX(CAST(SUBSTRING(FineID, LENGTH(?) + 1) AS UNSIGNED)) as max_seq 
+                          FROM Fine 
+                          WHERE FineID LIKE ?");
+    $maxIdStmt->bind_param("ss", $prefix, $likePattern);
+    $maxIdStmt->execute();
+    $maxIdResult = $maxIdStmt->get_result();
+    $maxSeqRow = $maxIdResult->fetch_assoc();
+    $maxIdStmt->close();
+    
+    // If we have existing records, use the next sequence number
+    if ($maxSeqRow && !is_null($maxSeqRow['max_seq'])) {
+        $nextSeq = (int)$maxSeqRow['max_seq'] + 1;
+    } else {
+        // Otherwise start with 1
+        $nextSeq = 1;
+    }
+    
+    // Format with leading zero for single digits
+    $sequentialNumber = ($nextSeq < 10) ? "0" . $nextSeq : $nextSeq;
+    
+    // Create the FineID
+    $fineID = $prefix . $sequentialNumber;
+    
+    // Verify the ID doesn't already exist (just to be safe)
     $checkIdStmt = prepare("SELECT COUNT(*) as exists_count FROM Fine WHERE FineID = ?");
     $checkIdStmt->bind_param("s", $fineID);
     $checkIdStmt->execute();
     $checkIdResult = $checkIdStmt->get_result();
     $idExists = $checkIdResult->fetch_assoc()['exists_count'] > 0;
     $checkIdStmt->close();
-
-    // If ID already exists, find the next available ID
+    
+    // If the ID exists (very unlikely but possible with concurrent operations)
+    // recursively call this function to get the next available ID
     if ($idExists) {
-        // Get the maximum sequential number used for this term
-        $maxIdStmt = prepare("SELECT MAX(SUBSTRING(FineID, LENGTH('FN" . $term . "')+1)) as max_seq 
-                            FROM Fine 
-                            WHERE FineID LIKE 'FN" . $term . "%'");
-        $maxIdStmt->execute();
-        $maxIdResult = $maxIdStmt->get_result();
-        $maxSeq = (int)$maxIdResult->fetch_assoc()['max_seq'];
-        $maxIdStmt->close();
-        
-        // Use the next number
-        $nextSeq = $maxSeq + 1;
-        
-        // Format with leading zero if needed
-        if ($nextSeq < 10) {
-            $sequentialNumber = "0" . $nextSeq;
-        } else {
-            $sequentialNumber = $nextSeq;
-        }
-        
-        $fineID = "FN" . $term . $sequentialNumber;
+        return generateFineID();
     }
-
-    // Check if a fine of the same type already exists for this member in the current month and term
-if ($description == 'late' || $description == 'absent') {
-    $dateMonth = date('m', strtotime($date));
-    $dateYear = date('Y', strtotime($date));
     
-    $checkDuplicateStmt = prepare("SELECT COUNT(*) as count FROM Fine 
-                                  WHERE Member_MemberID = ? 
-                                  AND Description = ? 
-                                  AND Term = ? 
-                                  AND MONTH(Date) = ? 
-                                  AND YEAR(Date) = ?");
-    $checkDuplicateStmt->bind_param("ssiss", 
-    $memberID, 
-    $description, 
-    $term, 
-    $dateMonth, 
-    $dateYear
-    );
-
-    $checkDuplicateStmt->execute();
-    $duplicateResult = $checkDuplicateStmt->get_result();
-    $duplicateCount = $duplicateResult->fetch_assoc()['count'];
-    $checkDuplicateStmt->close();
-    
-    if ($duplicateCount > 0) {
-        $_SESSION['error_message'] = "This member already has a $fineTypeText fine for this month in the selected term.";
-        header("Location: addFine.php");
-        exit();
-    }
+    return $fineID;
 }
 
-    $stmt = prepare("INSERT INTO Fine (FineID, Amount, Date, Term, Description, Member_MemberID, IsPaid) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?)");
-                
-    // Bind parameters
-    $stmt->bind_param("sdsisss", 
-        $fineID, 
-        $amount, 
-        $date, 
-        $term, 
-        $description, 
-        $memberID, 
-        $isPaid
-    ); 
-    
+// Get current term from Static table
+$termStmt = prepare("SELECT * FROM Static WHERE status = ?");
+$activeStatus = 'active';
+$termStmt->bind_param("s", $activeStatus);
+$termStmt->execute();
+$termResult = $termStmt->get_result();
+$termData = $termResult->fetch_assoc();
+$termStmt->close();
+
+// Check if term data exists
+if (!$termData) {
+    $_SESSION['error_message'] = "No active term data found. Please set up a term first.";
+    header("Location: home-treasurer.php");
+    exit();
+}
+
+// Handle form submission
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $amount = $_POST['amount'];
+    $date = $_POST['date'];
+    $term = $termData['year']; // Use the active term from Static table
+    $description = $_POST['description'];
+    $memberID = $_POST['memberID'];
+    // Set IsPaid to 'No' by default
+    $isPaid = 'No';
+
     try {
+        // Generate the fine ID using our function
+        $fineID = generateFineID();
+        
+        // Check if a fine of the same type already exists for this member in the current month and term
+        if ($description == 'late' || $description == 'absent') {
+            $dateMonth = date('m', strtotime($date));
+            $dateYear = date('Y', strtotime($date));
+            
+            $checkDuplicateStmt = prepare("SELECT COUNT(*) as count FROM Fine 
+                                          WHERE Member_MemberID = ? 
+                                          AND Description = ? 
+                                          AND Term = ? 
+                                          AND MONTH(Date) = ? 
+                                          AND YEAR(Date) = ?");
+            $checkDuplicateStmt->bind_param("ssiss", 
+                $memberID, 
+                $description, 
+                $term, 
+                $dateMonth, 
+                $dateYear
+            );
+
+            $checkDuplicateStmt->execute();
+            $duplicateResult = $checkDuplicateStmt->get_result();
+            $duplicateCount = $duplicateResult->fetch_assoc()['count'];
+            $checkDuplicateStmt->close();
+            
+            if ($duplicateCount > 0) {
+                $fineTypeText = ($description == 'late') ? 'late' : 'absent';
+                $_SESSION['error_message'] = "This member already has a $fineTypeText fine for this month in the selected term.";
+                header("Location: addFine.php");
+                exit();
+            }
+        }
+
+        $stmt = prepare("INSERT INTO Fine (FineID, Amount, Date, Term, Description, Member_MemberID, IsPaid) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?)");
+                        
+        // Bind parameters
+        $stmt->bind_param("sdsisss", 
+            $fineID, 
+            $amount, 
+            $date, 
+            $term, 
+            $description, 
+            $memberID, 
+            $isPaid
+        ); 
+        
         // Execute statement
         $stmt->execute();
         $stmt->close();
@@ -124,20 +161,6 @@ if ($description == 'late' || $description == 'absent') {
     } catch(Exception $e) {
         $_SESSION['error_message'] = "Error adding fine: " . $e->getMessage();
     }
-}
-
-// Get current term
-$termStmt = prepare("SELECT * FROM Static WHERE status = ?");
-$activeStatus = 'active';
-$termStmt->bind_param("s", $activeStatus);
-$termStmt->execute();
-$termResult = $termStmt->get_result();
-$termData = $termResult->fetch_assoc();
-$termStmt->close();
-
-// Check if term data exists
-if (!$termData) {
-    $_SESSION['error_message'] = "No term data found. Please set up a term first.";
 }
 
 // Get all members for dropdown

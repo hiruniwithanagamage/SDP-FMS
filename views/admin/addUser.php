@@ -4,6 +4,22 @@ ini_set('display_errors', 1);
 session_start();
 require_once "../../config/database.php";
 
+// Function to get the current active year from static table
+function getCurrentActiveYear($conn) {
+    $query = "SELECT year FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $stmt = $conn->prepare($query);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['year'];
+    }
+    
+    // Fallback to current year if no active record found
+    return date('Y');
+}
+
 // Generate new User ID
 function generateNewUserId($conn) {
     $query = "SELECT UserId FROM User ORDER BY UserId DESC LIMIT 1";
@@ -15,12 +31,14 @@ function generateNewUserId($conn) {
         $row = $result->fetch_assoc();
         if ($row && isset($row['UserId'])) {
             $lastId = $row['UserId'];
-            $numericPart = preg_replace('/[^0-9]/', '', $lastId);
+            // Extract numeric part - assuming format is USERxx
+            $numericPart = substr($lastId, 4); // Extract after "USER"
             $newNumericPart = intval($numericPart) + 1;
-            return "user" . $newNumericPart;
+            // Format with leading zeros if needed (e.g., USER01, USER02, etc.)
+            return "USER" . str_pad($newNumericPart, 2, '0', STR_PAD_LEFT);
         }
     }
-    return "user1";
+    return "USER01"; // First user if no records exist
 }
 
 // Generate a secure default password
@@ -100,6 +118,7 @@ function checkDuplicateRoleAssociation($conn, $role, $roleId) {
 // Get database connection
 $conn = getConnection(); // Assuming this function exists in database.php
 $newUserId = generateNewUserId($conn);
+$currentYear = getCurrentActiveYear($conn);
 
 // Fetch role options with prepared statements
 function fetchRoleOptions($conn, $tableName, $idColumn, $nameColumn) {
@@ -187,26 +206,18 @@ if(isset($_POST['add'])) {
             // Hash the password with a strong algorithm
             $hashedPassword = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
             
-            // Prepare the insert statement with placeholders
-            $query = "INSERT INTO User (UserId, Username, Email, Password, 
-                            Admin_AdminID, Auditor_AuditorID, 
-                            Treasurer_TreasurerID, Member_MemberID) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-            
-            $stmt = $conn->prepare($query);
-            
-            // Set the appropriate role ID and null for others
-            $adminId = ($role === 'admin') ? $roleId : null;
-            $auditorId = ($role === 'auditor') ? $roleId : null;
-            $treasurerId = ($role === 'treasurer') ? $roleId : null;
-            $memberId = ($role === 'member') ? $roleId : null;
-            
             // Update the query to include the additional fields from your updated schema
             $query = "INSERT INTO User (UserId, Username, Email, Password, 
                             Admin_AdminID, Auditor_AuditorID, 
                             Treasurer_TreasurerID, Member_MemberID,
                             failed_attempts) 
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)";
+            
+            // Set the appropriate role ID and null for others
+            $adminId = ($role === 'admin') ? $roleId : null;
+            $auditorId = ($role === 'auditor') ? $roleId : null;
+            $treasurerId = ($role === 'treasurer') ? $roleId : null;
+            $memberId = ($role === 'member') ? $roleId : null;
             
             // Bind parameters
             $stmt = $conn->prepare($query);

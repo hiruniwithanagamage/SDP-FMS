@@ -5,29 +5,62 @@ require_once "../../config/database.php";
 // Get the logged-in treasurer's ID from the session
 $treasurerID = isset($_SESSION['TreasurerID']) ? $_SESSION['TreasurerID'] : null;
 
+/**
+ * Get the current active term from the Static table
+ * @return array|null Returns the active term or null if no active term exists
+ */
+function getCurrentActiveTerm() {
+    $activeTermQuery = "SELECT * FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $activeTermResult = search($activeTermQuery);
+    
+    if ($activeTermResult && $activeTermResult->num_rows > 0) {
+        return $activeTermResult->fetch_assoc();
+    }
+    
+    return null;
+}
+
+/**
+ * Generate sequential Auditor ID following the pattern AUDI01, AUDI02, etc.
+ * @return string The generated Auditor ID
+ */
+function generateAuditorID() {
+    $prefix = "AUDI";
+    
+    // Get the highest existing auditor ID
+    $queryMaxID = "SELECT AuditorID FROM Auditor ORDER BY AuditorID DESC LIMIT 1";
+    $result = search($queryMaxID);
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        $lastID = $row['AuditorID'];
+        
+        // Extract the numeric part
+        $numericPart = intval(substr($lastID, 4)); // Skip 'AUDI' prefix
+        $nextNumber = $numericPart + 1;
+    } else {
+        // No existing records, start with 1
+        $nextNumber = 1;
+    }
+    
+    // Format the number with leading zeros (2 digits)
+    return $prefix . str_pad($nextNumber, 2, '0', STR_PAD_LEFT);
+}
+
 // Fetch all terms (both active and inactive)
 $allTermsQuery = "SELECT * FROM Static ORDER BY year DESC";
 $allTermsResult = search($allTermsQuery);
 $allTerms = [];
-while ($term = $allTermsResult->fetch_assoc()) {
+while ($allTermsResult && $term = $allTermsResult->fetch_assoc()) {
     $allTerms[] = $term;
 }
 
 // Identify the current active term
-$currentActiveTerm = null;
-$availableTerms = [];
-foreach ($allTerms as $term) {
-    if ($term['status'] == 'active') {
-        $currentActiveTerm = $term;
-    }
-    $availableTerms[] = $term;
-}
+$currentActiveTerm = getCurrentActiveTerm();
+$availableTerms = $allTerms;
 
-// Generate sequential Auditor ID 
-$countQuery = "SELECT COUNT(*) as count FROM Auditor";
-$countResult = search($countQuery);
-$auditorCount = $countResult->fetch_assoc()['count'] + 1;
-$newAuditorID = "auditor" . str_pad($auditorCount, 3, "0", STR_PAD_LEFT);
+// Generate Auditor ID
+$newAuditorID = generateAuditorID();
 
 // Handle form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -45,14 +78,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Check if member is already an auditor
     $checkAuditorQuery = "SELECT * FROM Auditor WHERE MemberID = '$memberID'";
     $checkAuditorResult = search($checkAuditorQuery);
-    if ($checkAuditorResult->num_rows > 0) {
+    if ($checkAuditorResult && $checkAuditorResult->num_rows > 0) {
         $errors[] = "This member is already an auditor";
     }
 
     // Check if there's already an active auditor for this term
     $activeAuditorQuery = "SELECT * FROM Auditor WHERE Term = '$term' AND isActive = 1";
     $activeAuditorResult = search($activeAuditorQuery);
-    if ($activeAuditorResult->num_rows > 0) {
+    if ($activeAuditorResult && $activeAuditorResult->num_rows > 0) {
         $activeAuditor = $activeAuditorResult->fetch_assoc();
         $errors[] = "There is already an active auditor for this term. Please deactivate the existing auditor first.";
     }
@@ -61,7 +94,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $memberQuery = "SELECT Name FROM Member WHERE MemberID = '$memberID'";
     $memberResult = search($memberQuery);
     
-    if ($memberResult->num_rows == 0) {
+    if (!$memberResult || $memberResult->num_rows == 0) {
         $errors[] = "Invalid member selected";
     } else {
         $memberData = $memberResult->fetch_assoc();
@@ -71,7 +104,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Validate term
     $termQuery = "SELECT * FROM Static WHERE year = '$term'";
     $termResult = search($termQuery);
-    if ($termResult->num_rows == 0) {
+    if (!$termResult || $termResult->num_rows == 0) {
         $errors[] = "Invalid term selected";
     }
 
@@ -99,7 +132,7 @@ $membersQuery = "SELECT MemberID, Name FROM Member";
 $membersResult = search($membersQuery);
 
 // Check if we have members
-if ($membersResult->num_rows == 0) {
+if (!$membersResult || $membersResult->num_rows == 0) {
     $_SESSION['error_message'] = "No members found in the system.";
 }
 ?>
@@ -273,7 +306,7 @@ if ($membersResult->num_rows == 0) {
                                     echo ' <span class="term-status">(Active)</span>';
                                     $termCheckQuery = "SELECT Name FROM Auditor WHERE Term = '{$currentActiveTerm['year']}' AND isActive = 1";
                                     $termCheckResult = search($termCheckQuery);
-                                    if ($termCheckResult->num_rows > 0) {
+                                    if ($termCheckResult && $termCheckResult->num_rows > 0) {
                                         $existingAuditor = $termCheckResult->fetch_assoc();
                                         // echo ' <span class="text-warning">(Active Auditor: ' . htmlspecialchars($existingAuditor['Name']) . ')</span>';
                                     }

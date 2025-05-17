@@ -337,18 +337,47 @@ function rejectPayment($paymentId) {
 
 // Helper function to generate a new fee ID
 function generateFeeId($conn) {
-    $query = "SELECT FeeID FROM MembershipFee ORDER BY FeeID DESC LIMIT 1";
-    $result = $conn->query($query);
+    // Get the current active term from Static table
+    $termQuery = "SELECT year FROM Static WHERE status = 'active' LIMIT 1";
+    $termResult = $conn->query($termQuery);
     
-    if ($result && $result->num_rows > 0) {
-        $row = $result->fetch_assoc();
-        $lastId = $row['FeeID'];
-        $numericPart = intval(substr($lastId, 3)) + 1;
-        return "FEE" . str_pad($numericPart, 3, '0', STR_PAD_LEFT);
+    if ($termResult && $termResult->num_rows > 0) {
+        $row = $termResult->fetch_assoc();
+        $currentTerm = $row['year'];
+        
+        // Get last 2 digits of the term
+        $yearSuffix = substr($currentTerm, -2);
+        
+        // Query to find the highest sequence number for the current term
+        $query = "SELECT FeeID FROM MembershipFee 
+                 WHERE FeeID LIKE 'FEE{$yearSuffix}%' 
+                 ORDER BY FeeID DESC LIMIT 1";
+        $result = $conn->query($query);
+        
+        if ($result && $result->num_rows > 0) {
+            $row = $result->fetch_assoc();
+            $lastId = $row['FeeID'];
+            
+            // Extract the sequence number (last 2 digits)
+            $seqNumber = intval(substr($lastId, -2));
+            $nextSeq = $seqNumber + 1;
+        } else {
+            // If no existing IDs found for this term, start with 01
+            $nextSeq = 1;
+        }
+        
+        // Format with leading zeros to ensure 2 digits
+        $feeId = 'FEE' . $yearSuffix . str_pad($nextSeq, 2, '0', STR_PAD_LEFT);
+        return $feeId;
     }
     
-    return "FEE001";
+    // Fallback if no active term found (should be rare)
+    // Using current year as fallback
+    $currentYear = date('Y');
+    $yearSuffix = substr($currentYear, -2);
+    return 'FEE' . $yearSuffix . '01';
 }
+
 
 // Process form actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

@@ -9,7 +9,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 try {
     // Validate inputs
-    $required_fields = ['member_id', 'payment_type', 'amount', 'payment_method', 'year'];
+    $required_fields = ['member_id', 'payment_type', 'amount', 'payment_method'];
     foreach ($required_fields as $field) {
         if (!isset($_POST[$field]) || empty($_POST[$field])) {
             throw new Exception("Missing required field: $field");
@@ -20,8 +20,10 @@ try {
     $paymentType = $_POST['payment_type'];
     $amount = floatval($_POST['amount']);
     $method = $_POST['payment_method'];
-    $year = intval($_POST['year']);
     $date = date('Y-m-d');
+    
+    // Get the current active term from Static table
+    $currentTerm = getCurrentActiveTerm();
 
     // Validate payment method details
     if ($method === 'online') {
@@ -36,11 +38,11 @@ try {
         validateFileUpload($_FILES['receipt']);
     }
 
-    // Get fee structure for the year
-    $query = "SELECT * FROM Static WHERE year = $year";
+    // Get fee structure for the current active term
+    $query = "SELECT * FROM Static WHERE year = $currentTerm AND status = 'active'";
     $result = search($query);
     if ($result->num_rows === 0) {
-        throw new Exception("Fee structure not found for selected year");
+        throw new Exception("Fee structure not found for the current term");
     }
     $feeStructure = $result->fetch_assoc();
 
@@ -96,7 +98,7 @@ try {
         '$method',
         $amount,
         '$date',
-        $year,
+        $currentTerm,
         " . ($receiptUrl ? "'$receiptUrl'" : "NULL") . ", 
         " . ($cardNumber ? "'$cardNumber'" : "NULL") . ",
         " . ($expireDate ? "'$expireDate'" : "NULL") . ",
@@ -119,7 +121,7 @@ try {
                                     JOIN Payment P ON MFP.PaymentID = P.PaymentID
                                     WHERE MF.Member_MemberID = '$memberId'
                                     AND MF.Type = 'registration'
-                                    AND MF.Term = $year";
+                                    AND MF.Term = $currentTerm";
                 $regFeePaidResult = search($regFeePaidQuery);
                 $regFeePaid = $regFeePaidResult->fetch_assoc()['total_paid'];
                 $remainingRegFee = $feeStructure['registration_fee'] - $regFeePaid;
@@ -142,7 +144,7 @@ try {
                     '$feeId', 
                     $amount, 
                     '$date', 
-                    $year, 
+                    $currentTerm, 
                     'registration', 
                     '$memberId', 
                     'Yes'
@@ -180,7 +182,7 @@ try {
                 // Process each selected month
                 foreach ($selectedMonths as $month) {
                     $feeId = generateFeeId();
-                    $monthDate = date('Y-m-d', strtotime("$year-$month-01"));
+                    $monthDate = date('Y-m-d', strtotime("$currentTerm-$month-01"));
                     
                     // Calculate monthly fee amount with proper float conversion
                     $monthlyFeeAmount = floatval($feeStructure['monthly_fee']);
@@ -198,7 +200,7 @@ try {
                         '$feeId', 
                         $monthlyFeeAmount, 
                         '$monthDate', 
-                        $year, 
+                        $currentTerm, 
                         'monthly', 
                         '$memberId', 
                         'Yes'
@@ -308,6 +310,24 @@ try {
 }
 
 // Helper Functions
+/**
+ * Gets the current active term/year from the static table
+ * 
+ * @return int|null The current active year or null if not found
+ */
+function getCurrentActiveTerm() {
+    $query = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $result = search($query);
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['year'];
+    }
+    
+    // Fallback to current year if no active year found
+    return date('Y');
+}
+
 function validateCardDetails($cardNumber, $expireDate, $cvv) {
     if (!preg_match('/^\d{16}$/', str_replace(' ', '', $cardNumber))) {
         throw new Exception("Invalid card number format");
@@ -353,18 +373,28 @@ function validateFileUpload($file) {
     }
 }
 
+/**
+ * Generates a payment ID with format "PAY"+Last 2 digits of current active term+sequence
+ * 
+ * @return string The newly generated payment ID
+ * @throws Exception if there's an error generating the ID
+ */
 function generatePaymentId() {
     try {
+        // Get current active term
+        $currentTerm = getCurrentActiveTerm();
+        $termSuffix = substr($currentTerm, -2); // Get last 2 digits
+        
         // Set the isolation level before starting the transaction
         iud("SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
         
-        // Now start the transaction
+        // Start the transaction
         iud("START TRANSACTION");
         
-        // Get the highest ID with a lock
-        $query = "SELECT CAST(SUBSTRING(PaymentID, 4) AS UNSIGNED) as max_num 
+        // Get the highest ID with a lock for the current term
+        $query = "SELECT CAST(SUBSTRING(PaymentID, 6) AS UNSIGNED) as max_num 
                  FROM Payment 
-                 WHERE PaymentID LIKE 'PAY%'
+                 WHERE PaymentID LIKE 'PAY{$termSuffix}%'
                  ORDER BY PaymentID DESC 
                  LIMIT 1 FOR UPDATE";
                  
@@ -378,8 +408,8 @@ function generatePaymentId() {
             $nextNum = 1;
         }
         
-        // Generate the new ID
-        $newId = "PAY" . str_pad($nextNum, 3, '0', STR_PAD_LEFT);
+        // Generate the new ID with 2-digit padding for sequence
+        $newId = "PAY" . $termSuffix . str_pad($nextNum, 2, '0', STR_PAD_LEFT);
         
         // Verify it doesn't exist (double check)
         $verifyQuery = "SELECT COUNT(*) as count FROM Payment WHERE PaymentID = '$newId'";
@@ -401,25 +431,69 @@ function generatePaymentId() {
     }
 }
 
+/**
+ * Generates a fee ID with format "FEE"+Last 2 digits of current active term+sequence
+ * 
+ * @return string The newly generated fee ID
+ * @throws Exception if there's an error generating the ID
+ */
 function generateFeeId() {
-    $query = "SELECT FeeID FROM MembershipFee ORDER BY FeeID DESC LIMIT 1";
-    $result = search($query);
-    
-    if ($result && $result->num_rows > 0) {
-        $row = $result->fetch_assoc();
-        $lastId = $row['FeeID'];
-        $numericPart = intval(substr($lastId, 3)) + 1;
-        return "FEE" . str_pad($numericPart, 3, '0', STR_PAD_LEFT);
+    try {
+        // Get current active term
+        $currentTerm = getCurrentActiveTerm();
+        $termSuffix = substr($currentTerm, -2); // Get last 2 digits
+        
+        // Set the isolation level before starting the transaction
+        iud("SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+        
+        // Start the transaction
+        iud("START TRANSACTION");
+        
+        // Get the highest ID with a lock for the current term
+        $query = "SELECT CAST(SUBSTRING(FeeID, 6) AS UNSIGNED) as max_num 
+                 FROM MembershipFee 
+                 WHERE FeeID LIKE 'FEE{$termSuffix}%'
+                 ORDER BY FeeID DESC 
+                 LIMIT 1 FOR UPDATE";
+                 
+        $result = search($query);
+        
+        // Determine the next number
+        if ($result && $result->num_rows > 0) {
+            $row = $result->fetch_assoc();
+            $nextNum = $row['max_num'] + 1;
+        } else {
+            $nextNum = 1;
+        }
+        
+        // Generate the new ID with 2-digit padding for sequence
+        $newId = "FEE" . $termSuffix . str_pad($nextNum, 2, '0', STR_PAD_LEFT);
+        
+        // Verify it doesn't exist (double check)
+        $verifyQuery = "SELECT COUNT(*) as count FROM MembershipFee WHERE FeeID = '$newId'";
+        $verifyResult = search($verifyQuery);
+        
+        if ($verifyResult->fetch_assoc()['count'] > 0) {
+            iud("ROLLBACK");
+            throw new Exception("Generated ID already exists: " . $newId);
+        }
+        
+        // Commit the transaction
+        iud("COMMIT");
+        
+        return $newId;
+        
+    } catch (Exception $e) {
+        iud("ROLLBACK");
+        throw new Exception("Error generating fee ID: " . $e->getMessage());
     }
-    
-    return "FEE001";
 }
 
-function checkDuplicatePayment($memberId, $paymentType, $year) {
+function checkDuplicatePayment($memberId, $paymentType, $currentTerm) {
     $query = "SELECT COUNT(*) as count FROM Payment 
               WHERE Member_MemberID = '$memberId' 
               AND Payment_Type = '$paymentType' 
-              AND Term = $year";
+              AND Term = $currentTerm";
     
     $result = search($query);
     $row = $result->fetch_assoc();

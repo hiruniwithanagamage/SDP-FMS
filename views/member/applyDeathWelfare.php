@@ -2,19 +2,67 @@
 session_start();
 require_once "../../config/database.php";
 
-// Generate new Welfare ID
-$query = "SELECT WelfareID FROM DeathWelfare ORDER BY WelfareID DESC LIMIT 1";
-$result = search($query);
-
-if ($result && $result->num_rows > 0) {
-    $row = $result->fetch_assoc();
-    $lastId = $row['WelfareID'];
-    $numericPart = preg_replace('/[^0-9]/', '', $lastId);
-    $newNumericPart = intval($numericPart) + 1;
-    $newWelfareId = "WF" . str_pad($newNumericPart, 3, '0', STR_PAD_LEFT);
-} else {
-    $newWelfareId = "WF001";
+// Generate new Welfare ID using the new format: DWF + last 2 digits of term + sequence (01-10)
+function generateNewWelfareId() {
+    // Get current active term (year) from the static table
+    $queryActiveTerm = "SELECT year FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $resultActiveTerm = search($queryActiveTerm);
+    
+    if ($resultActiveTerm && $resultActiveTerm->num_rows > 0) {
+        $rowTerm = $resultActiveTerm->fetch_assoc();
+        $currentTerm = $rowTerm['year'];
+    } else {
+        // Fallback to current year if no active term is found
+        $currentTerm = date('Y');
+        error_log("Warning: No active term found in static table, using current year as fallback");
+    }
+    
+    $lastTwoDigits = substr($currentTerm, -2); // Get last 2 digits of the year
+    
+    // Check existing welfare IDs for this term to determine the next sequence number
+    $query = "SELECT WelfareID FROM DeathWelfare 
+              WHERE Term = ? 
+              ORDER BY WelfareID DESC 
+              LIMIT 1";
+    
+    $stmt = prepare($query);
+    $stmt->bind_param("s", $currentTerm);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        $lastId = $row['WelfareID'];
+        
+        // Extract the sequence number from the last ID
+        // Format is DWF + 2 digits of year + 2 digit sequence
+        $sequencePart = substr($lastId, -2); // Last two characters
+        $newSequence = intval($sequencePart) + 1;
+        
+        // Check if we've reached the limit of 10 applications
+        if ($newSequence > 10) {
+            // Consider implementing a waitlist or different handling
+            // For now, we'll cycle back to 01 with a warning
+            $newSequence = 1;
+            // You may want to log this situation
+            error_log("Warning: More than 10 death welfare applications in term $currentTerm");
+        }
+    } else {
+        // This is the first application for this term
+        $newSequence = 1;
+    }
+    
+    // Format the sequence to always be 2 digits (01, 02, etc.)
+    $formattedSequence = str_pad($newSequence, 2, '0', STR_PAD_LEFT);
+    
+    // Create the new ID in format DWF + last 2 digits of term + sequence (01-10)
+    $newWelfareId = "DWF" . $lastTwoDigits . $formattedSequence;
+    
+    return $newWelfareId;
 }
+
+// Generate the new welfare ID
+$newWelfareId = generateNewWelfareId();
 
 // Function to simulate SMS sending for XAMPP testing
 function sendEmailToSMS($phone, $message) {
@@ -168,7 +216,20 @@ $relationships = [
 if(isset($_POST['apply'])) {
     $memberId = $_POST['member_id'];
     $date = $_POST['date'];
-    $term = date('Y'); // Current year as term
+    
+    // Get current active term from static table
+    $queryActiveTerm = "SELECT year FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $resultActiveTerm = search($queryActiveTerm);
+    
+    if ($resultActiveTerm && $resultActiveTerm->num_rows > 0) {
+        $rowTerm = $resultActiveTerm->fetch_assoc();
+        $term = $rowTerm['year'];
+    } else {
+        // Fallback to current year if no active term is found
+        $term = date('Y');
+        error_log("Warning: No active term found in static table, using current year as fallback");
+    }
+    
     $relationship = $_POST['relationship'];
     
     // Initialize errors array
@@ -264,8 +325,20 @@ $hasExistingApplication = false;
 $existingApplicationStatus = "";
 
 if(isset($_SESSION['member_id'])) {
-    // Check for existing applications in current year
-    $currentYear = date('Y');
+    // Get current active term from static table
+    $queryActiveTerm = "SELECT year FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $resultActiveTerm = search($queryActiveTerm);
+    
+    if ($resultActiveTerm && $resultActiveTerm->num_rows > 0) {
+        $rowTerm = $resultActiveTerm->fetch_assoc();
+        $currentYear = $rowTerm['year'];
+    } else {
+        // Fallback to current year if no active term is found
+        $currentYear = date('Y');
+        error_log("Warning: No active term found in static table, using current year as fallback");
+    }
+    
+    // Check for existing applications in current active term
     $checkQuery = "SELECT Status FROM DeathWelfare 
                   WHERE Member_MemberID = ? 
                   AND Term = ?
@@ -369,7 +442,20 @@ $welfareAmount = getWelfareAmount();
                     
                     <div class="form-group">
                         <label for="term">Term</label>
-                        <input type="text" id="term" value="<?php echo date('Y'); ?>" readonly>
+                        <?php
+                        // Get current active term from static table
+                        $queryActiveTerm = "SELECT year FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+                        $resultActiveTerm = search($queryActiveTerm);
+                        
+                        if ($resultActiveTerm && $resultActiveTerm->num_rows > 0) {
+                            $rowTerm = $resultActiveTerm->fetch_assoc();
+                            $currentYear = $rowTerm['year'];
+                        } else {
+                            // Fallback to current year if no active term is found
+                            $currentYear = date('Y');
+                        }
+                        ?>
+                        <input type="text" id="term" value="<?php echo $currentYear; ?>" readonly>
                     </div>
                 </div>
                 

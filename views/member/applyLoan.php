@@ -12,7 +12,15 @@ try {
 
 // Initialize error array and current year
 $errors = [];
-$currentYear = date('Y');
+// Get active year from static table
+$staticYearQuery = "SELECT year FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+$staticYearResult = search($staticYearQuery);
+$currentYear = date('Y'); // Fallback to system year if query fails
+
+if ($staticYearResult && $staticYearResult->num_rows > 0) {
+    $yearData = $staticYearResult->fetch_assoc();
+    $currentYear = $yearData['year'];
+}
 
 // Check if user is logged in
 if (!isset($_SESSION["u"])) {
@@ -118,21 +126,23 @@ function checkMemberEligibility($memberId) {
     return true;
 }
 
-// Generate new Loan ID (loan + Year + 3 digits)
-$query = "SELECT LoanID FROM Loan WHERE LoanID LIKE 'LN" . $currentYear . "%' ORDER BY LoanID DESC LIMIT 1";
+// Get the last 2 digits of the year
+$yearSuffix = substr($currentYear, -2);
+
+// Generate new Loan ID (LN + last 2 digits of year + 2-digit sequence)
+$query = "SELECT LoanID FROM Loan WHERE LoanID LIKE 'LN" . $yearSuffix . "%' ORDER BY LoanID DESC LIMIT 1";
 $result = search($query);
 
 if ($result && $result->num_rows > 0) {
     $lastId = $result->fetch_assoc()['LoanID'];
-    // Extract the numeric part after 'LN' + year
-    $yearPart = $currentYear;
-    $prefix = 'LN' . $yearPart;
+    // Extract the numeric part after 'LN' + year suffix (2 digits)
+    $prefix = 'LN' . $yearSuffix;
     $remainingPart = substr($lastId, strlen($prefix));
     $numericPart = intval($remainingPart);
-    $newLoanId = $prefix . sprintf('%02d', $numericPart + 1); // Format with leading zero if needed
+    $newLoanId = $prefix . sprintf('%02d', $numericPart + 1); // Format with leading zero
 } else {
     // First loan of the year
-    $newLoanId = "LN" . $currentYear . "01"; // Start with 01
+    $newLoanId = "LN" . $yearSuffix . "01"; // Start with 01
 }
 
 // Fetch eligible members for guarantor selection (with guaranteed_count < 1)

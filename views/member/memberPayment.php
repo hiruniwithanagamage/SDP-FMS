@@ -8,14 +8,30 @@ if (!isset($_SESSION['member_id'])) {
     exit();
 }
 
-// Get current date and year
+// Get current date
 $currentDate = date('Y-m-d');
-$currentYear = date('Y');
 
-// Fetch static data for current year
-$query = "SELECT * FROM Static WHERE year = $currentYear";
+// Get current active term from Static table
+function getCurrentActiveTerm() {
+    $query = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $result = search($query);
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['year'];
+    }
+    
+    // Fallback to current year if no active year found
+    return date('Y');
+}
+
+$currentTerm = getCurrentActiveTerm();
+
+// Fetch static data for current active term
+$query = "SELECT * FROM Static WHERE year = $currentTerm AND status = 'active'";
 $result = search($query);
 if ($result->num_rows === 0) {
+    // If no active term found, get the most recent one
     $query = "SELECT * FROM Static ORDER BY year DESC LIMIT 1";
     $result = search($query);
 }
@@ -55,7 +71,7 @@ $regFeePaidQuery = "SELECT COALESCE(SUM(P.Amount), 0) as total_paid
                     JOIN Payment P ON MFP.PaymentID = P.PaymentID
                     WHERE MF.Member_MemberID = '$memberId'
                     AND MF.Type = 'registration'
-                    AND MF.Term = $currentYear";
+                    AND MF.Term = $currentTerm";
 $regFeePaidResult = search($regFeePaidQuery);
 $regFeePaid = $regFeePaidResult->fetch_assoc()['total_paid'];
 $remainingRegFee = $staticData['registration_fee'] - $regFeePaid;
@@ -158,14 +174,14 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
                         <input type="date" name="date" value="<?php echo $currentDate; ?>" readonly>
                     </div>
                     <div class="form-group">
-                        <label>Year</label>
+                        <label>Term</label>
                         <select name="year" id="yearSelect">
                             <?php
                             $yearQuery = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
                             $yearResult = search($yearQuery);
                             while($yearRow = $yearResult->fetch_assoc()): ?>
                                 <option value="<?php echo $yearRow['year']; ?>" 
-                                    <?php echo ($yearRow['year'] == $currentYear) ? 'selected' : ''; ?>>
+                                    <?php echo ($yearRow['year'] == $currentTerm) ? 'selected' : ''; ?>>
                                     <?php echo $yearRow['year']; ?>
                                 </option>
                             <?php endwhile; ?>
@@ -254,7 +270,7 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
                             $monthNum = $index + 1;
                             $query = "SELECT COUNT(*) as paid FROM MembershipFee 
                                     WHERE Member_MemberID = '$memberId' 
-                                    AND Term = $currentYear 
+                                    AND Term = $currentTerm 
                                     AND MONTH(Date) = $monthNum 
                                     AND Type = 'monthly' 
                                     AND IsPaid = 'Yes'";
@@ -355,6 +371,7 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
         const staticData = <?php echo json_encode($staticData); ?>;
         const remainingRegFee = <?php echo $remainingRegFee; ?>;
         const memberStatus = "<?php echo $memberStatus; ?>";
+        const currentTerm = <?php echo $currentTerm; ?>;
     </script>
     <script src="../../assets/js/memberPayments.js"></script>
 </body>

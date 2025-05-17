@@ -2,6 +2,31 @@
 session_start();
 require_once "../../config/database.php";
 
+// Function to generate a new welfare ID
+function getActiveYear() {
+    // Query to get the current active year from the static table
+    $query = "SELECT year FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $result = search($query);
+    
+    // Check if any active record exists
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['year'];
+    }
+    
+    // Fallback: If no active record found, get the most recent year
+    $query = "SELECT year FROM static ORDER BY year DESC LIMIT 1";
+    $result = search($query);
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['year'];
+    }
+    
+    // If no records at all, return current year as last resort
+    return date('Y');
+}
+
 // Verify treasurer authentication
 if (!isset($_SESSION['treasurer_id'])) {
     header('Location: ../login.php');
@@ -10,7 +35,7 @@ if (!isset($_SESSION['treasurer_id'])) {
 
 // Get current date and year
 $currentDate = date('Y-m-d');
-$currentYear = date('Y');
+$currentYear = getActiveYear(); // Use the function instead of date('Y')
 
 // Fetch static data for current year
 $query = "SELECT * FROM Static WHERE year = $currentYear";
@@ -231,7 +256,7 @@ while ($row = $memberQueryResult->fetch_assoc()) {
                         <input type="date" name="date" value="<?php echo $currentDate; ?>" readonly>
                     </div>
                     <div class="form-group">
-                        <label>Year</label>
+                        <label>Term</label>
                         <select name="year" id="yearSelect">
                             <?php
                             $yearQuery = "SELECT DISTINCT year FROM Static ORDER BY year DESC";

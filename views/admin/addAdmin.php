@@ -5,7 +5,23 @@ require_once "../../config/database.php";
 // Get database connection
 $conn = getConnection(); // Assuming this function exists in database.php
 
-// Generate new Admin ID
+// Get current active year from static table
+function getCurrentActiveYear($conn) {
+    $query = "SELECT year FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $stmt = $conn->prepare($query);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['year'];
+    }
+    
+    // Fallback to current year if no active year found
+    return date('Y');
+}
+
+// Generate new Admin ID with format ADMI01, ADMI02, etc.
 function generateNewAdminId($conn) {
     $query = "SELECT AdminID FROM Admin ORDER BY AdminID DESC LIMIT 1";
     $stmt = $conn->prepare($query);
@@ -16,13 +32,13 @@ function generateNewAdminId($conn) {
         $row = $result->fetch_assoc();
         if ($row && isset($row['AdminID'])) {
             $lastId = $row['AdminID'];
-            // Use preg_replace to extract only numeric part
-            $numericPart = preg_replace('/[^0-9]/', '', $lastId);
+            // Extract numeric part after "ADMI"
+            $numericPart = substr($lastId, 4); // Get everything after "ADMI"
             $newNumericPart = intval($numericPart) + 1;
-            return "admin" . $newNumericPart;
+            return "ADMI" . str_pad($newNumericPart, 2, "0", STR_PAD_LEFT); // Ensure at least 2 digits
         }
     }
-    return "admin1";
+    return "ADMI01"; // First admin ID
 }
 
 // Check if admin name already exists
@@ -35,6 +51,10 @@ function checkExistingAdmin($conn, $name) {
     return $result->num_rows > 0;
 }
 
+// Get current active year
+$currentYear = getCurrentActiveYear($conn);
+
+// Generate new admin ID
 $newAdminId = generateNewAdminId($conn);
 
 // Check if form is submitted
@@ -228,6 +248,11 @@ if(isset($_POST['add'])) {
             <div class="form-group">
                 <label for="contact_number">Contact Number</label>
                 <input type="text" id="contact_number" name="contact_number" required value="<?php echo isset($contactNumber) ? htmlspecialchars($contactNumber) : ''; ?>" placeholder="10 digits">
+            </div>
+
+            <div class="form-group">
+                <label for="current_year">Current Active Year</label>
+                <input type="text" id="current_year" name="current_year" value="<?php echo htmlspecialchars($currentYear); ?>" disabled>
             </div>
 
             <div class="button-group">

@@ -51,7 +51,22 @@ function checkNICExists($conn, $nic) {
     return $result->fetch_assoc()['count'] > 0;
 }
 
-// Generate new Member ID using prepared statement
+// Get current active year from static table
+function getActiveYear($conn) {
+    $query = "SELECT year FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $stmt = $conn->prepare($query);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        return $result->fetch_assoc()['year'];
+    }
+    
+    // Fallback to current year if no active year is found
+    return date('Y');
+}
+
+// Generate new Member ID using prepared statement in format MEMB01, MEMB02, etc.
 function generateNewMemberId($conn) {
     $query = "SELECT MemberID FROM Member ORDER BY MemberID DESC LIMIT 1";
     $stmt = $conn->prepare($query);
@@ -60,15 +75,20 @@ function generateNewMemberId($conn) {
 
     if ($result->num_rows > 0) {
         $lastId = $result->fetch_assoc()['MemberID'];
-        $numericPart = intval(substr($lastId, 6)); // Assuming format is "Member1", "Member2", etc.
-        $newNumericPart = $numericPart + 1;
-        return "Member" . $newNumericPart;
-    } else {
-        return "Member1";
+        // Check if the last ID follows our format (MEMB followed by numbers)
+        if (preg_match('/^MEMB(\d+)$/', $lastId, $matches)) {
+            $numericPart = intval($matches[1]);
+            $newNumericPart = $numericPart + 1;
+            return "MEMB" . str_pad($newNumericPart, 2, '0', STR_PAD_LEFT);
+        }
     }
+    
+    // If no records exist or last ID doesn't match format, start with MEMB01
+    return "MEMB01";
 }
 
 $newMemberId = generateNewMemberId($conn);
+$currentYear = getActiveYear($conn);
 
 // Handle form submission with validation
 if (isset($_POST['add'])) {

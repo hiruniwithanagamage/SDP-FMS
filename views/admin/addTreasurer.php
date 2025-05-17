@@ -2,6 +2,28 @@
 session_start();
 require_once "../../config/database.php";
 
+// Function to generate a new welfare ID
+function generateTreasurerID() {
+    $countQuery = "SELECT COUNT(*) as count FROM Treasurer";
+    $countResult = search($countQuery);
+    $treasurerCount = $countResult->fetch_assoc()['count'] + 1;
+    
+    // Format the ID as TRES followed by a two-digit number (01, 02, etc.)
+    return "TRES" . str_pad($treasurerCount, 2, "0", STR_PAD_LEFT);
+}
+
+// Function to get the current active year
+function getActiveYear() {
+    $activeYearQuery = "SELECT year FROM Static WHERE status = 'active' LIMIT 1";
+    $activeYearResult = search($activeYearQuery);
+    
+    if ($activeYearResult && $activeYearResult->num_rows > 0) {
+        return $activeYearResult->fetch_assoc()['year'];
+    }
+    
+    return null;
+}
+
 // Get the logged-in treasurer's ID from the session
 $treasurerID = isset($_SESSION['TreasurerID']) ? $_SESSION['TreasurerID'] : null;
 
@@ -23,11 +45,8 @@ foreach ($allTerms as $term) {
     $availableTerms[] = $term;
 }
 
-// Generate sequential Treasurer ID 
-$countQuery = "SELECT COUNT(*) as count FROM Treasurer";
-$countResult = search($countQuery);
-$treasurerCount = $countResult->fetch_assoc()['count'] + 1;
-$newTreasurerID = "tres" . str_pad($treasurerCount, 3, "0", STR_PAD_LEFT);
+// Generate sequential Treasurer ID using our new function
+$newTreasurerID = generateTreasurerID();
 
 // Handle form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
