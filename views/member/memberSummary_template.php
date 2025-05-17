@@ -17,7 +17,6 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            /* margin-top: 20px; */
             margin-bottom: 2rem;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
@@ -38,7 +37,69 @@
             background: #1e3c72;
             color: white;
         }
-</style>
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .data-table th {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 12px;
+            text-align: left;
+            border-bottom: 2px solid #ddd;
+            font-weight: 600;
+        }
+
+        /* Pagination styles */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        
+        .pagination-info {
+            text-align: center;
+            margin-bottom: 10px;
+            color: #555;
+            font-size: 0.9rem;
+            width: 100%;
+        }
+        
+        .pagination button {
+            padding: 8px 16px;
+            margin: 0 4px;
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .pagination button:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .pagination button.active {
+            background-color: #4a6eb5;
+            color: white;
+            border-color: #4a6eb5;
+        }
+        
+        .pagination button.disabled {
+            color: #aaa;
+            cursor: not-allowed;
+        }
+        
+        .pagination button.disabled:hover {
+            background-color: #f8f8f8;
+        }
+    </style>
 </head>
 <body>
     <div id="print-content" class="pdf-document">
@@ -52,7 +113,6 @@
                     <h1 class="page-title">Member Financial Summary</h1>
                     
                     <div class="filter">
-                        <!-- <label for="year-select">Select Year:</label> -->
                         <select class="filter-select" id="year-select" onchange="changeYear(this.value)">
                             <?php foreach ($availableYears as $year): ?>
                                 <option value="<?php echo $year; ?>" <?php echo ($year == $selectedYear) ? 'selected' : ''; ?>>
@@ -114,8 +174,8 @@
                                 
                                 <div class="info-label">Loan Balance:</div>
                                 <div class="info-value">
-                                    <span class="status-badge <?php echo ($loanDues > 0) ? 'status-badge-warning' : 'status-badge-success'; ?>">
-                                        Rs.<?php echo number_format($loanDues, 2); ?>
+                                    <span class="status-badge <?php echo ($loanDues >= 0) ? 'status-badge-warning' : 'status-badge-success'; ?>">
+                                        <?php echo ($loanDues > 0) ? 'Rs.' . number_format($loanDues, 2) : 'No Active Loans'; ?>
                                     </span>
                                 </div>
                                 
@@ -164,7 +224,7 @@
                     </div>
                     
                     <!-- PDF section headers that are only visible when printing -->
-                    <div class="pdf-section-headers">
+                    <div class="pdf-section-headers" style="display: none;">
                         <h2 id="pdf-payment-header">Payment History - <?php echo $selectedYear; ?></h2>
                         <h2 id="pdf-loan-header">Loan History - <?php echo $selectedYear; ?></h2>
                         <h2 id="pdf-membership-header">Membership Fees - <?php echo $selectedYear; ?></h2>
@@ -181,7 +241,7 @@
                         
                         <div id="payment-tab" class="tab-content active">
                             <h2 class="card-title">Payment History - <?php echo $selectedYear; ?></h2>
-                            <?php if (empty($paymentHistory)): ?>
+                            <?php if (empty($paginatedPaymentHistory)): ?>
                                 <p>No payment history found for <?php echo $selectedYear; ?>.</p>
                             <?php else: ?>
                                 <div class="table-responsive">
@@ -196,7 +256,7 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            <?php foreach ($paymentHistory as $payment): ?>
+                                            <?php foreach ($paginatedPaymentHistory as $payment): ?>
                                                 <tr>
                                                     <td><?php echo htmlspecialchars($payment['PaymentID']); ?></td>
                                                     <td><?php echo htmlspecialchars($payment['Payment_Type']); ?></td>
@@ -208,12 +268,69 @@
                                         </tbody>
                                     </table>
                                 </div>
+                                
+                                <!-- Pagination for Payment History -->
+                                <?php if ($totalPaymentPages > 0): ?>
+                                <div class="pagination">
+                                    <div class="pagination-info">
+                                        Showing <?php echo ($currentPage-1)*$recordsPerPage+1; ?> to 
+                                        <?php echo min($currentPage*$recordsPerPage, $totalPaymentRecords); ?> of 
+                                        <?php echo $totalPaymentRecords; ?> records
+                                    </div>
+                                    
+                                    <!-- First and Previous buttons -->
+                                    <button onclick="goToPage(1, 'payment')" 
+                                            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-double-left"></i>
+                                    </button>
+                                    <button onclick="goToPage(<?php echo $currentPage-1; ?>, 'payment')" 
+                                            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-left"></i>
+                                    </button>
+                                    
+                                    <!-- Page numbers -->
+                                    <?php
+                                    // Calculate range of page numbers to show
+                                    $startPage = max(1, $currentPage - 2);
+                                    $endPage = min($totalPaymentPages, $currentPage + 2);
+                                    
+                                    // Ensure we always show at least 5 pages when possible
+                                    if ($endPage - $startPage + 1 < 5 && $totalPaymentPages >= 5) {
+                                        if ($startPage == 1) {
+                                            $endPage = min(5, $totalPaymentPages);
+                                        } elseif ($endPage == $totalPaymentPages) {
+                                            $startPage = max(1, $totalPaymentPages - 4);
+                                        }
+                                    }
+                                    
+                                    for ($i = $startPage; $i <= $endPage; $i++): ?>
+                                        <button onclick="goToPage(<?php echo $i; ?>, 'payment')" 
+                                                class="<?php echo $i == $currentPage ? 'active' : ''; ?>">
+                                            <?php echo $i; ?>
+                                        </button>
+                                    <?php endfor; ?>
+                                    
+                                    <!-- Next and Last buttons -->
+                                    <button onclick="goToPage(<?php echo $currentPage+1; ?>, 'payment')" 
+                                            <?php echo $currentPage == $totalPaymentPages ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == $totalPaymentPages ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-right"></i>
+                                    </button>
+                                    <button onclick="goToPage(<?php echo $totalPaymentPages; ?>, 'payment')" 
+                                            <?php echo $currentPage == $totalPaymentPages ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == $totalPaymentPages ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-double-right"></i>
+                                    </button>
+                                </div>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </div>
                         
                         <div id="loan-tab" class="tab-content">
                             <h2 class="card-title">Loan History - <?php echo $selectedYear; ?></h2>
-                            <?php if (empty($loanHistory)): ?>
+                            <?php if (empty($paginatedLoanHistory)): ?>
                                 <p>No loan history found for <?php echo $selectedYear; ?>.</p>
                             <?php else: ?>
                                 <div class="table-responsive">
@@ -230,7 +347,7 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            <?php foreach ($loanHistory as $loan): ?>
+                                            <?php foreach ($paginatedLoanHistory as $loan): ?>
                                                 <tr>
                                                     <td><?php echo htmlspecialchars($loan['LoanID']); ?></td>
                                                     <td>Rs.<?php echo number_format($loan['Amount'], 2); ?></td>
@@ -250,12 +367,69 @@
                                         </tbody>
                                     </table>
                                 </div>
+                                
+                                <!-- Pagination for Loan History -->
+                                <?php if ($totalLoanPages > 0): ?>
+                                <div class="pagination">
+                                    <div class="pagination-info">
+                                        Showing <?php echo ($currentPage-1)*$recordsPerPage+1; ?> to 
+                                        <?php echo min($currentPage*$recordsPerPage, $totalLoanRecords); ?> of 
+                                        <?php echo $totalLoanRecords; ?> records
+                                    </div>
+                                    
+                                    <!-- First and Previous buttons -->
+                                    <button onclick="goToPage(1, 'loan')" 
+                                            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-double-left"></i>
+                                    </button>
+                                    <button onclick="goToPage(<?php echo $currentPage-1; ?>, 'loan')" 
+                                            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-left"></i>
+                                    </button>
+                                    
+                                    <!-- Page numbers -->
+                                    <?php
+                                    // Calculate range of page numbers to show
+                                    $startPage = max(1, $currentPage - 2);
+                                    $endPage = min($totalLoanPages, $currentPage + 2);
+                                    
+                                    // Ensure we always show at least 5 pages when possible
+                                    if ($endPage - $startPage + 1 < 5 && $totalLoanPages >= 5) {
+                                        if ($startPage == 1) {
+                                            $endPage = min(5, $totalLoanPages);
+                                        } elseif ($endPage == $totalLoanPages) {
+                                            $startPage = max(1, $totalLoanPages - 4);
+                                        }
+                                    }
+                                    
+                                    for ($i = $startPage; $i <= $endPage; $i++): ?>
+                                        <button onclick="goToPage(<?php echo $i; ?>, 'loan')" 
+                                                class="<?php echo $i == $currentPage ? 'active' : ''; ?>">
+                                            <?php echo $i; ?>
+                                        </button>
+                                    <?php endfor; ?>
+                                    
+                                    <!-- Next and Last buttons -->
+                                    <button onclick="goToPage(<?php echo $currentPage+1; ?>, 'loan')" 
+                                            <?php echo $currentPage == $totalLoanPages ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == $totalLoanPages ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-right"></i>
+                                    </button>
+                                    <button onclick="goToPage(<?php echo $totalLoanPages; ?>, 'loan')" 
+                                            <?php echo $currentPage == $totalLoanPages ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == $totalLoanPages ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-double-right"></i>
+                                    </button>
+                                </div>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </div>
                         
                         <div id="membership-tab" class="tab-content">
                             <h2 class="card-title">Membership Fees - <?php echo $selectedYear; ?></h2>
-                            <?php if (empty($membershipHistory)): ?>
+                            <?php if (empty($paginatedMembershipHistory)): ?>
                                 <p>No membership fee history found for <?php echo $selectedYear; ?>.</p>
                             <?php else: ?>
                                 <div class="table-responsive">
@@ -271,7 +445,7 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            <?php foreach ($membershipHistory as $fee): ?>
+                                            <?php foreach ($paginatedMembershipHistory as $fee): ?>
                                                 <tr>
                                                     <td><?php echo htmlspecialchars($fee['FeeID']); ?></td>
                                                     <td><?php echo htmlspecialchars($fee['Type']); ?></td>
@@ -289,6 +463,63 @@
                                     </table>
                                 </div>
                                 
+                                <!-- Pagination for Membership Fees -->
+                                <?php if ($totalMembershipPages > 0): ?>
+                                <div class="pagination">
+                                    <div class="pagination-info">
+                                        Showing <?php echo ($currentPage-1)*$recordsPerPage+1; ?> to 
+                                        <?php echo min($currentPage*$recordsPerPage, $totalMembershipRecords); ?> of 
+                                        <?php echo $totalMembershipRecords; ?> records
+                                    </div>
+                                    
+                                    <!-- First and Previous buttons -->
+                                    <button onclick="goToPage(1, 'membership')" 
+                                            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-double-left"></i>
+                                    </button>
+                                    <button onclick="goToPage(<?php echo $currentPage-1; ?>, 'membership')" 
+                                            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-left"></i>
+                                    </button>
+                                    
+                                    <!-- Page numbers -->
+                                    <?php
+                                    // Calculate range of page numbers to show
+                                    $startPage = max(1, $currentPage - 2);
+                                    $endPage = min($totalMembershipPages, $currentPage + 2);
+                                    
+                                    // Ensure we always show at least 5 pages when possible
+                                    if ($endPage - $startPage + 1 < 5 && $totalMembershipPages >= 5) {
+                                        if ($startPage == 1) {
+                                            $endPage = min(5, $totalMembershipPages);
+                                        } elseif ($endPage == $totalMembershipPages) {
+                                            $startPage = max(1, $totalMembershipPages - 4);
+                                        }
+                                    }
+                                    
+                                    for ($i = $startPage; $i <= $endPage; $i++): ?>
+                                        <button onclick="goToPage(<?php echo $i; ?>, 'membership')" 
+                                                class="<?php echo $i == $currentPage ? 'active' : ''; ?>">
+                                            <?php echo $i; ?>
+                                        </button>
+                                    <?php endfor; ?>
+                                    
+                                    <!-- Next and Last buttons -->
+                                    <button onclick="goToPage(<?php echo $currentPage+1; ?>, 'membership')" 
+                                            <?php echo $currentPage == $totalMembershipPages ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == $totalMembershipPages ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-right"></i>
+                                    </button>
+                                    <button onclick="goToPage(<?php echo $totalMembershipPages; ?>, 'membership')" 
+                                            <?php echo $currentPage == $totalMembershipPages ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == $totalMembershipPages ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-double-right"></i>
+                                    </button>
+                                </div>
+                                <?php endif; ?>
+                                
                                 <?php if ($missingMonths > 0): ?>
                                 <div class="missing-months-notice">
                                     <p><strong>Note:</strong> There <?php echo ($missingMonths == 1) ? 'is' : 'are'; ?> <?php echo $missingMonths; ?> missing month<?php echo ($missingMonths == 1) ? '' : 's'; ?> in the system for <?php echo $selectedYear; ?>.</p>
@@ -299,7 +530,7 @@
                         
                         <div id="fine-tab" class="tab-content">
                             <h2 class="card-title">Fine History - <?php echo $selectedYear; ?></h2>
-                            <?php if (empty($fineHistory)): ?>
+                            <?php if (empty($paginatedFineHistory)): ?>
                                 <p>No fine history found for <?php echo $selectedYear; ?>.</p>
                             <?php else: ?>
                                 <div class="table-responsive">
@@ -314,7 +545,7 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            <?php foreach ($fineHistory as $fine): ?>
+                                            <?php foreach ($paginatedFineHistory as $fine): ?>
                                                 <tr>
                                                     <td><?php echo htmlspecialchars($fine['FineID']); ?></td>
                                                     <td><?php echo htmlspecialchars($fine['Description']); ?></td>
@@ -330,6 +561,63 @@
                                         </tbody>
                                     </table>
                                 </div>
+                                
+                                <!-- Pagination for Fine History -->
+                                <?php if ($totalFinePages > 0): ?>
+                                <div class="pagination">
+                                    <div class="pagination-info">
+                                        Showing <?php echo ($currentPage-1)*$recordsPerPage+1; ?> to 
+                                        <?php echo min($currentPage*$recordsPerPage, $totalFineRecords); ?> of 
+                                        <?php echo $totalFineRecords; ?> records
+                                    </div>
+                                    
+                                    <!-- First and Previous buttons -->
+                                    <button onclick="goToPage(1, 'fine')" 
+                                            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-double-left"></i>
+                                    </button>
+                                    <button onclick="goToPage(<?php echo $currentPage-1; ?>, 'fine')" 
+                                            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-left"></i>
+                                    </button>
+                                    
+                                    <!-- Page numbers -->
+                                    <?php
+                                    // Calculate range of page numbers to show
+                                    $startPage = max(1, $currentPage - 2);
+                                    $endPage = min($totalFinePages, $currentPage + 2);
+                                    
+                                    // Ensure we always show at least 5 pages when possible
+                                    if ($endPage - $startPage + 1 < 5 && $totalFinePages >= 5) {
+                                        if ($startPage == 1) {
+                                            $endPage = min(5, $totalFinePages);
+                                        } elseif ($endPage == $totalFinePages) {
+                                            $startPage = max(1, $totalFinePages - 4);
+                                        }
+                                    }
+                                    
+                                    for ($i = $startPage; $i <= $endPage; $i++): ?>
+                                        <button onclick="goToPage(<?php echo $i; ?>, 'fine')" 
+                                                class="<?php echo $i == $currentPage ? 'active' : ''; ?>">
+                                            <?php echo $i; ?>
+                                        </button>
+                                    <?php endfor; ?>
+                                    
+                                    <!-- Next and Last buttons -->
+                                    <button onclick="goToPage(<?php echo $currentPage+1; ?>, 'fine')" 
+                                            <?php echo $currentPage == $totalFinePages ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == $totalFinePages ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-right"></i>
+                                    </button>
+                                    <button onclick="goToPage(<?php echo $totalFinePages; ?>, 'fine')" 
+                                            <?php echo $currentPage == $totalFinePages ? 'class="disabled"' : ''; ?> 
+                                            <?php echo $currentPage == $totalFinePages ? 'disabled' : ''; ?>>
+                                        <i class="fas fa-angle-double-right"></i>
+                                    </button>
+                                </div>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -340,11 +628,7 @@
                             <i class="fas fa-download"></i> Get Summary
                         </a>
                         
-                        <!-- <a href="../../reports/memberFSPdf.php?id=<?php echo $formattedMemberData['id']; ?>&year=<?php echo $selectedYear; ?>&download=true" class="action-button download-button">
-                            <i class="fas fa-download"></i> Download PDF
-                        </a> -->
-                        
-                        <a href="index.php" class="back-link">
+                        <a href="home-member.php" class="back-link">
                             <i class="fas fa-arrow-left"></i> Back to Dashboard
                         </a>
                     </div>
@@ -359,6 +643,163 @@
     
     <!-- PDF generation library - include CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="../../assets/js/memberSummary.js"></script>
+    <script>
+        /**
+ * JavaScript functionality for Member Summary page
+ */
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize alerts if alertHandler.js is available
+    if (typeof initAlerts === 'function') {
+        initAlerts();
+    } else {
+        // Fallback alert handler
+        const alertElements = document.querySelectorAll('.alert');
+        alertElements.forEach(function(alert) {
+            setTimeout(function() {
+                alert.style.transition = 'opacity 0.5s ease';
+                alert.style.opacity = '0';
+                
+                setTimeout(function() {
+                    alert.remove();
+                }, 500);
+            }, 4000);
+        });
+    }
+    
+    // Tab switching functionality
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabContents = document.querySelectorAll('.tab-content');
+    
+    // Hide all tabs except active one on initial load
+    tabContents.forEach(content => {
+        if (!content.classList.contains('active')) {
+            content.style.display = 'none';
+        } else {
+            content.style.display = 'block';
+        }
+    });
+    
+    tabButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            // Remove active class from all buttons and contents
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            tabContents.forEach(content => {
+                content.classList.remove('active');
+                content.style.display = 'none';
+            });
+            
+            // Add active class to clicked button and corresponding content
+            this.classList.add('active');
+            const tabId = this.getAttribute('data-tab');
+            const activeTab = document.getElementById(tabId + '-tab');
+            activeTab.classList.add('active');
+            activeTab.style.display = 'block';
+            
+            // Store active tab in session storage
+            sessionStorage.setItem('activeTab', tabId);
+        });
+    });
+    
+    // Restore active tab from sessionStorage
+    const activeTab = sessionStorage.getItem('activeTab');
+    if (activeTab) {
+        const tabButton = document.querySelector(`.tab-button[data-tab="${activeTab}"]`);
+        if (tabButton) {
+            tabButton.click();
+        }
+    }
+});
+
+/**
+ * Change year filter
+ */
+function changeYear(year) {
+    // Store current active tab
+    const activeTabButton = document.querySelector('.tab-button.active');
+    const activeTab = activeTabButton ? activeTabButton.getAttribute('data-tab') : 'payment';
+    sessionStorage.setItem('activeTab', activeTab);
+    
+    window.location.href = 'memberSummary.php?year=' + year + '&page=1';
+}
+
+/**
+ * Navigate to specific page
+ */
+function goToPage(page, tabType) {
+    // Get current year filter
+    const year = document.getElementById('year-select').value;
+    
+    // Get current tab 
+    const activeTabButton = document.querySelector('.tab-button.active');
+    const activeTab = activeTabButton ? activeTabButton.getAttribute('data-tab') : 'payment';
+    
+    // If tabType is provided and different from current tab, use it instead
+    const tabToUse = tabType || activeTab;
+    
+    // Store the active tab in sessionStorage for restoration after page load
+    sessionStorage.setItem('activeTab', tabToUse);
+    
+    // Navigate to the page
+    window.location.href = `memberSummary.php?year=${year}&page=${page}`;
+}
+
+/**
+ * Print summary
+ */
+function printSummary() {
+    // Add a loading indicator
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.innerHTML = '<div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.8); display: flex; justify-content: center; align-items: center; z-index: 9999;"><div style="background: white; padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.1);"><i class="fas fa-spinner fa-spin" style="margin-right: 10px;"></i> Preparing to print...</div></div>';
+    document.body.appendChild(loadingIndicator);
+    
+    // Before printing, make all tab content visible
+    const tabContents = document.querySelectorAll('.tab-content');
+    tabContents.forEach(content => {
+        content.setAttribute('data-original-display', content.style.display);
+        content.style.display = 'block';
+    });
+    
+    // Show PDF-specific headers
+    document.querySelector('.pdf-section-headers').style.display = 'block';
+    
+    // Add page break classes
+    document.querySelectorAll('.summary-grid').forEach((el, index) => {
+        if (index < document.querySelectorAll('.summary-grid').length - 1) {
+            el.classList.add('page-break-after');
+        }
+    });
+    
+    // Allow time for the DOM to update
+    setTimeout(() => {
+        // Remove loading indicator
+        document.body.removeChild(loadingIndicator);
+        
+        // Print the document
+        window.print();
+        
+        // After printing, restore original display settings
+        tabContents.forEach(content => {
+            const originalDisplay = content.getAttribute('data-original-display');
+            content.style.display = originalDisplay || '';
+            content.removeAttribute('data-original-display');
+        });
+        
+        // Hide PDF-specific headers
+        document.querySelector('.pdf-section-headers').style.display = 'none';
+        
+        // Remove page break classes
+        document.querySelectorAll('.page-break-after').forEach(el => {
+            el.classList.remove('page-break-after');
+        });
+        
+        // Restore the active tab
+        const activeTab = document.querySelector('.tab-button.active');
+        if (activeTab) {
+            activeTab.click();
+        }
+    }, 500);
+}
+    </script>
 </body>
 </html>

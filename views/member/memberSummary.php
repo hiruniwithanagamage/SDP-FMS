@@ -19,6 +19,24 @@ $fineHistory = [];
 $availableYears = [];
 $selectedYear = isset($_GET['year']) ? $_GET['year'] : date('Y'); // Default to current year
 
+// Pagination parameters
+$recordsPerPage = 10; // Number of records per page
+
+// Get the generic page parameter for backward compatibility
+$currentPage = isset($_GET['page']) ? intval($_GET['page']) : 1;
+
+// Add separate pagination for each tab type
+$currentPaymentPage = isset($_GET['payment_page']) ? intval($_GET['payment_page']) : $currentPage;
+$currentLoanPage = isset($_GET['loan_page']) ? intval($_GET['loan_page']) : $currentPage;
+$currentMembershipPage = isset($_GET['membership_page']) ? intval($_GET['membership_page']) : $currentPage;
+$currentFinePage = isset($_GET['fine_page']) ? intval($_GET['fine_page']) : $currentPage;
+
+// Ensure all current pages are valid
+if ($currentPaymentPage < 1) $currentPaymentPage = 1;
+if ($currentLoanPage < 1) $currentLoanPage = 1;
+if ($currentMembershipPage < 1) $currentMembershipPage = 1;
+if ($currentFinePage < 1) $currentFinePage = 1;
+
 // Get database connection
 $conn = getConnection();
 
@@ -200,8 +218,8 @@ if (isset($_SESSION['u'])) {
                                 Date
                                 FROM Payment 
                                 WHERE Member_MemberID = ? 
-                                AND YEAR(Date) = ?
-                                ORDER BY Date DESC";
+                                AND Term = ?
+                                ORDER BY PaymentID ASC";
                 $paymentStmt = $conn->prepare($paymentQuery);
                 $paymentStmt->bind_param("si", $memberID, $selectedYear);
                 $paymentStmt->execute();
@@ -226,7 +244,7 @@ if (isset($_SESSION['u'])) {
                                     FROM Loan 
                                     WHERE Member_MemberID = ? 
                                     AND (YEAR(Issued_Date) = ? OR YEAR(Due_Date) = ?)
-                                    ORDER BY Issued_Date DESC";
+                                    ORDER BY LoanID ASC";
                 $loanHistoryStmt = $conn->prepare($loanHistoryQuery);
                 $loanHistoryStmt->bind_param("sii", $memberID, $selectedYear, $selectedYear);
                 $loanHistoryStmt->execute();
@@ -246,8 +264,8 @@ if (isset($_SESSION['u'])) {
                                           IsPaid 
                                           FROM MembershipFee 
                                           WHERE Member_MemberID = ? 
-                                          AND YEAR(Date) = ?
-                                          ORDER BY Date DESC";
+                                          AND Term = ?
+                                          ORDER BY FeeID ASC";
                 $membershipHistoryStmt = $conn->prepare($membershipHistoryQuery);
                 $membershipHistoryStmt->bind_param("si", $memberID, $selectedYear);
                 $membershipHistoryStmt->execute();
@@ -266,8 +284,8 @@ if (isset($_SESSION['u'])) {
                                     IsPaid 
                                     FROM Fine 
                                     WHERE Member_MemberID = ? 
-                                    AND YEAR(Date) = ?
-                                    ORDER BY Date DESC";
+                                    AND Term = ?
+                                    ORDER BY fineID ASC";
                 $fineHistoryStmt = $conn->prepare($fineHistoryQuery);
                 $fineHistoryStmt->bind_param("si", $memberID, $selectedYear);
                 $fineHistoryStmt->execute();
@@ -276,6 +294,47 @@ if (isset($_SESSION['u'])) {
                 while ($fine = $fineHistoryResult->fetch_assoc()) {
                     $fineHistory[] = $fine;
                 }
+                
+                // Calculate total records and pages for each section
+                $totalPaymentRecords = count($paymentHistory);
+                $totalPaymentPages = ceil($totalPaymentRecords / $recordsPerPage);
+
+                $totalLoanRecords = count($loanHistory);
+                $totalLoanPages = ceil($totalLoanRecords / $recordsPerPage);
+
+                $totalMembershipRecords = count($membershipHistory);
+                $totalMembershipPages = ceil($totalMembershipRecords / $recordsPerPage);
+
+                $totalFineRecords = count($fineHistory);
+                $totalFinePages = ceil($totalFineRecords / $recordsPerPage);
+
+                // Adjust current pages if they exceed their respective total pages
+                if ($currentPaymentPage > $totalPaymentPages && $totalPaymentPages > 0) {
+                    $currentPaymentPage = $totalPaymentPages;
+                }
+                
+                if ($currentLoanPage > $totalLoanPages && $totalLoanPages > 0) {
+                    $currentLoanPage = $totalLoanPages;
+                }
+                
+                if ($currentMembershipPage > $totalMembershipPages && $totalMembershipPages > 0) {
+                    $currentMembershipPage = $totalMembershipPages;
+                }
+                
+                if ($currentFinePage > $totalFinePages && $totalFinePages > 0) {
+                    $currentFinePage = $totalFinePages;
+                }
+
+                // Apply pagination to the data arrays using the specific page variables
+                $paymentStartIndex = ($currentPaymentPage - 1) * $recordsPerPage;
+                $loanStartIndex = ($currentLoanPage - 1) * $recordsPerPage;
+                $membershipStartIndex = ($currentMembershipPage - 1) * $recordsPerPage;
+                $fineStartIndex = ($currentFinePage - 1) * $recordsPerPage;
+
+                $paginatedPaymentHistory = array_slice($paymentHistory, $paymentStartIndex, $recordsPerPage);
+                $paginatedLoanHistory = array_slice($loanHistory, $loanStartIndex, $recordsPerPage);
+                $paginatedMembershipHistory = array_slice($membershipHistory, $membershipStartIndex, $recordsPerPage);
+                $paginatedFineHistory = array_slice($fineHistory, $fineStartIndex, $recordsPerPage);
                 
             } else {
                 $error = "Member information not found";
@@ -309,6 +368,31 @@ function formatMemberData($data) {
 }
 
 $formattedMemberData = formatMemberData($memberData);
+
+// Debug information (remove or comment this in production)
+/*
+echo "<pre>";
+echo "Payment History Count: " . count($paymentHistory) . "<br>";
+echo "Loan History Count: " . count($loanHistory) . "<br>";
+echo "Membership History Count: " . count($membershipHistory) . "<br>";
+echo "Fine History Count: " . count($fineHistory) . "<br>";
+
+echo "Paginated Payment History Count: " . count($paginatedPaymentHistory) . "<br>";
+echo "Paginated Loan History Count: " . count($paginatedLoanHistory) . "<br>";
+echo "Paginated Membership History Count: " . count($paginatedMembershipHistory) . "<br>";
+echo "Paginated Fine History Count: " . count($paginatedFineHistory) . "<br>";
+
+echo "Current Payment Page: " . $currentPaymentPage . "<br>";
+echo "Current Loan Page: " . $currentLoanPage . "<br>";
+echo "Current Membership Page: " . $currentMembershipPage . "<br>";
+echo "Current Fine Page: " . $currentFinePage . "<br>";
+
+echo "Total Payment Pages: " . $totalPaymentPages . "<br>";
+echo "Total Loan Pages: " . $totalLoanPages . "<br>";
+echo "Total Membership Pages: " . $totalMembershipPages . "<br>";
+echo "Total Fine Pages: " . $totalFinePages . "<br>";
+echo "</pre>";
+*/
 
 // Include the HTML template
 include 'memberSummary_template.php';

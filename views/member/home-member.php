@@ -32,7 +32,7 @@ if (isset($_SESSION['u'])) {
                 
                 // Calculate loan dues
                 $loanDuesQuery = "SELECT COALESCE(SUM(Remain_Loan + Remain_Interest), 0) as loan_dues 
-                                 FROM Loan WHERE Member_MemberID = ?";
+                                 FROM Loan WHERE Member_MemberID = ? AND Status = 'approved'";
                 $loanStmt = $conn->prepare($loanDuesQuery);
                 $loanStmt->bind_param("s", $memberID);
                 $loanStmt->execute();

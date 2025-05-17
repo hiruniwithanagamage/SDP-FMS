@@ -51,9 +51,9 @@ function getMemberDetails($memberID) {
 
 // Function to get loan status
 function getLoanStatus($memberID) {
-    $sql = "SELECT COUNT(*) as count, SUM(Remain_Loan) as balance 
+    $sql = "SELECT COUNT(*) as count, COALESCE(SUM(Remain_Loan + Remain_Interest), 0) as balance 
             FROM Loan 
-            WHERE Member_MemberID = ? AND Remain_Loan > 0";
+            WHERE Member_MemberID = ? AND Status = 'approved'";
     $stmt = prepare($sql);
     $stmt->bind_param("s", $memberID);
     $stmt->execute();
