@@ -39,8 +39,11 @@ function isReportApproved($year) {
     return false; // If no report exists, it's not approved
 }
 
-// Get expenses based on filters
-function getExpenses($year, $category = '', $method = '', $fromDate = '', $toDate = '') {
+// Get expenses based on filters with pagination
+function getExpenses($year, $category = '', $method = '', $fromDate = '', $toDate = '', $page = 1, $recordsPerPage = 10) {
+    // Calculate the starting point for the LIMIT clause
+    $start = ($page - 1) * $recordsPerPage;
+    
     $sql = "SELECT e.*, t.Name as TreasurerName 
             FROM Expenses e 
             LEFT JOIN Treasurer t ON e.Treasurer_TreasurerID = t.TreasurerID
@@ -59,9 +62,33 @@ function getExpenses($year, $category = '', $method = '', $fromDate = '', $toDat
         $sql .= " AND e.Date <= '$toDate'";
     }
     
-    $sql .= " ORDER BY e.ExpenseID ASC";
+    $sql .= " ORDER BY e.ExpenseID ASC LIMIT $start, $recordsPerPage";
     
     return search($sql);
+}
+
+// Get total count of records for pagination
+function getTotalExpenses($year, $category = '', $method = '', $fromDate = '', $toDate = '') {
+    $sql = "SELECT COUNT(*) as total 
+            FROM Expenses e 
+            WHERE e.Term = $year";
+    
+    if (!empty($category)) {
+        $sql .= " AND e.Category = '$category'";
+    }
+    if (!empty($method)) {
+        $sql .= " AND e.Method = '$method'";
+    }
+    if (!empty($fromDate)) {
+        $sql .= " AND e.Date >= '$fromDate'";
+    }
+    if (!empty($toDate)) {
+        $sql .= " AND e.Date <= '$toDate'";
+    }
+    
+    $result = search($sql);
+    $row = $result->fetch_assoc();
+    return $row['total'];
 }
 
 // Get expense summary for the year
@@ -191,8 +218,11 @@ if(isset($_GET['delete']) && isset($_GET['id'])) {
     exit();
 }
 
+// Pagination variables
+$recordsPerPage = 10;
 $currentTerm = getCurrentTerm();
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
+$currentPage = isset($_GET['page']) ? intval($_GET['page']) : 1;
 $allTerms = getAllTerms();
 
 // Initialize filter parameters
@@ -200,6 +230,17 @@ $category = isset($_GET['category']) ? $_GET['category'] : '';
 $method = isset($_GET['method']) ? $_GET['method'] : '';
 $fromDate = isset($_GET['from_date']) ? $_GET['from_date'] : '';
 $toDate = isset($_GET['to_date']) ? $_GET['to_date'] : '';
+
+// Get total records and calculate total pages
+$totalRecords = getTotalExpenses($selectedYear, $category, $method, $fromDate, $toDate);
+$totalPages = ceil($totalRecords / $recordsPerPage);
+
+// Ensure current page is valid
+if ($currentPage < 1) {
+    $currentPage = 1;
+} elseif ($currentPage > $totalPages && $totalPages > 0) {
+    $currentPage = $totalPages;
+}
 
 $expenseSummary = getExpenseSummary($selectedYear);
 $monthlyStats = getMonthlyExpenseStats($selectedYear);
@@ -213,6 +254,7 @@ $months = [
 ];
 
 $isReportApproved = isReportApproved($selectedYear);
+$scrollToTable = isset($_GET['scrollToTable']) ? true : false;
 ?>
 
 <!DOCTYPE html>
@@ -402,6 +444,52 @@ $isReportApproved = isReportApproved($selectedYear);
             border-radius: 4px;
             font-size: 0.9rem;
         }
+        
+        /* Pagination styles */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        
+        .pagination-info {
+            text-align: center;
+            margin-bottom: 10px;
+            color: #555;
+            font-size: 0.9rem;
+            width: 100%;
+        }
+        
+        .pagination button {
+            padding: 8px 16px;
+            margin: 0 4px;
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .pagination button:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .pagination button.active {
+            background-color: #4a6eb5;
+            color: white;
+            border-color: #4a6eb5;
+        }
+        
+        .pagination button.disabled {
+            color: #aaa;
+            cursor: not-allowed;
+        }
+        
+        .pagination button.disabled:hover {
+            background-color: #f8f8f8;
+        }
+        
         /* Responsive styles for filters */
         @media screen and (max-width: 900px) {
             .filters {
@@ -532,7 +620,7 @@ $isReportApproved = isReportApproved($selectedYear);
                     <i class="fas fa-plus"></i> Add New Expense
                 </a>
             </div>
-            <div class="table-container">
+            <div id = "table-container" class="table-container" style="max-height: 900px;">
                 <table>
                     <thead>
                         <tr>
@@ -548,7 +636,7 @@ $isReportApproved = isReportApproved($selectedYear);
                     </thead>
                     <tbody>
                     <?php 
-                    $expenses = getExpenses($selectedYear, $category, $method, $fromDate, $toDate);
+                    $expenses = getExpenses($selectedYear, $category, $method, $fromDate, $toDate, $currentPage, $recordsPerPage);
                     
                     while($row = $expenses->fetch_assoc()): 
                     ?>
@@ -588,8 +676,63 @@ $isReportApproved = isReportApproved($selectedYear);
                     <?php endwhile; ?>
                     </tbody>
                 </table>
+                
+                <!-- Pagination Controls -->
+                <div class="pagination">
+    <div class="pagination-info">
+        Showing <?php echo ($currentPage-1)*$recordsPerPage+1; ?> to 
+        <?php echo min($currentPage*$recordsPerPage, $totalRecords); ?> of 
+        <?php echo $totalRecords; ?> records
+    </div>
+    
+    <!-- First and Previous buttons -->
+    <button onclick="goToPage(1)" 
+            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+        <i class="fas fa-angle-double-left"></i>
+    </button>
+    <button onclick="goToPage(<?php echo $currentPage-1; ?>)" 
+            <?php echo $currentPage == 1 ? 'class="disabled"' : ''; ?> 
+            <?php echo $currentPage == 1 ? 'disabled' : ''; ?>>
+        <i class="fas fa-angle-left"></i>
+    </button>
+    
+    <!-- Page numbers -->
+    <?php
+    // Calculate range of page numbers to show
+    $startPage = max(1, $currentPage - 2);
+    $endPage = min($totalPages, $currentPage + 2);
+    
+    // Ensure we always show at least 5 pages when possible
+    if ($endPage - $startPage + 1 < 5 && $totalPages >= 5) {
+        if ($startPage == 1) {
+            $endPage = min(5, $totalPages);
+        } elseif ($endPage == $totalPages) {
+            $startPage = max(1, $totalPages - 4);
+        }
+    }
+    
+    for ($i = $startPage; $i <= $endPage; $i++): ?>
+        <button onclick="goToPage(<?php echo $i; ?>)" 
+                class="<?php echo $i == $currentPage ? 'active' : ''; ?>">
+            <?php echo $i; ?>
+        </button>
+    <?php endfor; ?>
+    
+    <!-- Next and Last buttons -->
+    <button onclick="goToPage(<?php echo $currentPage+1; ?>)" 
+            <?php echo $currentPage == $totalPages ? 'class="disabled"' : ''; ?> 
+            <?php echo $currentPage == $totalPages ? 'disabled' : ''; ?>>
+        <i class="fas fa-angle-right"></i>
+    </button>
+    <button onclick="goToPage(<?php echo $totalPages; ?>)" 
+            <?php echo $currentPage == $totalPages ? 'class="disabled"' : ''; ?> 
+            <?php echo $currentPage == $totalPages ? 'disabled' : ''; ?>>
+        <i class="fas fa-angle-double-right"></i>
+    </button>
+</div>
             </div>
-        </div>
+        </div>  
 
         <div id="category-view" style="display: none;">
             <div class="table-container">
@@ -687,6 +830,7 @@ $isReportApproved = isReportApproved($selectedYear);
                 <input type="hidden" id="delete_expense_id" name="id">
                 <input type="hidden" name="delete" value="true">
                 <input type="hidden" name="year" value="<?php echo $selectedYear; ?>">
+                <input type="hidden" name="page" value="<?php echo $currentPage; ?>">
                 <div class="delete-modal-buttons">
                     <button type="button" class="cancel-btn" onclick="closeDeleteModal()">Cancel</button>
                     <button type="submit" class="confirm-delete-btn">Delete</button>
@@ -735,34 +879,48 @@ $isReportApproved = isReportApproved($selectedYear);
             document.getElementById('receiptModal').style.display = 'none';
         }
 
+        // Pagination function
+        function goToPage(page) {
+            // Build the URL with all current filters plus the new page
+            const year = document.getElementById('yearSelect').value;
+            const category = document.getElementById('categoryFilter')?.value || '';
+            const method = document.getElementById('methodFilter')?.value || '';
+            
+            // Add scrollToTable parameter to indicate we should scroll to the table
+            window.location.href = `trackExpenses.php?year=${year}&category=${category}&method=${method}&page=${page}&scrollToTable=true`;
+        }
+
+        // Add scrolling logic to the DOMContentLoaded event
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if we need to scroll to the table
+            const urlParams = new URLSearchParams(window.location.search);
+            const shouldScrollToTable = urlParams.get('scrollToTable') === 'true';
+            
+            if (shouldScrollToTable) {
+                // Get the table container element
+                const tableContainer = document.getElementById('table-container');
+                if (tableContainer) {
+                    // Scroll directly to the table container without animation
+                    const tableTop = tableContainer.getBoundingClientRect().top + window.pageYOffset - 80;
+                    window.scrollTo(0, tableTop);
+                }
+            }
+            
+            // Rest of your initialization code
+            addEventListeners();
+        });
+
         function updateFilters() {
             const year = document.getElementById('yearSelect').value;
             const category = document.getElementById('categoryFilter')?.value || '';
             const method = document.getElementById('methodFilter')?.value || '';
             
-            // Don't redirect, just update via fetch
-            fetch(`trackExpenses.php?year=${year}&category=${category}&method=${method}`)
-                .then(response => response.text())
-                .then(html => {
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, 'text/html');
-                    
-                    // Update stats cards
-                    document.getElementById('stats-section').innerHTML = doc.getElementById('stats-section').innerHTML;
-                    
-                    // Update expense view
-                    document.getElementById('expense-view').innerHTML = doc.getElementById('expense-view').innerHTML;
-                    
-                    // Update category view
-                    document.getElementById('category-view').innerHTML = doc.getElementById('category-view').innerHTML;
-                    
-                    // Update months view
-                    document.getElementById('months-view').innerHTML = doc.getElementById('months-view').innerHTML;
-                    
-                    // Re-add event listeners for the newly loaded content
-                    addEventListeners();
-                })
-                .catch(error => console.error('Error:', error));
+            // Reset to page 1 when changing filters
+            window.location.href = `trackExpenses.php?year=${year}&category=${category}&method=${method}&page=1`;
+        }
+
+        function filterExpenses() {
+            updateFilters();
         }
 
         // Function to reattach event listeners after DOM updates
@@ -790,6 +948,19 @@ $isReportApproved = isReportApproved($selectedYear);
 
         // Add this to the DOMContentLoaded event
         document.addEventListener('DOMContentLoaded', function() {
+            // Check if there's a saved position to scroll to
+            const savedPosition = sessionStorage.getItem('tablePosition');
+            if (savedPosition) {
+                // Clear it immediately to prevent it being used again
+                sessionStorage.removeItem('tablePosition');
+                
+                // Scroll to the saved position
+                window.scrollTo({
+                    top: parseInt(savedPosition),
+                    behavior: 'smooth'
+                });
+            }
+
             addEventListeners();
         });
 
@@ -853,6 +1024,12 @@ $isReportApproved = isReportApproved($selectedYear);
             } else if (noResultsMsg) {
                 noResultsMsg.style.display = 'none';
             }
+            
+            // Hide pagination when searching
+            const pagination = document.querySelector('.pagination');
+            if (pagination) {
+                pagination.style.display = searchTerm ? 'none' : 'flex';
+            }
         }
 
         function clearSearch() {
@@ -860,26 +1037,12 @@ $isReportApproved = isReportApproved($selectedYear);
             searchInput.value = '';
             performSearch();
             searchInput.focus();
-        }
-        
-        function filterExpenses() {
-            const categoryFilter = document.getElementById('categoryFilter').value.toLowerCase();
-            const methodFilter = document.getElementById('methodFilter').value.toLowerCase();
-            const tableRows = document.querySelectorAll('#expense-view tbody tr');
             
-            tableRows.forEach(row => {
-                const category = row.cells[1].textContent.toLowerCase();
-                const method = row.cells[3].textContent.toLowerCase();
-                
-                const categoryMatch = categoryFilter === '' || category.includes(categoryFilter);
-                const methodMatch = methodFilter === '' || method.includes(methodFilter);
-                
-                if (categoryMatch && methodMatch) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
-                }
-            });
+            // Show pagination again
+            const pagination = document.querySelector('.pagination');
+            if (pagination) {
+                pagination.style.display = 'flex';
+            }
         }
 
         function openDeleteModal(id) {
@@ -916,53 +1079,54 @@ $isReportApproved = isReportApproved($selectedYear);
         };
 
         // Function to create and show alerts programmatically
-function showAlert(type, message) {
-    // Store the alert in sessionStorage
-    sessionStorage.setItem('alertType', type);
-    sessionStorage.setItem('alertMessage', message);
-    
-    // Create and display the alert (original code)
-    const alertsContainer = document.querySelector('.alerts-container');
-    
-    // Create alert element
-    const alertDiv = document.createElement('div');
-    alertDiv.className = type === 'success' ? 'alert alert-success' : 
-                        type === 'info' ? 'alert alert-info' : 'alert alert-danger';
-    alertDiv.textContent = message;
-    
-    // Clear previous alerts
-    alertsContainer.innerHTML = '';
-    
-    // Add new alert
-    alertsContainer.appendChild(alertDiv);
-    
-    // Scroll to top to see the alert
-    window.scrollTo(0, 0);
-    
-    // Manually trigger the alert handler for this new alert
-    const closeBtn = document.createElement('span');
-    closeBtn.innerHTML = '&times;';
-    closeBtn.className = 'alert-close';
-    closeBtn.style.float = 'right';
-    closeBtn.style.cursor = 'pointer';
-    closeBtn.style.fontWeight = 'bold';
-    closeBtn.style.fontSize = '20px';
-    closeBtn.style.marginLeft = '15px';
-    
-    closeBtn.addEventListener('click', function() {
-        alertDiv.style.display = 'none';
-    });
-    
-    alertDiv.insertBefore(closeBtn, alertDiv.firstChild);
-    
-    // Auto-hide alerts after 5 seconds
-    setTimeout(function() {
-        alertDiv.style.opacity = '0';
-        setTimeout(function() {
-            alertDiv.style.display = 'none';
-        }, 500);
-    }, 5000);
-}
+        function showAlert(type, message) {
+            // Store the alert in sessionStorage
+            sessionStorage.setItem('alertType', type);
+            sessionStorage.setItem('alertMessage', message);
+            
+            // Create and display the alert (original code)
+            const alertsContainer = document.querySelector('.alerts-container');
+            
+            // Create alert element
+            const alertDiv = document.createElement('div');
+            alertDiv.className = type === 'success' ? 'alert alert-success' : 
+                                type === 'info' ? 'alert alert-info' : 'alert alert-danger';
+            alertDiv.textContent = message;
+            
+            // Clear previous alerts
+            alertsContainer.innerHTML = '';
+            
+            // Add new alert
+            alertsContainer.appendChild(alertDiv);
+            
+            // Scroll to top to see the alert
+            window.scrollTo(0, 0);
+            
+            // Manually trigger the alert handler for this new alert
+            const closeBtn = document.createElement('span');
+            closeBtn.innerHTML = '&times;';
+            closeBtn.className = 'alert-close';
+            closeBtn.style.float = 'right';
+            closeBtn.style.cursor = 'pointer';
+            closeBtn.style.fontWeight = 'bold';
+            closeBtn.style.fontSize = '20px';
+            closeBtn.style.marginLeft = '15px';
+            
+            closeBtn.addEventListener('click', function() {
+                alertDiv.style.display = 'none';
+            });
+            
+            alertDiv.insertBefore(closeBtn, alertDiv.firstChild);
+            
+            // Auto-hide alerts after 5 seconds
+            setTimeout(function() {
+                alertDiv.style.opacity = '0';
+                setTimeout(function() {
+                    alertDiv.style.display = 'none';
+                }, 500);
+            }, 5000);
+        }
+        
         // Check for stored alerts on page load
         document.addEventListener('DOMContentLoaded', function() {
             // Check if there are any stored alerts
