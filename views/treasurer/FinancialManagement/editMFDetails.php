@@ -87,7 +87,7 @@ if(isset($_POST['delete_fee'])) {
         $GLOBALS['db_connection']->begin_transaction();
         
         // Get fee details first
-        $feeQuery = "SELECT f.Member_MemberID, f.Amount, f.Term, f.Type, f.IsPaid FROM MembershipFee f WHERE f.FeeID = ?";
+        $feeQuery = "SELECT f.Member_MemberID, f.Amount, f.Term, f.Type, f.IsPaid, f.Date FROM MembershipFee f WHERE f.FeeID = ?";
         $stmt = prepare($feeQuery);
         $stmt->bind_param("s", $feeId);
         $stmt->execute();
@@ -103,9 +103,21 @@ if(isset($_POST['delete_fee'])) {
         $term = $feeDetails['Term'];
         $type = $feeDetails['Type'];
         $isPaid = $feeDetails['IsPaid'];
+        $feeDate = $feeDetails['Date'];
         
-        // If the fee was paid, create an expense record to balance the accounts
-        if($isPaid == 'Yes') {
+        // Get active treasurer
+        $treasurerQuery = "SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1";
+        $stmt = prepare($treasurerQuery);
+        $stmt->execute();
+        $treasurerResult = $stmt->get_result();
+        $activeTreasurer = $treasurerResult->fetch_assoc()['TreasurerID'];
+        
+        if (!$activeTreasurer) {
+            throw new Exception("No active treasurer found. Please set an active treasurer first.");
+        }
+        
+        // Only create an expense record if the fee was actually paid
+        if ($isPaid === 'Yes') {
             // Function to generate a unique expense ID
             function generateExpenseID($term) {
                 // Get current year if term is not provided
@@ -141,40 +153,75 @@ if(isset($_POST['delete_fee'])) {
                 }
             }
             
-            // Get active treasurer
-            $treasurerQuery = "SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1";
-            $stmt = prepare($treasurerQuery);
-            $stmt->execute();
-            $treasurerResult = $stmt->get_result();
-            $activeTreasurer = $treasurerResult->fetch_assoc()['TreasurerID'];
-            
-            if (!$activeTreasurer) {
-                throw new Exception("No active treasurer found. Please set an active treasurer first.");
-            }
-            
-            // Generate expense ID
+            // Create expense record for the deleted fee
             $expenseID = generateExpenseID($term);
             $currentDate = date('Y-m-d');
+            $description = "Deleted " . ucfirst($type) . " Membership Fee";
             
             // Create an expense record
             $expenseStmt = prepare("
                 INSERT INTO Expenses (
                     ExpenseID, Category, Method, Amount, Date, Term, 
                     Description, Treasurer_TreasurerID
-                ) VALUES (?, 'Adjustment', 'System', ?, ?, ?, 'Deleted Membership Fee', ?)
+                ) VALUES (?, 'Adjustment', 'System', ?, ?, ?, ?, ?)
             ");
             
-            $expenseStmt->bind_param("sdsss", 
+            $expenseStmt->bind_param("sdssss", 
                 $expenseID,
                 $amount,
                 $currentDate,
                 $term,
+                $description,
                 $activeTreasurer
             );
             
             if (!$expenseStmt->execute()) {
-                throw new Exception("Failed to create expense record: " . error);
+                throw new Exception("Failed to create expense record: " . $expenseStmt->error);
             }
+        }
+        
+        // Store fee details as JSON for the changelog
+        $oldValues = json_encode([
+            'FeeID' => $feeId,
+            'Member_MemberID' => $memberID,
+            'Amount' => $amount,
+            'Term' => $term,
+            'Type' => $type,
+            'IsPaid' => $isPaid,
+            'Date' => $feeDate
+        ]);
+        
+        // Add to ChangeLog
+        $logQuery = "INSERT INTO ChangeLog (
+                RecordType, 
+                RecordID, 
+                MemberID,
+                TreasurerID, 
+                OldValues, 
+                NewValues, 
+                ChangeDetails,
+                Status
+            ) VALUES (
+                'MembershipFee',
+                ?,
+                ?,
+                ?,
+                ?,
+                '{}',
+                'Deleted membership fee record',
+                'Not Read'
+            )";
+            
+        $stmt = prepare($logQuery);
+        $stmt->bind_param("ssss", 
+            $feeId,
+            $memberID,
+            $activeTreasurer,
+            $oldValues
+        );
+        
+        if (!$stmt->execute()) {
+            throw new Exception("Failed to create change log entry: " . $stmt->error);
         }
         
         // Finally, delete the fee record

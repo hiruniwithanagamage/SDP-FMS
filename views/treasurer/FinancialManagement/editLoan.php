@@ -172,6 +172,40 @@ function getActiveTreasurer() {
     return $row['TreasurerID'];
 }
 
+function logChange($recordType, $recordID, $memberID, $oldValues, $newValues, $changeDetails) {
+    $conn = getConnection();
+    
+    // Convert arrays to JSON strings for storage
+    $oldValuesJson = json_encode($oldValues);
+    $newValuesJson = json_encode($newValues);
+    
+    // Get the active treasurer ID (already defined in the script)
+    $treasurerID = getActiveTreasurer();
+    
+    // Prepare and execute the insertion statement
+    $stmt = $conn->prepare("
+        INSERT INTO ChangeLog (
+            RecordType, RecordID, MemberID, TreasurerID,
+            OldValues, NewValues, ChangeDetails, Status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Not Read')
+    ");
+    
+    $stmt->bind_param("sssssss", 
+        $recordType,
+        $recordID,
+        $memberID,
+        $treasurerID,
+        $oldValuesJson,
+        $newValuesJson,
+        $changeDetails
+    );
+    
+    $result = $stmt->execute();
+    $stmt->close();
+    
+    return $result;
+}
+
 // Get loan details
 $loan = getLoanDetails($loanID);
 if (!$loan) {
@@ -211,6 +245,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         
         // Start transaction
         $conn->begin_transaction();
+
+        $oldValues = [
+            'amount' => $loan['Amount'],
+            'reason' => $loan['Reason'],
+            'issued_date' => $loan['Issued_Date'],
+            'due_date' => $loan['Due_Date'],
+            'status' => $loan['Status'],
+            'remain_loan' => $loan['Remain_Loan'],
+            'remain_interest' => $loan['Remain_Interest']
+        ];
         
         // VALIDATION 1: Member cannot be changed
         if ($memberID !== $loan['Member_MemberID']) {
@@ -333,7 +377,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     INSERT INTO Payment (
                         PaymentID, Payment_Type, Method, Amount, Date, Term,
                         Member_MemberID, status, Notes
-                    ) VALUES (?, 'Loan Return', 'system', ?, ?, ?, ?, 'cash', ?)
+                    ) VALUES (?, 'Loan Return', 'cash', ?, ?, ?, ?, 'edited', ?)
                 ");
                 
                 $paymentStmt->bind_param("sdssss", 
@@ -430,7 +474,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             INSERT INTO Payment (
                                 PaymentID, Payment_Type, Method, Amount, Date, Term,
                                 Member_MemberID, status, Notes
-                            ) VALUES (?, 'Loan Adjustment', 'system', ?, ?, ?, ?, 'cash', ?)
+                            ) VALUES (?, 'Loan Adjustment', 'cash', ?, ?, ?, ?, 'edited', ?)
                         ");
                         
                         $paymentStmt->bind_param("sdssss", 
@@ -539,7 +583,58 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         );
         
         $stmt->execute();
+
+        $newValues = [
+            'amount' => $amount,
+            'reason' => $reason,
+            'issued_date' => $issuedDate,
+            'due_date' => $dueDate,
+            'status' => $status,
+            'remain_loan' => $remainLoan,
+            'remain_interest' => $remainInterest
+        ];
         
+        // Build a user-friendly change description
+        $changeDetails = "Loan #$loanID updated: ";
+        $changes = [];
+
+        if ($oldValues['amount'] != $newValues['amount']) {
+            $changes[] = "Amount changed from Rs. " . number_format($oldValues['amount'], 2) . " to Rs. " . number_format($newValues['amount'], 2);
+        }
+
+        if ($oldValues['reason'] != $newValues['reason']) {
+            $changes[] = "Reason updated";
+        }
+
+        if ($oldValues['issued_date'] != $newValues['issued_date']) {
+            $changes[] = "Issue date changed from " . date('Y-m-d', strtotime($oldValues['issued_date'])) . " to " . $newValues['issued_date'];
+        }
+
+        if ($oldValues['status'] != $newValues['status']) {
+            $changes[] = "Status changed from " . ucfirst($oldValues['status']) . " to " . ucfirst($newValues['status']);
+        }
+
+        if (empty($changes)) {
+            $changeDetails .= "Minor updates";
+        } else {
+            $changeDetails .= implode(", ", $changes);
+        }
+
+        // Log the change
+        $logResult = logChange(
+            'Loan', 
+            $loanID, 
+            $memberID, 
+            $oldValues, 
+            $newValues, 
+            $changeDetails
+        );
+
+        // If logging fails, you might want to handle it
+        if (!$logResult) {
+            error_log("Failed to log changes for Loan #$loanID");
+        }
+
         // Commit transaction
         $conn->commit();
         

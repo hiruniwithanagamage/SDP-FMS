@@ -152,6 +152,21 @@ if(isset($_POST['delete_welfare'])) {
             $amount = $welfareData['Amount'];
             $expenseId = $welfareData['Expense_ExpenseID'];
             
+            // Get the current treasurer ID (assuming it's stored in session)
+            $treasurerId = $_SESSION['treasurer_id']; // Adjust based on your session structure
+            
+            // Log the deletion in ChangeLog
+            $recordType = "DeathWelfare";
+            $oldValues = json_encode($welfareData);
+            $newValues = "{}"; // Empty as record is deleted
+            $changeDetails = "Death welfare claim #{$welfareId} deleted. Status was: {$status}";
+            
+            $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, MemberID, TreasurerID, OldValues, NewValues, ChangeDetails, Status) 
+                         VALUES (?, ?, ?, ?, ?, ?, ?, 'Not Read')";
+            $stmt = $conn->prepare($logQuery);
+            $stmt->bind_param("sssssss", $recordType, $welfareId, $memberId, $treasurerId, $oldValues, $newValues, $changeDetails);
+            $stmt->execute();
+            
             // Handle based on status
             if($status == 'pending' || $status == 'rejected') {
                 // For pending or rejected claims, simply delete the record
@@ -180,7 +195,7 @@ if(isset($_POST['delete_welfare'])) {
                 $notes = "Refund for deleted welfare claim #$welfareId";
                 
                 $addPaymentQuery = "INSERT INTO Payment (PaymentID, Payment_Type, Method, Amount, Date, Term, Notes, Member_MemberID, status) 
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cash')";
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'edited')";
                 $stmt = $conn->prepare($addPaymentQuery);
                 $stmt->bind_param("sssdsiss", $paymentId, $paymentType, $method, $amount, $date, $currentTerm, $notes, $memberId);
                 $stmt->execute();

@@ -171,6 +171,60 @@ function getActiveTreasurer() {
     return $row['TreasurerID'];
 }
 
+function logMembershipFeeChange($feeID, $oldValues, $newValues, $details) {
+    $conn = getConnection();
+    
+    // Get the active treasurer ID (already defined in your code)
+    $treasurerID = getActiveTreasurer();
+    
+    // Get the member ID from the new values
+    $memberID = $newValues['Member_MemberID'];
+    
+    // Convert arrays to JSON strings for storage
+    $oldValuesJson = json_encode($oldValues);
+    $newValuesJson = json_encode($newValues);
+    
+    // Insert into ChangeLog table
+    $stmt = $conn->prepare("
+        INSERT INTO ChangeLog (
+            RecordType, 
+            RecordID, 
+            TreasurerID, 
+            MemberID,
+            OldValues, 
+            NewValues, 
+            ChangeDetails,
+            Status
+        ) VALUES (
+            'MembershipFee', 
+            ?, 
+            ?, 
+            ?,
+            ?, 
+            ?, 
+            ?,
+            'Not Read'
+        )
+    ");
+    
+    $stmt->bind_param("ssssss", 
+        $feeID, 
+        $treasurerID, 
+        $memberID,
+        $oldValuesJson, 
+        $newValuesJson, 
+        $details
+    );
+    
+    $result = $stmt->execute();
+    
+    if (!$result) {
+        error_log("Error creating change log: " . $conn->error);
+    }
+    
+    return $result;
+}
+
 // Get fee details, members list, and settings
 $fee = getMembershipFeeDetails($feeID);
 if (!$fee) {
@@ -243,6 +297,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     number_format($currentFeeSettings['registration_fee'], 2) . ")");
             }
         }
+
+        // Store old values before updating
+        $oldValues = [
+            'Member_MemberID' => $fee['Member_MemberID'],
+            'Amount' => floatval($fee['Amount']),
+            'Date' => $fee['Date'],
+            'Term' => intval($fee['Term']),
+            'Type' => $fee['Type'],
+            'IsPaid' => $fee['IsPaid']
+        ];
         
         // Prepare the base update statement
         $stmt = $conn->prepare("
@@ -270,6 +334,37 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             throw new Exception("Failed to update membership fee: " . $conn->error);
         }
         
+        // Store new values after updating
+        $newValues = [
+            'Member_MemberID' => $memberID,
+            'Amount' => $amount,
+            'Date' => $date,
+            'Term' => $term,
+            'Type' => $type,
+            'IsPaid' => $isPaid
+        ];
+
+        // Add specifics to the change details
+        if ($oldValues['Member_MemberID'] != $newValues['Member_MemberID']) {
+            $changeDetails .= "; Member changed from {$oldValues['Member_MemberID']} to {$newValues['Member_MemberID']}";
+        }
+        
+        if ($oldValues['Amount'] != $newValues['Amount']) {
+            $changeDetails .= "; Amount changed from Rs.{$oldValues['Amount']} to Rs.{$newValues['Amount']}";
+        }
+        
+        if ($oldValues['Date'] != $newValues['Date']) {
+            $changeDetails .= "; Date changed from {$oldValues['Date']} to {$newValues['Date']}";
+        }
+        
+        if ($oldValues['Term'] != $newValues['Term']) {
+            $changeDetails .= "; Term changed from {$oldValues['Term']} to {$newValues['Term']}";
+        }
+        
+        if ($oldValues['IsPaid'] != $newValues['IsPaid']) {
+            $changeDetails .= "; Payment status changed from '{$oldValues['IsPaid']}' to '{$newValues['IsPaid']}'";
+        }
+
         // Handle amount changes for registration fees
         if ($type == 'registration' && $amount != $oldAmount && $isPaid == 'Yes') {
             if ($amount < $oldAmount) {
@@ -416,6 +511,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     throw new Exception("Failed to update payment relationships: " . $conn->error);
                 }
             }
+        }
+
+        // Log the change to the ChangeLog table
+        if (!logMembershipFeeChange($feeID, $oldValues, $newValues, $changeDetails)) {
+            throw new Exception("Failed to log the change");
         }
         
         // Commit transaction

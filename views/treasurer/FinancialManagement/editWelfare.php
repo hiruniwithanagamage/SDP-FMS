@@ -250,6 +250,36 @@ function getActiveTreasurerID() {
     return $row ? $row['TreasurerID'] : null;
 }
 
+// Function to add entry to change log table
+function addToChangeLog($recordType, $recordID, $memberID, $treasurerID, $oldValues, $newValues, $changeDetails) {
+    $conn = getConnection();
+    
+    // Convert array values to JSON strings
+    $oldValuesJSON = json_encode($oldValues);
+    $newValuesJSON = json_encode($newValues);
+    
+    $stmt = $conn->prepare("
+        INSERT INTO ChangeLog (
+            RecordType, RecordID, MemberID, TreasurerID, 
+            OldValues, NewValues, ChangeDetails, Status
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, 'Not Read'
+        )
+    ");
+    
+    $stmt->bind_param("sssssss", 
+        $recordType,
+        $recordID,
+        $memberID,
+        $treasurerID,
+        $oldValuesJSON,
+        $newValuesJSON,
+        $changeDetails
+    );
+    
+    return $stmt->execute();
+}
+
 $treasurerID = getActiveTreasurerID();
 
 // Process form submission
@@ -321,6 +351,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     throw new Exception("Failed to create payment record for refund");
                 }
             }
+
+            // Prepare the changelog entry
+            $oldValues = [
+                'member_id' => $welfare['Member_MemberID'],
+                'date' => $welfare['Date'],
+                'relationship' => $welfare['Relationship'],
+                'status' => $welfare['Status'],
+                'amount' => $welfare['Amount']
+            ];
             
             // Update welfare record
             $stmt = $conn->prepare("
@@ -347,6 +386,31 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             );
             
             $stmt->execute();
+
+            $newValues = [
+                'member_id' => $memberID,
+                'date' => $date,
+                'relationship' => $relationship,
+                'status' => $newStatus,
+                'amount' => $amount
+            ];
+
+            // Determine what changed
+            $changes = [];
+            if ($oldValues['date'] != $newValues['date']) {
+                $changes[] = "Date changed from " . date('Y-m-d', strtotime($oldValues['date'])) . " to " . $newValues['date'];
+            }
+            if ($oldValues['relationship'] != $newValues['relationship']) {
+                $changes[] = "Relationship changed from " . ucfirst($oldValues['relationship']) . " to " . ucfirst($newValues['relationship']);
+            }
+            if ($oldValues['status'] != $newValues['status']) {
+                $changes[] = "Status changed from " . ucfirst($oldValues['status']) . " to " . ucfirst($newValues['status']);
+            }
+
+            $changeDetails = "Death welfare claim #$welfareID updated: " . implode(", ", $changes);
+
+            // Add to change log
+            addToChangeLog('DeathWelfare', $welfareID, $memberID, $treasurerID, $oldValues, $newValues, $changeDetails);
             
             // Commit transaction
             $conn->commit();

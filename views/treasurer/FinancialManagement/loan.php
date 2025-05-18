@@ -108,6 +108,15 @@ if(isset($_POST['delete_payment'])) {
         $memberID = $loanData['Member_MemberID'];
         $loanAmount = $loanData['Amount'];
         
+        // Get treasurer ID for changelog
+        $treasurerQuery = "SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1";
+        $treasurerResult = search($treasurerQuery);
+        $treasurerData = $treasurerResult->fetch_assoc();
+        $treasurerId = $treasurerData['TreasurerID'] ?? 'UNKNOWN';
+        
+        // Store old values for changelog
+        $oldValues = json_encode($loanData);
+        
         // Case 1: Approved loan with payments - cannot delete
         if($loanStatus == 'approved' && $hasPayments) {
             $_SESSION['error_message'] = "Cannot delete loan #$loanId as it has already been approved and has payments.";
@@ -138,6 +147,16 @@ if(isset($_POST['delete_payment'])) {
             $stmt->bind_param("s", $loanId);
             $stmt->execute();
             
+            // Add to change log - Loan converted and deleted
+            $changeDetails = "Loan #$loanId was converted to a cash payment and deleted";
+            $newValues = json_encode(['payment_id' => $paymentID, 'payment_type' => 'loan_conversion', 'amount' => $loanAmount]);
+            
+            $insertLogQuery = "INSERT INTO ChangeLog (RecordType, RecordID, MemberID, TreasurerID, OldValues, NewValues, ChangeDetails, Status) 
+                              VALUES ('Loan', ?, ?, ?, ?, ?, ?, 'Not Read')";
+            $stmt = $conn->prepare($insertLogQuery);
+            $stmt->bind_param("ssssss", $loanId, $memberID, $treasurerId, $oldValues, $newValues, $changeDetails);
+            $stmt->execute();
+            
             $_SESSION['success_message'] = "Loan #$loanId was converted to a cash payment and deleted successfully.";
         }
         // Case 3: Not approved (pending/rejected) - delete normally
@@ -146,6 +165,16 @@ if(isset($_POST['delete_payment'])) {
             $deleteGuarantorsQuery = "DELETE FROM Guarantor WHERE Loan_LoanID = ?";
             $stmt = $conn->prepare($deleteGuarantorsQuery);
             $stmt->bind_param("s", $loanId);
+            $stmt->execute();
+            
+            // Add to change log - Loan deleted
+            $changeDetails = "Loan #$loanId (" . ($loanStatus == 'pending' ? 'pending' : 'rejected') . ") was deleted";
+            $newValues = json_encode(['status' => 'deleted']);
+            
+            $insertLogQuery = "INSERT INTO ChangeLog (RecordType, RecordID, MemberID, TreasurerID, OldValues, NewValues, ChangeDetails, Status) 
+                              VALUES ('Loan', ?, ?, ?, ?, ?, ?, 'Not Read')";
+            $stmt = $conn->prepare($insertLogQuery);
+            $stmt->bind_param("ssssss", $loanId, $memberID, $treasurerId, $oldValues, $newValues, $changeDetails);
             $stmt->execute();
             
             // Delete the loan record

@@ -108,7 +108,7 @@ if(isset($_POST['delete_fine'])) {
             $treasurerQuery = "SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1";
             $treasurerResult = search($treasurerQuery);
             $treasurerRow = $treasurerResult->fetch_assoc();
-            $treasurerID = $treasurerRow['TreasurerID'];
+            $treasurerID = $treasurerRow['TreasurerID'] ?? 'Unknown';
             
             // Generate a new expense ID
             $expenseID = generateExpenseID($term = null);
@@ -167,18 +167,18 @@ if(isset($_POST['delete_fine'])) {
         $stmt->bind_param("s", $fineId);
         $stmt->execute();
         
-        // Add to change log
-        $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, UserID, TreasurerID, OldValues, NewValues, 
+        // Add to change log - NOTE: Using MemberID instead of UserID
+        $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, MemberID, TreasurerID, OldValues, NewValues, 
                     ChangeDetails) VALUES (?, ?, ?, ?, ?, ?, ?)";
         $recordType = "Fine";
-        $userId = $_SESSION['user_id'] ?? 'Unknown';
+        $memberIdForLog = $_SESSION['member_id'] ?? $memberID; // Use the fine's member ID if session member_id not available
         $treasurerId = $treasurerID ?? 'Unknown';
         $oldValues = json_encode($fineData);
         $newValues = "{}";
         $changeDetails = "Deleted fine record #$fineId";
         
         $stmt = $conn->prepare($logQuery);
-        $stmt->bind_param("sssssss", $recordType, $fineId, $userId, $treasurerId, $oldValues, $newValues, $changeDetails);
+        $stmt->bind_param("sssssss", $recordType, $fineId, $memberIdForLog, $treasurerId, $oldValues, $newValues, $changeDetails);
         $stmt->execute();
         
         // Commit transaction
@@ -186,7 +186,9 @@ if(isset($_POST['delete_fine'])) {
         
     } catch(Exception $e) {
         // Rollback on error
-        $conn->rollback();
+        if(isset($conn) && $conn->ping()) {
+            $conn->rollback();
+        }
         $_SESSION['error_message'] = "Error deleting fine: " . $e->getMessage();
     }
     

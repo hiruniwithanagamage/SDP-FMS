@@ -152,6 +152,33 @@ function getActiveTreasurer() {
     return $row['TreasurerID'];
 }
 
+function logChange($recordType, $recordID, $memberID, $treasurerID, $oldValues, $newValues, $changeDetails) {
+    $conn = getConnection();
+    
+    // Convert arrays to JSON for storage
+    $oldValuesJSON = json_encode($oldValues);
+    $newValuesJSON = json_encode($newValues);
+    
+    $stmt = $conn->prepare("
+        INSERT INTO ChangeLog (
+            RecordType, RecordID, MemberID, TreasurerID, 
+            OldValues, NewValues, ChangeDetails, Status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Not Read')
+    ");
+    
+    $stmt->bind_param("sssssss", 
+        $recordType,
+        $recordID,
+        $memberID,
+        $treasurerID,
+        $oldValuesJSON,
+        $newValuesJSON,
+        $changeDetails
+    );
+    
+    return $stmt->execute();
+}
+
 // Get fine details
 $fine = getFineDetails($fineID);
 if (!$fine) {
@@ -190,6 +217,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         
         // Start transaction
         $conn->begin_transaction();
+
+        // Store old values for change log
+        $oldValues = [
+            'Member_MemberID' => $fine['Member_MemberID'],
+            'Amount' => $fine['Amount'],
+            'Date' => $fine['Date'],
+            'Description' => $fine['Description'],
+            'IsPaid' => $fine['IsPaid'],
+            'Payment_PaymentID' => $fine['Payment_PaymentID']
+        ];
         
         // VALIDATION 1: If fine is paid, member cannot be changed
         if ($fine['IsPaid'] === 'Yes' && $memberID !== $fine['Member_MemberID']) {
@@ -240,7 +277,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     INSERT INTO Payment (
                         PaymentID, Payment_Type, Method, Amount, Date, Term,
                         Member_MemberID, status, Notes
-                    ) VALUES (?, 'Fine', 'system', ?, ?, ?, ?, 'transfer', ?)
+                    ) VALUES (?, 'Fine', 'cash', ?, ?, ?, ?, 'treasurer', ?)
                 ");
                 
                 $notes = "Payment for Fine #$fineID - " . ucfirst($description) . " Fine";
@@ -390,6 +427,69 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
         // If it's popup mode, we'll continue rendering the page with a success message
         // and add JavaScript to refresh the parent later
+
+        $updatedFine = getFineDetails($fineID); // Re-fetch to get the updated data
+        $newValues = [
+            'Member_MemberID' => $updatedFine['Member_MemberID'],
+            'Amount' => $updatedFine['Amount'],
+            'Date' => $updatedFine['Date'],
+            'Description' => $updatedFine['Description'],
+            'IsPaid' => $updatedFine['IsPaid'],
+            'Payment_PaymentID' => $updatedFine['Payment_PaymentID']
+        ];
+        
+        // Generate change details text
+        $changeDetails = "Fine #$fineID updated: ";
+        $changes = [];
+        
+        if ($oldValues['Member_MemberID'] !== $newValues['Member_MemberID']) {
+            $changes[] = "Member changed from {$oldValues['Member_MemberID']} to {$newValues['Member_MemberID']}";
+        }
+        if ($oldValues['Amount'] !== $newValues['Amount']) {
+            $changes[] = "Amount changed from {$oldValues['Amount']} to {$newValues['Amount']}";
+        }
+        if ($oldValues['Date'] !== $newValues['Date']) {
+            $changes[] = "Date changed from {$oldValues['Date']} to {$newValues['Date']}";
+        }
+        if ($oldValues['Description'] !== $newValues['Description']) {
+            $changes[] = "Fine type changed from {$oldValues['Description']} to {$newValues['Description']}";
+        }
+        if ($oldValues['IsPaid'] !== $newValues['IsPaid']) {
+            $status = ($newValues['IsPaid'] === 'Yes') ? 'Paid' : 'Unpaid';
+            $changes[] = "Status changed to $status";
+        }
+        if (
+            ($oldValues['Payment_PaymentID'] === null && $newValues['Payment_PaymentID'] !== null) || 
+            ($oldValues['Payment_PaymentID'] !== null && $newValues['Payment_PaymentID'] === null) ||
+            ($oldValues['Payment_PaymentID'] !== $newValues['Payment_PaymentID'])
+        ) {
+            $changes[] = "Payment record updated";
+        }
+        
+        $changeDetails .= implode(", ", $changes);
+        
+        // Log the changes
+        logChange(
+            'Fine', 
+            $fineID, 
+            $memberID, 
+            $activeTreasurer, 
+            $oldValues, 
+            $newValues, 
+            $changeDetails
+        );
+        
+        // Commit transaction - this should be after the logging
+        $conn->commit();
+        
+        // Set success message
+        $_SESSION['success_message'] = "Fine #$fineID successfully updated";
+        
+        // Handle redirection based on popup mode after ALL database operations are complete
+        if (!$isPopup) {
+            header("Location: fine.php");
+            exit();
+        }
         
     } catch (Exception $e) {
         // Rollback on error
