@@ -71,8 +71,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["change_password"])) {
         $errorMessage = "Current password is incorrect.";
     } else if ($newPassword != $confirmPassword) {
         $errorMessage = "New passwords do not match.";
-    } else if (strlen($newPassword) < 6) {
-        $errorMessage = "Password must be at least 6 characters long.";
+    } else if (strlen($newPassword) < 5) {
+        $errorMessage = "Password must be at least 5 characters long.";
+    } else if (strlen($newPassword) > 12) {
+        $errorMessage = "Password must not exceed 12 characters";
     } else {
         // Hash the new password
         $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
@@ -390,7 +392,7 @@ $profileImage = "../../assets/images/profile_photo.jpg"; // default image
                             <div class="mb-3">
                                 <label for="new_password" class="form-label">New Password</label>
                                 <input type="password" class="form-control" id="new_password" name="new_password" minlength="6" required>
-                                <div class="form-text">Password must be at least 6 characters long</div>
+                                <div class="form-text">Password must be 5-12 characters long</div>
                             </div>
                             
                             <div class="mb-3">

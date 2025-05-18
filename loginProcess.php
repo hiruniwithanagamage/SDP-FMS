@@ -170,6 +170,98 @@ function logLoginAttempt($userId, $username, $success, $failureReason = null) {
     $stmt->execute();
 }
 
+// Function to check if a treasurer is eligible to login
+function isTreasurerEligible($treasurerId) {
+    // First get treasurer info
+    $query = "SELECT t.isActive, t.Term FROM Treasurer t WHERE t.TreasurerID = ?";
+    $stmt = prepare($query);
+    $stmt->bind_param("s", $treasurerId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows == 0) {
+        return false; // Treasurer not found
+    }
+    
+    $treasurer = $result->fetch_assoc();
+    
+    // Get current active term from Static table
+    $termQuery = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $termResult = search($termQuery);
+    
+    if ($termResult->num_rows == 0) {
+        return false; // No active term found
+    }
+    
+    $activeTerm = $termResult->fetch_assoc()['year'];
+    
+    // Case 1: Treasurer is active AND their term matches the current active term
+    if ($treasurer['isActive'] == 1 && $treasurer['Term'] == $activeTerm) {
+        return true;
+    }
+    
+    // Case 2: Check if there's an active treasurer for the current term
+    $activeQuery = "SELECT COUNT(*) as count FROM Treasurer WHERE Term = ? AND isActive = 1";
+    $activeStmt = prepare($activeQuery);
+    $activeStmt->bind_param("i", $activeTerm);
+    $activeStmt->execute();
+    $activeResult = $activeStmt->get_result();
+    $activeCount = $activeResult->fetch_assoc()['count'];
+    
+    // If no active treasurer for current term and this treasurer is from previous term
+    if ($activeCount == 0 && $treasurer['Term'] < $activeTerm) {
+        return true; // Previous treasurer can log in
+    }
+    
+    return false; // In all other cases, treasurer cannot log in
+}
+
+// Function to check if an auditor is eligible to login
+function isAuditorEligible($auditorId) {
+    // Get auditor info
+    $query = "SELECT a.isActive, a.Term FROM Auditor a WHERE a.AuditorID = ?";
+    $stmt = prepare($query);
+    $stmt->bind_param("s", $auditorId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows == 0) {
+        return false; // Auditor not found
+    }
+    
+    $auditor = $result->fetch_assoc();
+    
+    // Get current active term from Static table
+    $termQuery = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $termResult = search($termQuery);
+    
+    if ($termResult->num_rows == 0) {
+        return false; // No active term found
+    }
+    
+    $activeTerm = $termResult->fetch_assoc()['year'];
+    
+    // Case 1: Auditor is active AND their term matches the current active term
+    if ($auditor['isActive'] == 1 && $auditor['Term'] == $activeTerm) {
+        return true;
+    }
+    
+    // Case 2: Check if there's an active auditor for the current term
+    $activeQuery = "SELECT COUNT(*) as count FROM Auditor WHERE Term = ? AND isActive = 1";
+    $activeStmt = prepare($activeQuery);
+    $activeStmt->bind_param("i", $activeTerm);
+    $activeStmt->execute();
+    $activeResult = $activeStmt->get_result();
+    $activeCount = $activeResult->fetch_assoc()['count'];
+    
+    // If no active auditor for current term and this auditor is from previous term
+    if ($activeCount == 0 && $auditor['Term'] < $activeTerm) {
+        return true; // Previous auditor can log in
+    }
+    
+    return false; // In all other cases, auditor cannot log in
+}
+
 try {
     // Get inputs
     $Username = $_POST["u"] ?? '';
@@ -226,6 +318,17 @@ try {
         }
         
         if ($passwordCorrect) {
+            // Check role-specific eligibility
+            if ($d["role"] == "treasurer") {
+                if (!isTreasurerEligible($d["Treasurer_TreasurerID"])) {
+                    throw new Exception("Your treasurer account is not active for the current term.");
+                }
+            } elseif ($d["role"] == "auditor") {
+                if (!isAuditorEligible($d["Auditor_AuditorID"])) {
+                    throw new Exception("Your auditor account is not active for the current term.");
+                }
+            }
+            
             // Reset login attempts on successful login
             resetLoginAttempts($d['UserId']);
             

@@ -3,6 +3,12 @@ session_start();
 
 date_default_timezone_set('Asia/Colombo');
 
+// Clear password reset flag when directly accessing the page
+if (!isset($_GET['reset']) && basename($_SERVER['PHP_SELF']) == 'reset_password.php') {
+    unset($_SESSION['password_reset']);
+}
+
+
 // Clear all reset session variables if "start over" is requested
 if (isset($_GET['reset']) && $_GET['reset'] == 'true') {
     unset($_SESSION['reset_requested']);
@@ -215,7 +221,7 @@ function initiatePasswordReset($username) {
                 // Create SMS message with token
                 $smsMessage = "Password Reset Request\n";
                 $smsMessage .= "Username: " . $user['Username'] . "\n";
-                $smsMessage .= "Reset Code: " . substr($token, 0, 8) . "\n";
+                $smsMessage .= "Reset Code: " . substr($token, 0, 4) . "\n";
                 $smsMessage .= "Valid for: 1 hour\n";
                 $smsMessage .= "From: Society Management System";
                 
@@ -241,7 +247,7 @@ function initiatePasswordReset($username) {
 function resetPassword($token, $newPassword) {
     // Validate token
     $query = "SELECT UserId, reset_expires FROM User WHERE reset_token = ? OR reset_token LIKE ?";
-    $tokenPattern = substr($token, 0, 8) . '%';
+    $tokenPattern = substr($token, 0, 4) . '%';
     $stmt = prepare($query);
     $stmt->bind_param("ss", $token, $tokenPattern);
     $stmt->execute();
@@ -298,12 +304,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Process verification code
     else if (isset($_POST['verify-submit'])) {
         $code = '';
-        for ($i = 0; $i < 8; $i++) {
+        for ($i = 0; $i < 4; $i++) {
             $code .= isset($_POST["code-$i"]) ? $_POST["code-$i"] : '';
         }
         
-        if (strlen($code) !== 8) {
-            $verify_error = "Please enter all 8 digits of the verification code";
+        if (strlen($code) !== 4) {
+            $verify_error = "Please enter all 4 digits of the verification code";
         } else {
             // Find the token in the database that starts with this code
             $query = "SELECT reset_token FROM User WHERE reset_token LIKE ? AND reset_expires > NOW()";
@@ -333,7 +339,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $password_error = "Passwords do not match";
         } else if (strlen($password) < 5) {
             $password_error = "Password must be at least 5 characters long";
-        } else if (isset($_SESSION['reset_token'])) {
+        } else if (strlen($password) > 12) {
+            $password_error = "Password must not exceed 12 characters";
+        }else if (isset($_SESSION['reset_token'])) {
             $result = resetPassword($_SESSION['reset_token'], $password);
             if ($result['status'] === 'success') {
                 $_SESSION['password_reset'] = true;
@@ -343,9 +351,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 unset($_SESSION['reset_token']);
                 unset($_SESSION['code_verified']);
                 unset($_SESSION['reset_requested']);
+                unset($_SESSION['password_reset']);
                 
                 // Redirect to login after a delay
-                header("Refresh: 2; URL=index.php");
+                // header("Refresh: 2; URL=index.php");
+                // Redirect to the same page without parameters
+                header("Location: " . strtok($_SERVER["REQUEST_URI"], '?'));
             } else {
                 $password_error = $result['message'];
             }
@@ -527,6 +538,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <i class="fas fa-eye"></i>
                         </span>
                     </div>
+                    <small>Password must be 5-8 characters long</small>
                 </div>
                 <button type="submit" name="password-submit">Reset Password</button>
             </form>
@@ -545,7 +557,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="form-group">
                     <label>Verification Code</label>
                     <div class="token-form">
-                        <?php for ($i = 0; $i < 8; $i++): ?>
+                        <?php for ($i = 0; $i < 4; $i++): ?>
                             <input type="text" class="token-input" maxlength="1" name="code-<?= $i ?>" 
                                    data-index="<?= $i ?>" onkeyup="moveToNext(this)" required>
                         <?php endfor; ?>
@@ -577,12 +589,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <script>
         function moveToNext(input) {
             const index = parseInt(input.getAttribute('data-index'));
-            const maxIndex = 7; // 8 digits - 1 (zero-indexed)
+            const maxIndex = 3; // 4 digits - 1 (zero-indexed)
             
             const evt = window.event || event; // Ensure event is defined
             
             // If backspace is pressed, move to previous input
-            if (evt.keyCode === 8 && index > 0) {
+            if (evt.keyCode === 4 && index > 0) {
                 const prevInput = document.querySelector(`.token-input[data-index="${index - 1}"]`);
                 prevInput.focus();
                 return;
