@@ -69,13 +69,37 @@ $query = "SELECT dw.*, m.Name as MemberName, m.MemberID
           ORDER BY dw.Date DESC";
 $result = search($query);
 
-// Replace the existing approval handling code with this
+// When a death welfare application status is updated, we need to log the change to the ChangeLog table
 if(isset($_POST['update_status'])) {
     $welfareId = $_POST['welfare_id'];
     $status = $_POST['status'];
     
     try {
-        // Start by getting welfare amount if it's being approved
+        // Get the member ID for the welfare application
+        $memberQuery = "SELECT dw.*, m.MemberID FROM DeathWelfare dw 
+                        JOIN Member m ON dw.Member_MemberID = m.MemberID 
+                        WHERE dw.WelfareID = '$welfareId'";
+        $memberResult = search($memberQuery);
+        $memberData = $memberResult->fetch_assoc();
+        
+        if(!$memberData) {
+            throw new Exception("Member data not found for this welfare application");
+        }
+        
+        $memberId = $memberData['MemberID'];
+        
+        // Get treasurer ID for logging
+        $treasurerQuery = "SELECT Treasurer_TreasurerID FROM User WHERE UserId = '{$_SESSION['user_id']}'";
+        $treasurerResult = search($treasurerQuery);
+        $treasurerData = $treasurerResult->fetch_assoc();
+        
+        if (!$treasurerData || !$treasurerData['Treasurer_TreasurerID']) {
+            throw new Exception("Invalid Treasurer ID");
+        }
+        
+        $treasurerId = $treasurerData['Treasurer_TreasurerID'];
+        
+        // If it's being approved
         if($status === 'approved') {
             $welfareQuery = "SELECT Amount FROM DeathWelfare WHERE WelfareID = '$welfareId'";
             $welfareResult = search($welfareQuery);
@@ -89,6 +113,15 @@ if(isset($_POST['update_status'])) {
                 $updateQuery = "UPDATE DeathWelfare SET Status = '$status' WHERE WelfareID = '$welfareId'";
                 iud($updateQuery);
                 
+                // Log the change to ChangeLog table
+                $oldValues = json_encode(['Status' => 'pending']);
+                $newValues = json_encode(['Status' => 'approved', 'Expense_ExpenseID' => $expenseId]);
+                $changeDetails = "Death welfare application (ID: $welfareId) approved and expense (ID: $expenseId) created";
+                
+                $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, MemberID, TreasurerID, OldValues, NewValues, ChangeDetails, Status) 
+                            VALUES ('DeathWelfare', '$welfareId', '$memberId', '$treasurerId', '$oldValues', '$newValues', '$changeDetails', 'Not Read')";
+                iud($logQuery);
+                
                 $_SESSION['success_message'] = "Death welfare approved and expense recorded successfully!";
             } else {
                 throw new Exception("Welfare record not found");
@@ -97,6 +130,16 @@ if(isset($_POST['update_status'])) {
             // Just update status for rejection
             $updateQuery = "UPDATE DeathWelfare SET Status = '$status' WHERE WelfareID = '$welfareId'";
             iud($updateQuery);
+            
+            // Log the change to ChangeLog table
+            $oldValues = json_encode(['Status' => 'pending']);
+            $newValues = json_encode(['Status' => 'rejected']);
+            $changeDetails = "Death welfare application (ID: $welfareId) rejected";
+            
+            $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, MemberID, TreasurerID, OldValues, NewValues, ChangeDetails, Status) 
+                        VALUES ('DeathWelfare', '$welfareId', '$memberId', '$treasurerId', '$oldValues', '$newValues', '$changeDetails', 'Not Read')";
+            iud($logQuery);
+            
             $_SESSION['success_message'] = "Death welfare application has been rejected.";
         }
     } catch(Exception $e) {
@@ -260,6 +303,7 @@ if(isset($_POST['update_status'])) {
                 </div>
             <?php endif; ?>
 
+            <?php if($result->num_rows > 0): ?>
             <div class="table-responsive">
                 <table class="treasurer-table">
                     <thead>
@@ -307,6 +351,11 @@ if(isset($_POST['update_status'])) {
                     </tbody>
                 </table>
             </div>
+            <?php else: ?>
+                <div style="text-align: center; padding: 50px 0; color: #666; font-style: italic;">
+                    <p>There are no pending death welfare applications at this time.</p>
+                </div>
+            <?php endif; ?>
         </div>
 
         <!-- Approve Confirmation Modal -->

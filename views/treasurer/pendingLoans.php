@@ -84,6 +84,26 @@ function getPendingLoans() {
     return search($query);
 }
 
+function logChange($recordType, $recordId, $memberId, $treasurerId, $oldValues, $newValues, $changeDetails) {
+    try {
+        $stmt = prepare("INSERT INTO ChangeLog (RecordType, RecordID, MemberID, TreasurerID, OldValues, NewValues, ChangeDetails, Status) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'Not Read')");
+        
+        $stmt->bind_param("sssssss", $recordType, $recordId, $memberId, $treasurerId, $oldValues, $newValues, $changeDetails);
+        $stmt->execute();
+        
+        if($stmt->affected_rows <= 0) {
+            throw new Exception("Failed to add log record");
+        }
+        
+        return true;
+    } catch (Exception $e) {
+        // Only log to session, don't disrupt main process
+        $_SESSION['error_message'] = $_SESSION['error_message'] . " Warning: Log entry failed: " . $e->getMessage();
+        return false;
+    }
+}
+
 // Handle loan approval/rejection
 function processLoanUpdate() {
     if(isset($_POST['update_status'])) {
@@ -91,6 +111,40 @@ function processLoanUpdate() {
         $status = $_POST['status'];
         
         try {
+            // First get the current loan data before any changes
+            $getCurrentLoanStmt = prepare("SELECT l.*, m.Name as MemberName, m.MemberID 
+                                          FROM Loan l 
+                                          JOIN Member m ON l.Member_MemberID = m.MemberID 
+                                          WHERE l.LoanID = ?");
+            $getCurrentLoanStmt->bind_param("s", $loanId);
+            $getCurrentLoanStmt->execute();
+            $currentLoanData = $getCurrentLoanStmt->get_result()->fetch_assoc();
+            
+            if(!$currentLoanData) {
+                throw new Exception("Loan record not found");
+            }
+            
+            // Store old values for logging
+            $oldValues = json_encode([
+                'Status' => $currentLoanData['Status'],
+                'Expenses_ExpenseID' => $currentLoanData['Expenses_ExpenseID'],
+                'Remain_Interest' => $currentLoanData['Remain_Interest']
+            ]);
+            
+            // Get treasurer ID for logging
+            $treasurerQuery = prepare("SELECT Treasurer_TreasurerID FROM User WHERE UserId = ?");
+            $treasurerQuery->bind_param("s", $_SESSION['user_id']);
+            $treasurerQuery->execute();
+            $treasurerResult = $treasurerQuery->get_result();
+            $treasurerData = $treasurerResult->fetch_assoc();
+            
+            if (!$treasurerData || !$treasurerData['Treasurer_TreasurerID']) {
+                throw new Exception("Invalid Treasurer ID");
+            }
+            
+            $treasurerId = $treasurerData['Treasurer_TreasurerID'];
+            $memberId = $currentLoanData['MemberID'];
+
             if($status === 'approved') {
                 // Get loan amount using prepared statement
                 $stmt = prepare("SELECT Amount FROM Loan WHERE LoanID = ?");
@@ -133,6 +187,18 @@ function processLoanUpdate() {
                 $updateLoanStmt->execute();
 
                 if($updateLoanStmt->affected_rows > 0) {
+                    // Create new values for logging
+                    $newValues = json_encode([
+                        'Status' => 'approved',
+                        'Expenses_ExpenseID' => $expenseId,
+                        'Remain_Interest' => $initialInterest
+                    ]);
+                    
+                    $changeDetails = "Loan application approved with initial interest of Rs. " . number_format($initialInterest, 2);
+                    
+                    // Log the change
+                    logChange('Loan', $loanId, $memberId, $treasurerId, $oldValues, $newValues, $changeDetails);
+                    
                     $_SESSION['success_message'] = "Loan approved and expense recorded successfully!";
                 } else {
                     throw new Exception("Failed to update loan with expense ID");
@@ -144,7 +210,33 @@ function processLoanUpdate() {
                 $updateStmt->execute();
                 
                 if($updateStmt->affected_rows > 0) {
+                    // Delete associated guarantor records when loan is rejected
+                    $deleteGuarantorsStmt = prepare("DELETE FROM Guarantor WHERE Loan_LoanID = ?");
+                    $deleteGuarantorsStmt->bind_param("s", $loanId);
+                    $deleteGuarantorsStmt->execute();
+                    
+                    // Get number of deleted guarantors for the message
+                    $guarantorsDeleted = $deleteGuarantorsStmt->affected_rows;
+                    
+                    // Create new values for logging
+                    $newValues = json_encode([
+                        'Status' => 'rejected',
+                        'Expenses_ExpenseID' => null,
+                        'Remain_Interest' => 0
+                    ]);
+                    
+                    $changeDetails = "Loan application rejected";
+                    if ($guarantorsDeleted > 0) {
+                        $changeDetails .= " and " . $guarantorsDeleted . " associated guarantor(s) removed";
+                    }
+                    
+                    // Log the change
+                    logChange('Loan', $loanId, $memberId, $treasurerId, $oldValues, $newValues, $changeDetails);
+                    
                     $_SESSION['success_message'] = "Loan application has been rejected.";
+                    if ($guarantorsDeleted > 0) {
+                        $_SESSION['success_message'] .= " Associated guarantor records have been removed.";
+                    }
                 } else {
                     throw new Exception("Failed to update loan status");
                 }
@@ -163,6 +255,7 @@ processLoanUpdate();
 
 // Get pending loans for display
 $result = getPendingLoans();
+$hasPendingLoans = ($result && $result->num_rows > 0);
 ?>
 
 <!DOCTYPE html>
@@ -287,6 +380,16 @@ $result = getPendingLoans();
             gap: 1rem;
             margin-top: 2rem;
         }
+        .no-records-message {
+            text-align: center;
+            padding: 2rem;
+            font-style: italic;
+            color: #6c757d;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            margin: 2rem 0;
+            font-size: 1.1rem;
+        }
     </style>
 </head>
 <body>
@@ -319,6 +422,7 @@ $result = getPendingLoans();
                 </div>
             <?php endif; ?>
 
+            <?php if ($hasPendingLoans): ?>
             <div class="table-responsive">
                 <table class="treasurer-table">
                     <thead>
@@ -362,6 +466,12 @@ $result = getPendingLoans();
                     </tbody>
                 </table>
             </div>
+            <?php else: ?>
+                <div class="no-records-message">
+                    There are no pending loan applications at this time.
+                </div>
+            <?php endif; ?>
+            
             <!-- Approve Confirmation Modal -->
             <div id="approveModal" class="delete-modal">
                 <div class="delete-modal-content">

@@ -1,0 +1,39 @@
+--------------------------------------------------
+Time: 2025-05-18 15:26:09
+Phone: 0703804216 (Mobitel)
+Email: 0703804216@sms.mobitel.lk
+Message: New Death Welfare Application
+ID: DWF2501
+Member:  (Member1)
+Relationship: Dog
+Amount: Rs.200.00
+Date: 2025-05-18
+From: Society Management System
+--------------------------------------------------
+
+--------------------------------------------------
+Time: 2025-05-18 15:29:25
+Phone: 0703804216 (Mobitel)
+Email: 0703804216@sms.mobitel.lk
+Message: New Death Welfare Application
+ID: DWF2501
+Member:  (Member1)
+Relationship: Dog
+Amount: Rs.200.00
+Date: 2025-05-18
+From: Society Management System
+--------------------------------------------------
+
+--------------------------------------------------
+Time: 2025-05-18 15:32:45
+Phone: 0703804216 (Mobitel)
+Email: 0703804216@sms.mobitel.lk
+Message: New Death Welfare Application
+ID: DWF2501
+Member:  (Member1)
+Relationship: Dog
+Amount: Rs.200.00
+Date: 2025-05-18
+From: Society Management System
+--------------------------------------------------
+

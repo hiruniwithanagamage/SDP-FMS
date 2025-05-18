@@ -135,78 +135,122 @@ if(isset($_GET['delete']) && isset($_GET['id'])) {
     $expenseId = $_GET['id'];
     $currentYear = isset($_GET['year']) ? $_GET['year'] : getCurrentTerm();
     
-    // First check if this expense is an Adjustment - if so, do not allow deletion
-    $checkCategoryQuery = "SELECT Category FROM Expenses WHERE ExpenseID = ?";
-    
     try {
         $conn = getConnection();
         
         // Start transaction
         $conn->begin_transaction();
         
-        // Check if this is an Adjustment expense
-        $stmt = $conn->prepare($checkCategoryQuery);
+        // First check if financial report for this term is approved
+        if(isReportApproved($currentYear)) {
+            $_SESSION['error_message'] = "Cannot delete this expense as the financial report for this term has been approved.";
+            $conn->rollback();
+            header("Location: trackExpenses.php?year=" . $currentYear);
+            exit();
+        }
+        
+        // Get expense details
+        $getExpenseQuery = "SELECT * FROM Expenses WHERE ExpenseID = ?";
+        $stmt = $conn->prepare($getExpenseQuery);
         $stmt->bind_param("s", $expenseId);
         $stmt->execute();
-        $categoryResult = $stmt->get_result();
-        $categoryRow = $categoryResult->fetch_assoc();
+        $expenseResult = $stmt->get_result();
         
-        if($categoryRow && $categoryRow['Category'] === 'Adjustment') {
+        if($expenseResult->num_rows == 0) {
+            $_SESSION['error_message'] = "Expense not found.";
+            $conn->rollback();
+            header("Location: trackExpenses.php?year=" . $currentYear);
+            exit();
+        }
+        
+        $expenseData = $expenseResult->fetch_assoc();
+        $expenseCategory = $expenseData['Category'];
+        
+        // Check if this is an Adjustment expense
+        if($expenseCategory === 'Adjustment') {
             $_SESSION['error_message'] = "Cannot delete this expense as it is an Adjustment record.";
-        } else {
-            // Then check if this expense is linked to a Death Welfare
-            $checkQuery = "SELECT * FROM DeathWelfare WHERE Expense_ExpenseID = ?";
-            $stmt = $conn->prepare($checkQuery);
+            $conn->rollback();
+            header("Location: trackExpenses.php?year=" . $currentYear);
+            exit();
+        }
+        
+        // Handle Loan expenses
+        if($expenseCategory === 'Loan') {
+            // Check if loan exists and if it's paid
+            $checkLoanQuery = "SELECT * FROM Loan WHERE Expenses_ExpenseID = ?";
+            $stmt = $conn->prepare($checkLoanQuery);
             $stmt->bind_param("s", $expenseId);
             $stmt->execute();
-            $result = $stmt->get_result();
+            $loanResult = $stmt->get_result();
             
-            if($result->num_rows > 0) {
-                $_SESSION['error_message'] = "Cannot delete this expense as it is linked to a Death Welfare record.";
-            } else {
-                // Get the original expense data before deletion (for logging)
-                $getExpenseQuery = "SELECT * FROM Expenses WHERE ExpenseID = ?";
-                $stmt = $conn->prepare($getExpenseQuery);
+            if($loanResult->num_rows > 0) {
+                $loanData = $loanResult->fetch_assoc();
+                
+                // Check if loan is paid
+                if($loanData['Paid_Loan'] > 0 || $loanData['Paid_Interest'] > 0) {
+                    $_SESSION['error_message'] = "Cannot delete this expense as the associated loan has already been partially or fully paid.";
+                    $conn->rollback();
+                    header("Location: trackExpenses.php?year=" . $currentYear);
+                    exit();
+                }
+                
+                // Loan is not paid, update its status to pending and remove expense ID
+                $updateLoanQuery = "UPDATE Loan SET Status = 'pending', Expenses_ExpenseID = NULL WHERE Expenses_ExpenseID = ?";
+                $stmt = $conn->prepare($updateLoanQuery);
                 $stmt->bind_param("s", $expenseId);
                 $stmt->execute();
-                $expenseResult = $stmt->get_result();
-                $expenseData = $expenseResult->fetch_assoc();
-                
-                // Get current treasurer ID (assuming it's stored in session)
-                $treasurerId = $_SESSION['user_id'] ?? $expenseData['Treasurer_TreasurerID'];
-                
-                // Get member ID (from the treasurer table, linked by treasurer ID)
-                $getMemberQuery = "SELECT MemberID FROM Treasurer WHERE TreasurerID = ?";
-                $stmt = $conn->prepare($getMemberQuery);
-                $stmt->bind_param("s", $treasurerId);
-                $stmt->execute();
-                $memberResult = $stmt->get_result();
-                $memberData = $memberResult->fetch_assoc();
-                $memberId = $memberData['MemberID'] ?? 'UNKNOWN';
-                
-                // Convert expense data to JSON for logging
-                $oldValues = json_encode($expenseData);
-                $newValues = "{}"; // Empty JSON object for deletion
-                $changeDetails = "Expense #$expenseId was deleted";
-                
-                // Delete the expense
-                $deleteQuery = "DELETE FROM Expenses WHERE ExpenseID = ?";
-                $stmt = $conn->prepare($deleteQuery);
-                $stmt->bind_param("s", $expenseId);
-                $stmt->execute();
-                
-                // Log the deletion to ChangeLog table
-                $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, MemberID, OldValues, NewValues, ChangeDetails, TreasurerID, Status) 
-                             VALUES (?, ?, ?, ?, ?, ?, ?, 'Not Read')";
-                $stmt = $conn->prepare($logQuery);
-                $recordType = "Expense";
-                $stmt->bind_param("sssssss", $recordType, $expenseId, $memberId, $oldValues, $newValues, $changeDetails, $treasurerId);
-                $stmt->execute();
-                
-                $conn->commit();
-                $_SESSION['success_message'] = "Expense #$expenseId was successfully deleted.";
             }
         }
+        
+        // Handle Death Welfare expenses - should automatically cascade delete
+        // But we'll check for existence first
+        if($expenseCategory === 'Death Welfare') {
+            $checkWelfareQuery = "SELECT * FROM DeathWelfare WHERE Expense_ExpenseID = ?";
+            $stmt = $conn->prepare($checkWelfareQuery);
+            $stmt->bind_param("s", $expenseId);
+            $stmt->execute();
+            $welfareResult = $stmt->get_result();
+            
+            if($welfareResult->num_rows == 0) {
+                $_SESSION['error_message'] = "Associated Death Welfare record not found.";
+                $conn->rollback();
+                header("Location: trackExpenses.php?year=" . $currentYear);
+                exit();
+            }
+        }
+        
+        // Get treasurer and member information for logging
+        $treasurerId = $_SESSION['user_id'] ?? $expenseData['Treasurer_TreasurerID'];
+        
+        $getMemberQuery = "SELECT MemberID FROM Treasurer WHERE TreasurerID = ?";
+        $stmt = $conn->prepare($getMemberQuery);
+        $stmt->bind_param("s", $treasurerId);
+        $stmt->execute();
+        $memberResult = $stmt->get_result();
+        $memberData = $memberResult->fetch_assoc();
+        $memberId = $memberData['MemberID'] ?? 'UNKNOWN';
+        
+        // Convert expense data to JSON for logging
+        $oldValues = json_encode($expenseData);
+        $newValues = "{}"; // Empty JSON object for deletion
+        $changeDetails = "Expense #$expenseId was deleted";
+        
+        // Delete the expense - this should cascade to related tables
+        $deleteQuery = "DELETE FROM Expenses WHERE ExpenseID = ?";
+        $stmt = $conn->prepare($deleteQuery);
+        $stmt->bind_param("s", $expenseId);
+        $stmt->execute();
+        
+        // Log the deletion to ChangeLog table
+        $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, MemberID, OldValues, NewValues, ChangeDetails, TreasurerID, Status) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 'Not Read')";
+        $stmt = $conn->prepare($logQuery);
+        $recordType = "Expense";
+        $stmt->bind_param("sssssss", $recordType, $expenseId, $memberId, $oldValues, $newValues, $changeDetails, $treasurerId);
+        $stmt->execute();
+        
+        $conn->commit();
+        $_SESSION['success_message'] = "Expense #$expenseId was successfully deleted.";
     } catch(Exception $e) {
         // Rollback on error
         $conn->rollback();
