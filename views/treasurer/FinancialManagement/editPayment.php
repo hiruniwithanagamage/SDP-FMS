@@ -1092,14 +1092,17 @@ if ($isPopup): ?>
                 
                 <?php if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_SESSION['error_message'])): ?>
                 <script>
-                    // If form was submitted successfully in popup mode, pass message to parent
-                    window.parent.showAlert('success', 'Payment #<?php echo $paymentID; ?> successfully updated');
+                    // Store success message in localStorage instead of showing it immediately
+                    localStorage.setItem('payment_alert_type', 'success');
+                    localStorage.setItem('payment_alert_message', 'Payment #<?php echo $paymentID; ?> successfully updated');
                     window.parent.closeEditModal();
                 </script>
                 <?php elseif ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_SESSION['error_message'])): ?>
                 <script>
-                    // If form had errors, pass error message to parent
-                    window.parent.showAlert('error', '<?php echo addslashes($_SESSION['error_message']); ?>');
+                    // Store error message in localStorage
+                    localStorage.setItem('payment_alert_type', 'error');
+                    localStorage.setItem('payment_alert_message', '<?php echo addslashes($_SESSION['error_message']); ?>');
+                    // Don't close the modal if there's an error
                 </script>
                 <?php unset($_SESSION['error_message']); ?>
                 <?php endif; ?>

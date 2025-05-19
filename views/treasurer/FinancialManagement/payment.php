@@ -1011,14 +1011,16 @@ $methodTypes = [
 
         function closeEditModal() {
             document.getElementById('editPaymentModal').style.display = 'none';
-            
+    
             // After closing, refresh the payment list to see any changes
             const urlParams = new URLSearchParams(window.location.search);
             const year = urlParams.get('year') || document.getElementById('yearSelect').value;
             const month = urlParams.get('month') || document.getElementById('monthSelect').value;
             const page = urlParams.get('page') || 1;
             
+            // Redirect to the same page with parameters
             window.location.href = `payment.php?year=${year}&month=${month}&page=${page}`;
+
         }
 
         function openDeleteModal(id) {
@@ -1108,7 +1110,21 @@ $methodTypes = [
         function showReportMessage() {
             showAlert('info', 'This record cannot be modified as the financial report for this term has already been approved.');
         }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check for stored alerts from the edit modal
+            const alertType = localStorage.getItem('payment_alert_type');
+            const alertMessage = localStorage.getItem('payment_alert_message');
+            
+            if (alertType && alertMessage) {
+                // Display the alert
+                showAlert(alertType, alertMessage);
+                
+                // Clear the stored alert data
+                localStorage.removeItem('payment_alert_type');
+                localStorage.removeItem('payment_alert_message');
+            }
+        });
     </script>
 </body>
-</html>year" value="<?php echo $selectedYear; ?>">
-                <input type="hidden" name="
+</html>
