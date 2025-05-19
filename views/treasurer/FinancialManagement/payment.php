@@ -89,8 +89,6 @@ function getPaymentSummary($year, $month = null, $memberID = null) {
             COUNT(*) as total_payments,
             SUM(Amount) as total_amount,
             COUNT(DISTINCT Member_MemberID) as unique_members,
-            -- COUNT(CASE WHEN Payment_Type = 'Loan' THEN 1 END) as loan_payments,
-            -- COUNT(CASE WHEN Payment_Type = 'Membership Fee' THEN 1 END) as membership_fee_payments,
             COUNT(CASE WHEN Payment_Type = 'Fine' THEN 1 END) as fine_payments,
             SUM(CASE WHEN Payment_Type = 'Loan' THEN Amount ELSE 0 END) as loan_amount,
             SUM(CASE WHEN Payment_Type = 'registration' THEN Amount ELSE 0 END) as registration_fee_amount,
@@ -146,6 +144,230 @@ function isReportApproved($year) {
     return false; // If no report exists, it's not approved
 }
 
+// Get all available terms/years
+function getAllTerms() {
+    $sql = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
+    return search($sql);
+}
+
+// Handle Delete Payment Logic with new conditions
+if(isset($_POST['delete_payment'])) {
+    $paymentId = $_POST['payment_id'];
+    $currentYear = isset($_GET['year']) ? $_GET['year'] : (isset($_POST['year']) ? $_POST['year'] : getCurrentTerm());
+    
+    try {
+        $conn = getConnection();
+        
+        // Start transaction
+        $conn->begin_transaction();
+        
+        // First get all payment details to determine status and type
+        $getPaymentQuery = "SELECT * FROM Payment WHERE PaymentID = ?";
+        $stmt = $conn->prepare($getPaymentQuery);
+        $stmt->bind_param("s", $paymentId);
+        $stmt->execute();
+        $paymentResult = $stmt->get_result();
+        
+        if ($paymentResult->num_rows == 0) {
+            throw new Exception("Payment not found");
+        }
+        
+        $paymentData = $paymentResult->fetch_assoc();
+        $paymentStatus = $paymentData['Status'] ?? ''; 
+        $paymentMethod = $paymentData['Method'] ?? '';
+        $paymentType = $paymentData['Payment_Type'] ?? '';
+        $paymentAmount = $paymentData['Amount'] ?? 0;
+        $memberID = $paymentData['Member_MemberID'] ?? '';
+        
+        // CONDITION 1: Check if status is 'edited', if so, cannot delete
+        if ($paymentStatus == 'edited') {
+            throw new Exception("Payments with 'edited' status cannot be deleted");
+        }
+        
+        // CONDITION 2: If status is 'self' and method is 'online', cannot delete
+        if ($paymentStatus == 'self' && $paymentMethod == 'online') {
+            throw new Exception("Online payments cannot be deleted");
+        }
+        
+        // Valid cases: status = 'self' with method = 'cash' or 'transfer', or status = 'treasurer'
+        // Get current treasurer ID
+        $treasurerQuery = "SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1";
+        $treasurerResult = search($treasurerQuery);
+        $treasurerRow = $treasurerResult->fetch_assoc();
+        $treasurerId = $treasurerRow['TreasurerID'] ?? '';
+        
+        if (empty($treasurerId)) {
+            throw new Exception("Cannot find active treasurer to create adjustment entry");
+        }
+        
+        // CONDITION 3: Handle specific payment types
+        // CONDITION 3: Handle specific payment types
+if ($paymentType == 'loan') {
+    // For loan payments, delete from LoanPayment table and update Loan table
+    $loanQuery = "SELECT * FROM LoanPayment WHERE PaymentID = ?";
+    $stmt = $conn->prepare($loanQuery);
+    $stmt->bind_param("s", $paymentId);
+    $stmt->execute();
+    $loanResult = $stmt->get_result();
+    
+    if ($loanResult->num_rows > 0) {
+        $loanRow = $loanResult->fetch_assoc();
+        $loanId = $loanRow['LoanID'];
+        
+        // Get current loan details
+        $getLoanQuery = "SELECT * FROM Loan WHERE LoanID = ?";
+        $stmt = $conn->prepare($getLoanQuery);
+        $stmt->bind_param("s", $loanId);
+        $stmt->execute();
+        $currentLoanResult = $stmt->get_result();
+        $currentLoan = $currentLoanResult->fetch_assoc();
+        
+        // Get remaining details after applying payment
+        $currentPaidLoan = $currentLoan['Paid_Loan'] ?? 0;
+        $currentPaidInterest = $currentLoan['Paid_Interest'] ?? 0;
+        $currentRemainLoan = $currentLoan['Remain_Loan'] ?? 0;
+        $currentRemainInterest = $currentLoan['Remain_Interest'] ?? 0;
+        
+        // When originally processing a payment, interest is paid first, then principal
+        // So when reversing, we need to first restore the principal, then the interest
+        
+        // First, we determine how much was applied to interest and how much to principal
+        // Since Remain_Interest was likely modified after the payment, we need to calculate
+        // backwards based on original payment amount
+        
+        // We know the total payment amount, and need to reverse it properly
+        $interestPayment = 0;
+        $principalPayment = 0;
+        
+        // Check if paid interest can be reduced by full payment amount
+        if ($currentPaidInterest >= $paymentAmount) {
+            // The entire payment went to interest
+            $interestPayment = $paymentAmount;
+            $principalPayment = 0;
+        } else {
+            // Part went to interest, part to principal
+            $interestPayment = $currentPaidInterest;
+            $principalPayment = $paymentAmount - $interestPayment;
+            
+            // Make sure we don't reduce Paid_Loan below 0
+            $principalPayment = min($principalPayment, $currentPaidLoan);
+        }
+        
+        // Calculate new values after reversal
+        $newPaidLoan = $currentPaidLoan - $principalPayment;
+        $newRemainLoan = $currentRemainLoan + $principalPayment;
+        $newPaidInterest = $currentPaidInterest - $interestPayment;
+        $newRemainInterest = $currentRemainInterest + $interestPayment;
+        
+        // Remove loan payment link
+        $deleteLoanPaymentQuery = "DELETE FROM LoanPayment WHERE PaymentID = ?";
+        $stmt = $conn->prepare($deleteLoanPaymentQuery);
+        $stmt->bind_param("s", $paymentId);
+        $stmt->execute();
+        
+        // Update loan with all the new values
+        $updateLoanQuery = "UPDATE Loan 
+                          SET Paid_Loan = ?, 
+                              Remain_Loan = ?,
+                              Paid_Interest = ?,
+                              Remain_Interest = ?
+                          WHERE LoanID = ?";
+        $stmt = $conn->prepare($updateLoanQuery);
+        $stmt->bind_param("dddds", $newPaidLoan, $newRemainLoan, $newPaidInterest, $newRemainInterest, $loanId);
+        $stmt->execute();
+    }
+} else if ($paymentType == 'registration' || $paymentType == 'monthly') {
+            // For membership fees (registration or monthly)
+            // Get all membership fees linked to this payment
+            $feesQuery = "SELECT * FROM MembershipFeePayment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($feesQuery);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            $feesResult = $stmt->get_result();
+            
+            // Collect all fee IDs to be processed
+            $feeIds = [];
+            while($feeRow = $feesResult->fetch_assoc()) {
+                $feeIds[] = $feeRow['FeeID'];
+            }
+            
+            // Remove the membership fee payment links
+            $deleteFeePaymentsQuery = "DELETE FROM MembershipFeePayment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($deleteFeePaymentsQuery);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            
+            // Delete each associated membership fee
+            foreach($feeIds as $feeId) {
+                $deleteFeeQuery = "DELETE FROM MembershipFee WHERE FeeID = ?";
+                $stmt = $conn->prepare($deleteFeeQuery);
+                $stmt->bind_param("s", $feeId);
+                $stmt->execute();
+            }
+        } else if ($paymentType == 'Fine') {
+            // For fine payments, delete from FinePayment table and update Fine table
+            $fineQuery = "SELECT * FROM FinePayment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($fineQuery);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            $fineResult = $stmt->get_result();
+            
+            // Get all fine IDs linked to this payment
+            $fineIds = [];
+            while($fineRow = $fineResult->fetch_assoc()) {
+                $fineIds[] = $fineRow['FineID'];
+            }
+            
+            // Remove the fine payment links
+            $deleteFinePaymentsQuery = "DELETE FROM FinePayment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($deleteFinePaymentsQuery);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            
+            // Update all related fines to unpaid
+            foreach($fineIds as $fineId) {
+                $updateFineQuery = "UPDATE Fine SET IsPaid = 'No' WHERE FineID = ?";
+                $stmt = $conn->prepare($updateFineQuery);
+                $stmt->bind_param("s", $fineId);
+                $stmt->execute();
+            }
+        }
+        
+        // Finally, delete the payment record
+        $deleteQuery = "DELETE FROM Payment WHERE PaymentID = ?";
+        $stmt = $conn->prepare($deleteQuery);
+        $stmt->bind_param("s", $paymentId);
+        $stmt->execute();
+        
+        // Log the deletion
+        $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, TreasurerID, OldValues, NewValues, ChangeDetails, MemberID, Status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        $recordType = "Payment";
+        $memberId = $_SESSION['member_id'] ?? 'unknown';
+        $oldValues = json_encode($paymentData);
+        $newValues = "{}";
+        $changeDetails = "Deleted payment #$paymentId ($paymentType) for Member #$memberID";
+        $Status = "Not Read";
+        
+        $stmt = $conn->prepare($logQuery);
+        $stmt->bind_param("ssssssss", $recordType, $paymentId, $treasurerId, $oldValues, $newValues, $changeDetails, $memberId, $Status);
+        $stmt->execute();
+        
+        // Commit transaction
+        $conn->commit();
+        
+        $_SESSION['success_message'] = "Payment #$paymentId was successfully deleted and appropriate adjustments were made.";
+    } catch(Exception $e) {
+        // Rollback on error
+        $conn->rollback();
+        $_SESSION['error_message'] = "Error deleting payment: " . $e->getMessage();
+    }
+    
+    // Redirect back to payment page
+    header("Location: payment.php?year=" . $currentYear . "&month=" . $selectedMonth . "&page=" . $currentPage);
+    exit();
+}
+
 // Handle current filter selections
 $currentTerm = getCurrentTerm();
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
@@ -165,12 +387,6 @@ if ($currentPage < 1) {
     $currentPage = 1;
 } elseif ($currentPage > $totalPages && $totalPages > 0) {
     $currentPage = $totalPages;
-}
-
-// Get all available terms/years
-function getAllTerms() {
-    $sql = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
-    return search($sql);
 }
 
 // Get data based on filters
@@ -201,262 +417,6 @@ $methodTypes = [
     'Bank Transfer' => 'Bank Transfer',
     'Card' => 'Card',
 ];
-
-// Handle Delete Payment
-if(isset($_POST['delete_payment'])) {
-    $paymentId = $_POST['payment_id'];
-    $currentYear = isset($_GET['year']) ? $_GET['year'] : (isset($_POST['year']) ? $_POST['year'] : getCurrentTerm());
-    
-    try {
-        $conn = getConnection();
-        
-        // Start transaction
-        $conn->begin_transaction();
-        
-        // First get all payment details to determine status and type
-        $getPaymentQuery = "SELECT * FROM Payment WHERE PaymentID = ?";
-        $stmt = $conn->prepare($getPaymentQuery);
-        $stmt->bind_param("s", $paymentId);
-        $stmt->execute();
-        $paymentResult = $stmt->get_result();
-        
-        if ($paymentResult->num_rows == 0) {
-            throw new Exception("Payment not found");
-        }
-        
-        $paymentData = $paymentResult->fetch_assoc();
-        $paymentStatus = $paymentData['Status'] ?? 'self'; // Default to 'self' if status not set
-        $paymentMethod = $paymentData['Method'] ?? '';
-        $paymentType = $paymentData['Payment_Type'] ?? '';
-        $paymentAmount = $paymentData['Amount'] ?? 0;
-        $memberID = $paymentData['Member_MemberID'] ?? '';
-        
-        // 1. Check if status is 'edited', if so, cannot delete
-        if ($paymentStatus == 'edited') {
-            throw new Exception("Payments with 'edited' status cannot be deleted");
-        }
-        
-        // 2. If status is 'self', check method restrictions
-        if ($paymentStatus == 'self') {
-            if ($paymentMethod == 'online') {
-                throw new Exception("Online payments cannot be deleted");
-            }
-            
-            // For other payment methods like bank transfer or cash, continue with deletion
-        }
-        
-        // For both 'self' and 'system' status payments that can be deleted
-        // Create an adjustment expense entry to balance the books
-        if ($paymentStatus == 'self' || $paymentStatus == 'system') {
-            // Get current treasurer ID
-            $treasurerQuery = "SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1";
-            $treasurerResult = search($treasurerQuery);
-            $treasurerRow = $treasurerResult->fetch_assoc();
-            $treasurerId = $treasurerRow['TreasurerID'] ?? '';
-            
-            if (empty($treasurerId)) {
-                throw new Exception("Cannot find active treasurer to create adjustment entry");
-            }
-            
-            // Generate a new expense ID with the specified format
-            $newExpenseId = generateExpenseID($currentYear);
-            
-            // Create adjustment expense
-            $createExpenseQuery = "INSERT INTO Expenses (ExpenseID, Category, Method, Amount, Date, Term, Description, Treasurer_TreasurerID) 
-                                 VALUES (?, 'Adjustment', 'system', ?, CURDATE(), ?, ?, ?)";
-            $description = "Deleted payment #$paymentId ($paymentType)";
-            
-            $stmt = $conn->prepare($createExpenseQuery);
-            $stmt->bind_param("ssdss", $newExpenseId, $paymentAmount, $currentYear, $description, $treasurerId);
-            $stmt->execute();
-        }
-        
-        // Now handle specific payment types
-        if ($paymentType == 'monthly' || $paymentType == 'registration') {
-            // For membership fees, need to update the related fees
-            // First get all membership fees linked to this payment
-            $feesQuery = "SELECT * FROM MembershipFeePayment WHERE PaymentID = ?";
-            $stmt = $conn->prepare($feesQuery);
-            $stmt->bind_param("s", $paymentId);
-            $stmt->execute();
-            $feesResult = $stmt->get_result();
-            
-            // Get the fees in descending order to handle in proper sequence
-            $feeIds = [];
-            while($feeRow = $feesResult->fetch_assoc()) {
-                $feeIds[] = $feeRow['FeeID'];
-            }
-            
-            // Sort fee IDs in descending order (assuming IDs have a meaningful sequence)
-            rsort($feeIds);
-            
-            // Remove the membership fee payment links
-            $deleteFeePaymentsQuery = "DELETE FROM MembershipFeePayment WHERE PaymentID = ?";
-            $stmt = $conn->prepare($deleteFeePaymentsQuery);
-            $stmt->bind_param("s", $paymentId);
-            $stmt->execute();
-            
-            // Update all related fees to unpaid
-            foreach($feeIds as $feeId) {
-                $updateFeeQuery = "UPDATE MembershipFee SET IsPaid = 'No' WHERE FeeID = ?";
-                $stmt = $conn->prepare($updateFeeQuery);
-                $stmt->bind_param("s", $feeId);
-                $stmt->execute();
-            }
-            
-        } else if ($paymentType == 'Fine') {
-            // For fines, check and update related fine records
-            $fineQuery = "SELECT * FROM FinePayment WHERE PaymentID = ?";
-            $stmt = $conn->prepare($fineQuery);
-            $stmt->bind_param("s", $paymentId);
-            $stmt->execute();
-            $fineResult = $stmt->get_result();
-            
-            // Get all fine IDs linked to this payment
-            $fineIds = [];
-            while($fineRow = $fineResult->fetch_assoc()) {
-                $fineIds[] = $fineRow['FineID'];
-            }
-            
-            // Remove the fine payment links
-            $deleteFinePaymentsQuery = "DELETE FROM FinePayment WHERE PaymentID = ?";
-            $stmt = $conn->prepare($deleteFinePaymentsQuery);
-            $stmt->bind_param("s", $paymentId);
-            $stmt->execute();
-            
-            // Update all related fines to unpaid
-            foreach($fineIds as $fineId) {
-                $updateFineQuery = "UPDATE Fine SET IsPaid = 'No' WHERE FineID = ?";
-                $stmt = $conn->prepare($updateFineQuery);
-                $stmt->bind_param("s", $fineId);
-                $stmt->execute();
-            }
-            
-        } else if ($paymentType == 'Loan') {
-            // For loan payments, check and update loan balance
-            $loanQuery = "SELECT * FROM LoanPayment WHERE PaymentID = ?";
-            $stmt = $conn->prepare($loanQuery);
-            $stmt->bind_param("s", $paymentId);
-            $stmt->execute();
-            $loanResult = $stmt->get_result();
-            
-            if ($loanResult->num_rows > 0) {
-                $loanRow = $loanResult->fetch_assoc();
-                $loanId = $loanRow['LoanID'];
-                
-                // Remove loan payment link
-                $deleteLoanPaymentQuery = "DELETE FROM LoanPayment WHERE PaymentID = ?";
-                $stmt = $conn->prepare($deleteLoanPaymentQuery);
-                $stmt->bind_param("s", $paymentId);
-                $stmt->execute();
-                
-                // Update loan balance by adding back the payment amount
-                // Note: This is simplified and may need to be adjusted based on your actual loan payment logic
-                $updateLoanQuery = "UPDATE Loan 
-                                  SET Paid_Loan = Paid_Loan - ?, 
-                                      Remain_Loan = Remain_Loan + ? 
-                                  WHERE LoanID = ?";
-                $stmt = $conn->prepare($updateLoanQuery);
-                $stmt->bind_param("dds", $paymentAmount, $paymentAmount, $loanId);
-                $stmt->execute();
-            }
-        }
-        
-        // Finally, delete the payment record
-        $deleteQuery = "DELETE FROM Payment WHERE PaymentID = ?";
-        $stmt = $conn->prepare($deleteQuery);
-        $stmt->bind_param("s", $paymentId);
-        $stmt->execute();
-        
-        // Log the deletion
-        $logQuery = "INSERT INTO ChangeLog (RecordType, RecordID, UserID, TreasurerID, OldValues, NewValues, ChangeDetails) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?)";
-        $recordType = "Payment";
-        $userId = $_SESSION['user_id'] ?? 'unknown';
-        $oldValues = json_encode($paymentData);
-        $newValues = "{}";
-        $changeDetails = "Deleted payment #$paymentId ($paymentType) for Member #$memberID";
-        
-        $stmt = $conn->prepare($logQuery);
-        $stmt->bind_param("sssssss", $recordType, $paymentId, $userId, $treasurerId, $oldValues, $newValues, $changeDetails);
-        $stmt->execute();
-        
-        // Commit transaction
-        $conn->commit();
-        
-        $_SESSION['success_message'] = "Payment #$paymentId was successfully deleted and appropriate adjustments were made.";
-    } catch(Exception $e) {
-        // Rollback on error
-        $conn->rollback();
-        $_SESSION['error_message'] = "Error deleting payment: " . $e->getMessage();
-    }
-    
-    // Redirect back to payment page
-    header("Location: payment.php?year=" . $currentYear . "&month=" . $selectedMonth . "&page=" . $currentPage);
-    exit();
-}
-
-function generateExpenseID($term) {
-    $conn = getConnection();
-    
-    // Get the last 2 digits of the term
-    $termSuffix = substr($term, -2);
-    
-    // Get the current highest expense ID for this term
-    $query = "SELECT ExpenseID FROM Expenses 
-              WHERE ExpenseID LIKE 'EXP{$termSuffix}%' 
-              ORDER BY ExpenseID DESC LIMIT 1";
-    
-    $result = $conn->query($query);
-    
-    if ($result && $result->num_rows > 0) {
-        $row = $result->fetch_assoc();
-        $lastID = $row['ExpenseID'];
-        
-        // Extract the numeric part (last 2 digits)
-        $lastNum = intval(substr($lastID, -2));
-        $newNum = $lastNum + 1;
-    } else {
-        // No existing expense for this term yet, start with 01
-        $newNum = 1;
-    }
-    
-    // Format the new ID with leading zeros for the sequence number
-    $expenseID = "EXP{$termSuffix}" . str_pad($newNum, 2, '0', STR_PAD_LEFT);
-    
-    return $expenseID;
-}
-
-function generatePaymentID($term) {
-    $conn = getConnection();
-    
-    // Get the last 2 digits of the term
-    $termSuffix = substr($term, -2);
-    
-    // Get the current highest payment ID for this term
-    $query = "SELECT PaymentID FROM Payment 
-              WHERE PaymentID LIKE 'PAY{$termSuffix}%' 
-              ORDER BY PaymentID DESC LIMIT 1";
-    
-    $result = $conn->query($query);
-    
-    if ($result && $result->num_rows > 0) {
-        $row = $result->fetch_assoc();
-        $lastID = $row['PaymentID'];
-        
-        // Extract the numeric part (last 2 digits)
-        $lastNum = intval(substr($lastID, -2));
-        $newNum = $lastNum + 1;
-    } else {
-        // No existing payment for this term yet, start with 01
-        $newNum = 1;
-    }
-    
-    // Format the new ID with leading zeros for the sequence number
-    $paymentID = "PAY{$termSuffix}" . str_pad($newNum, 2, '0', STR_PAD_LEFT);
-    
-    return $paymentID;
-}
 ?>
 
 <!DOCTYPE html>
