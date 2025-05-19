@@ -120,9 +120,10 @@ function getFinancialReport($year) {
     // Get expense details from Expenses table
     $expenseQuery = "SELECT 
                       SUM(CASE WHEN Category = 'death_welfare' THEN Amount ELSE 0 END) as death_welfare,
-                      SUM(CASE WHEN Category = 'furniture' THEN Amount ELSE 0 END) as furniture_equipment,
-                      SUM(CASE WHEN Category = 'maintenance' THEN Amount ELSE 0 END) as maintenance_repairs,
-                      SUM(CASE WHEN Category NOT IN ('death_welfare', 'furniture', 'maintenance') THEN Amount ELSE 0 END) as other
+                      SUM(CASE WHEN Category = 'maintenance' OR Category = 'Maintenace' THEN Amount ELSE 0 END) as maintenance_repairs,
+                      SUM(CASE WHEN Category = 'Stationary' THEN Amount ELSE 0 END) as stationary,
+                      SUM(CASE WHEN Category = 'Event' THEN Amount ELSE 0 END) as event,
+                      SUM(CASE WHEN Category NOT IN ('death_welfare', 'maintenance', 'Maintenace', 'Stationary', 'Event') THEN Amount ELSE 0 END) as other
                     FROM Expenses
                     WHERE Term = ?";
     
@@ -144,8 +145,9 @@ function getFinancialReport($year) {
                    ($revenueData['fine_revenue'] ?? 0);
     
     $totalExpenses = ($expenseData['death_welfare'] ?? 0) + 
-                    ($expenseData['furniture_equipment'] ?? 0) + 
                     ($expenseData['maintenance_repairs'] ?? 0) + 
+                    ($expenseData['stationary'] ?? 0) + 
+                    ($expenseData['event'] ?? 0) + 
                     ($expenseData['other'] ?? 0);
     
     $netIncome = $totalRevenue - $totalExpenses;
@@ -171,8 +173,9 @@ function getFinancialReport($year) {
         ],
         'expenses' => [
             'death_welfare' => $expenseData['death_welfare'] ?? 0,
-            'furniture_equipment' => $expenseData['furniture_equipment'] ?? 0,
             'maintenance_repairs' => $expenseData['maintenance_repairs'] ?? 0,
+            'stationary' => $expenseData['stationary'] ?? 0,
+            'event' => $expenseData['event'] ?? 0,
             'other' => $expenseData['other'] ?? 0
         ],
         'notes' => $reportData['Comments'] ?? 'No audit notes available for this report.',
@@ -759,12 +762,16 @@ function getAmountColor($amount) {
                         <td class="amount-col"><?php echo formatCurrency($report['expenses']['death_welfare']); ?></td>
                     </tr>
                     <tr>
-                        <td>Furniture and Equipments</td>
-                        <td class="amount-col"><?php echo formatCurrency($report['expenses']['furniture_equipment']); ?></td>
-                    </tr>
-                    <tr>
                         <td>Maintenance and Repairs</td>
                         <td class="amount-col"><?php echo $report['expenses']['maintenance_repairs'] > 0 ? formatCurrency($report['expenses']['maintenance_repairs']) : '-'; ?></td>
+                    </tr>
+                    <tr>
+                        <td>Stationary</td>
+                        <td class="amount-col"><?php echo $report['expenses']['stationary'] > 0 ? formatCurrency($report['expenses']['stationary']) : '-'; ?></td>
+                    </tr>
+                    <tr>
+                        <td>Event</td>
+                        <td class="amount-col"><?php echo $report['expenses']['event'] > 0 ? formatCurrency($report['expenses']['event']) : '-'; ?></td>
                     </tr>
                     <tr>
                         <td>Other</td>

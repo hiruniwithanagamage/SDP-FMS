@@ -364,10 +364,8 @@ if(isset($_GET['cancel'])) {
                 <label for="category">Category</label>
                 <select id="category" name="category" required>
                     <option value="">Select Category</option>
-                    <option value="Death Welfare">Death Welfare</option>
-                    <option value="Administrative">Administrative</option>
-                    <option value="Utility">Utility</option>
-                    <option value="Maintenance">Maintenance</option>
+                    <option value="Maintenace">Maintenance</option>
+                    <option value="Stationary">Stationary</option>
                     <option value="Event">Event</option>
                     <option value="Other">Other</option>
                 </select>

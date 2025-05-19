@@ -26,7 +26,8 @@ function getMemberLoans($year) {
             l.Status
         FROM Member m
         INNER JOIN Loan l ON m.MemberID = l.Member_MemberID 
-            AND YEAR(l.Issued_Date) = $year
+        WHERE (YEAR(l.Issued_Date) = $year OR YEAR(l.Due_Date) = $year OR 
+              ($year BETWEEN YEAR(l.Issued_Date) AND YEAR(l.Due_Date)))
         ORDER BY m.Name";
     
     return search($sql);
