@@ -64,8 +64,8 @@ unset($_SESSION['last_payment_id']); // Clear the session variable
             <a href="payment_receipt.php?payment_id=<?php echo urlencode($paymentId); ?>" target="_blank">
                 <i class="fas fa-file-download"></i>Download Receipt
             </a>
-            <a href="../home-treasurer.php">
-                <i class="fas fa-home"></i>Back to Dashboard
+            <a href="../treasurerPayment.php">
+                <i class="fas fa-home"></i>Back to Payment
             </a>
         </div>
     </div>

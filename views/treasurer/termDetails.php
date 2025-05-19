@@ -51,7 +51,7 @@ if(isset($_POST['update'])) {
         
         if($stmt) {
             // Bind parameters - "dddddddi" means 8 doubles (decimal numbers) and 1 integer
-            $stmt->bind_param("ddddddddi", 
+            $stmt->bind_param("dddddddds", 
                 $monthly_fee, 
                 $registration_fee, 
                 $death_welfare, 

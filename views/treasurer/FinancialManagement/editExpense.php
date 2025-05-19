@@ -358,7 +358,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     WHERE ExpenseID = ?
                 ");
                 
-                $stmt->bind_param("ssdssisss", 
+                $stmt->bind_param("ssdsissss", 
                     $category, 
                     $method, 
                     $amount, 

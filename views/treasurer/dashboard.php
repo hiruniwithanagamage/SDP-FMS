@@ -278,14 +278,42 @@ $loanRepaymentRate = 0;
 if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
     $loanRepaymentRate = ($loanStats['paid_amount'] / ($loanStats['paid_amount'] + $loanStats['remaining_amount'])) * 100;
 }
+
+// Define chart colors (fixed array to avoid undefined variable)
+$chartColors = [
+    '#1e3c72', '#2a5298', '#3a67b8', '#4a7bd8', '#5a8ff8', 
+    '#6aa3ff', '#7ab7ff', '#8acbff', '#9adfff', '#aaf3ff'
+];
+
+// Process expense categories data for charts
+$categoryLabels = [];
+$categoryAmounts = [];
+$categoryColors = [];
+$expenseCategories->data_seek(0);
+$colorIndex = 0;
+while ($category = $expenseCategories->fetch_assoc()) {
+    $categoryLabels[] = $category['Category'];
+    $categoryAmounts[] = $category['amount'];
+    $categoryColors[] = $chartColors[$colorIndex % count($chartColors)];
+    $colorIndex++;
+}
+
+// Process payment methods data for charts
+$methodLabels = [];
+$methodAmounts = [];
+$paymentMethods->data_seek(0);
+while ($method = $paymentMethods->fetch_assoc()) {
+    $methodLabels[] = $method['method'];
+    $methodAmounts[] = $method['amount'];
+}
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Financial Analytics Dashboard - FMS</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <!-- Chart.js for visualizations -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -339,6 +367,10 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
         .year-selector select {
             background: transparent;
             color: white;
+            border: none;
+            padding: 5px;
+            font-size: 1rem;
+            outline: none;
         }
 
         .year-selector select option {
@@ -444,6 +476,32 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
         @media (max-width: 992px) {
             .dashboard-row {
                 grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-stats {
+                grid-template-columns: 1fr;
+            }
+            
+            .page-header {
+                flex-direction: column;
+                gap: 15px;
+                padding: 1.5rem;
+            }
+            
+            .dashboard-container {
+                padding: 1rem;
+            }
+            
+            .chart-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            
+            .chart-actions {
+                width: 100%;
             }
         }
 
@@ -593,6 +651,14 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
             font-size: 0.8rem;
             font-weight: 600;
             margin-left: 10px;
+        }
+        
+        /* No data message */
+        .no-data-message {
+            text-align: center;
+            padding: 50px 0;
+            color: #666;
+            font-style: italic;
         }
     </style>
 </head>
@@ -775,17 +841,20 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
                     </div>
                     <div class="data-grid">
                         <?php
-                        // Generate category colors
-                        $colors = ['#1e3c72', '#2a5298', '#3a67b8', '#4a7bd8', '#5a8ff8', '#6aa3ff', '#7ab7ff', '#8acbff', '#9adfff', '#aaf3ff'];
-                        $colorIndex = 0;
-                        $expenseCategories->data_seek(0); // Reset result pointer
-                        while ($category = $expenseCategories->fetch_assoc()) {
-                            $color = $colors[$colorIndex % count($colors)];
-                            echo '<div class="data-row">';
-                            echo '<div class="data-label"><div class="data-color" style="background: ' . $color . '"></div>' . htmlspecialchars($category['Category']) . '</div>';
-                            echo '<div class="data-value">Rs.' . number_format($category['amount'], 2) . '</div>';
-                            echo '</div>';
-                            $colorIndex++;
+                        // Reset pointer and check if there are categories
+                        $expenseCategories->data_seek(0); 
+                        if ($expenseCategories->num_rows > 0) {
+                            $colorIndex = 0;
+                            while ($category = $expenseCategories->fetch_assoc()) {
+                                $color = $chartColors[$colorIndex % count($chartColors)];
+                                echo '<div class="data-row">';
+                                echo '<div class="data-label"><div class="data-color" style="background: ' . $color . '"></div>' . htmlspecialchars($category['Category']) . '</div>';
+                                echo '<div class="data-value">Rs.' . number_format($category['amount'], 2) . '</div>';
+                                echo '</div>';
+                                $colorIndex++;
+                            }
+                        } else {
+                            echo '<div class="data-row"><div class="data-label">No expense data for this term</div></div>';
                         }
                         ?>
                     </div>
@@ -794,7 +863,7 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
                 <!-- Loan Status -->
                 <div class="chart-card">
                     <div class="chart-header">
-                        <div class="chart-title">Loan Status (<?php echo $selectedYear; ?>)</div>
+                        <div class="chart-title">Loan Status(<?php echo $selectedYear; ?>)</div>
                         <div class="chart-actions">
                             <?php if (!$isAuditor): ?>
                             <button class="chart-action" onclick="downloadChart('loanStatusChart', 'Loan_Status')">
@@ -901,8 +970,12 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
         <?php include '../templates/footer.php'; ?>
     </div>
 
-    <script>
-    // Chart.js configuration
+    // Replace this with your main chart initialization script to fix the JSON parsing issue
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Chart configuration and initialization
+    // Define Chart.js defaults
     Chart.defaults.font.family = "'Segoe UI', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif";
     Chart.defaults.font.size = 12;
     Chart.defaults.color = '#666';
@@ -923,347 +996,359 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
     // Monthly labels
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     
-    // Initialize charts when the page loads
-    document.addEventListener('DOMContentLoaded', function() {
-        createIncomeExpensesChart();
-        createMembershipChart();
-        createExpenseCategoriesChart();
-        createLoanStatusChart();
-        createPaymentMethodsChart();
-        createMemberStatsChart();
-    });
+    // Store chart instances
+    const chartInstances = {};
     
-    // Create Income vs Expenses Chart
-    function createIncomeExpensesChart() {
-        const ctx = document.getElementById('incomeExpensesChart').getContext('2d');
-        
-        // Get data from PHP
-        const incomeData = <?php echo json_encode(array_values($monthlyData['income'])); ?>;
-        const expensesData = <?php echo json_encode(array_values($monthlyData['expenses'])); ?>;
-        
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: months,
-                datasets: [
-                    {
-                        label: 'Income',
-                        data: incomeData,
-                        backgroundColor: colors.green,
-                        borderColor: colors.green,
-                        borderWidth: 1
-                    },
-                    {
-                        label: 'Expenses',
-                        data: expensesData,
-                        backgroundColor: colors.red,
-                        borderColor: colors.red,
-                        borderWidth: 1
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        title: {
-                            display: true,
-                            text: 'Amount (Rs.)'
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        position: 'top'
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return context.dataset.label + ': Rs.' + context.raw.toLocaleString();
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-    
-    // Create Membership Fee Status Chart
-    function createMembershipChart() {
-        const ctx = document.getElementById('membershipChart').getContext('2d');
-        
-        // Get data from PHP
-        const paidFees = <?php echo $membershipStats['paid_fees']; ?>;
-        const unpaidFees = <?php echo $membershipStats['unpaid_fees']; ?>;
-        
-        new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Paid', 'Unpaid'],
-                datasets: [{
-                    data: [paidFees, unpaidFees],
-                    backgroundColor: [colors.green, colors.red],
-                    borderColor: ['#fff', '#fff'],
-                    borderWidth: 2
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '65%',
-                plugins: {
-                    legend: {
-                        position: 'bottom'
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const total = paidFees + unpaidFees;
-                                const percentage = Math.round((context.raw / total) * 100);
-                                return context.label + ': ' + context.raw + ' (' + percentage + '%)';
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-    
-    // Create Expense Categories Chart
-    function createExpenseCategoriesChart() {
-        const ctx = document.getElementById('expenseCategoriesChart').getContext('2d');
-        
-        // Get data from PHP
-        const categories = [];
-        const amounts = [];
-        const backgroundColors = [];
-        
-        <?php
-        // Generate category data for chart
-        $expenseCategories->data_seek(0); // Reset result pointer
-        $colorIndex = 0;
-        while ($category = $expenseCategories->fetch_assoc()) {
-            echo "categories.push('" . addslashes($category['Category']) . "');\n";
-            echo "amounts.push(" . $category['amount'] . ");\n";
-            echo "backgroundColors.push('" . $colors[$colorIndex % count($colors)] . "');\n";
-            $colorIndex++;
+    // Raw data objects from PHP (directly embedded to avoid JSON parsing errors)
+    const chartData = {
+        income: <?php echo json_encode(array_values($monthlyData['income'] ?? array_fill(0, 12, 0))); ?>,
+        expenses: <?php echo json_encode(array_values($monthlyData['expenses'] ?? array_fill(0, 12, 0))); ?>,
+        membershipStats: {
+            paidFees: <?php echo $membershipStats['paid_fees'] ?? 0; ?>,
+            unpaidFees: <?php echo $membershipStats['unpaid_fees'] ?? 0; ?>
+        },
+        expenseCategories: {
+            labels: <?php echo json_encode($categoryLabels ?? []); ?>,
+            amounts: <?php echo json_encode($categoryAmounts ?? []); ?>,
+            colors: <?php echo json_encode($categoryColors ?? []); ?>
+        },
+        loanStats: {
+            paidAmount: <?php echo $loanStats['paid_amount'] ?? 0; ?>,
+            remainingAmount: <?php echo $loanStats['remaining_amount'] ?? 0; ?>,
+            paidInterest: <?php echo $loanStats['paid_interest'] ?? 0; ?>,
+            remainingInterest: <?php echo $loanStats['remaining_interest'] ?? 0; ?>
+        },
+        paymentMethods: {
+            labels: <?php echo json_encode($methodLabels ?? []); ?>, 
+            amounts: <?php echo json_encode($methodAmounts ?? []); ?>
+        },
+        memberStats: {
+            activeMembers: <?php echo $memberStats['active_members'] ?? 0; ?>,
+            inactiveMembers: <?php echo $memberStats['inactive_members'] ?? 0; ?>
         }
-        ?>
-        
-        new Chart(ctx, {
-            type: 'pie',
-            data: {
-                labels: categories,
-                datasets: [{
-                    data: amounts,
-                    backgroundColor: backgroundColors,
-                    borderColor: '#fff',
-                    borderWidth: 2
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'right',
-                        display: false
+    };
+    
+    // Initialize all charts
+    function initializeCharts() {
+        try {
+            // Clear any existing chart instances
+            Object.values(chartInstances).forEach(chart => {
+                if (chart) chart.destroy();
+            });
+            
+            // Income vs Expenses Chart
+            const incomeExpensesCtx = document.getElementById('incomeExpensesChart')?.getContext('2d');
+            if (incomeExpensesCtx) {
+                chartInstances.incomeExpenses = new Chart(incomeExpensesCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: months,
+                        datasets: [
+                            {
+                                label: 'Income',
+                                data: chartData.income,
+                                backgroundColor: colors.green,
+                                borderColor: colors.green,
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Expenses',
+                                data: chartData.expenses,
+                                backgroundColor: colors.red,
+                                borderColor: colors.red,
+                                borderWidth: 1
+                            }
+                        ]
                     },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                const percentage = Math.round((context.raw / total) * 100);
-                                return context.label + ': Rs.' + context.raw.toLocaleString() + ' (' + percentage + '%)';
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Amount (Rs.)'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.dataset.label + ': Rs.' + (context.raw || 0).toLocaleString();
+                                    }
+                                }
                             }
                         }
                     }
-                }
+                });
             }
-        });
-    }
-    
-    // Create Loan Status Chart
-    function createLoanStatusChart() {
-        const ctx = document.getElementById('loanStatusChart').getContext('2d');
-        
-        // Get data from PHP
-        const paidAmount = <?php echo $loanStats['paid_amount']; ?>;
-        const remainingAmount = <?php echo $loanStats['remaining_amount']; ?>;
-        const paidInterest = <?php echo $loanStats['paid_interest']; ?>;
-        const remainingInterest = <?php echo $loanStats['remaining_interest']; ?>;
-        
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: ['Loan Principal', 'Interest'],
-                datasets: [
-                    {
-                        label: 'Paid',
-                        data: [paidAmount, paidInterest],
-                        backgroundColor: colors.green,
-                        borderColor: colors.green,
-                        borderWidth: 1
+            
+            // Membership Fee Chart
+            const membershipCtx = document.getElementById('membershipChart')?.getContext('2d');
+            if (membershipCtx) {
+                chartInstances.membership = new Chart(membershipCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Paid', 'Unpaid'],
+                        datasets: [{
+                            data: [
+                                chartData.membershipStats.paidFees, 
+                                chartData.membershipStats.unpaidFees
+                            ],
+                            backgroundColor: [colors.green, colors.red],
+                            borderColor: ['#fff', '#fff'],
+                            borderWidth: 2
+                        }]
                     },
-                    {
-                        label: 'Remaining',
-                        data: [remainingAmount, remainingInterest],
-                        backgroundColor: colors.orange,
-                        borderColor: colors.orange,
-                        borderWidth: 1
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        stacked: false
-                    },
-                    y: {
-                        beginAtZero: true,
-                        title: {
-                            display: true,
-                            text: 'Amount (Rs.)'
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        position: 'top'
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return context.dataset.label + ': Rs.' + context.raw.toLocaleString();
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '65%',
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const total = chartData.membershipStats.paidFees + 
+                                                    chartData.membershipStats.unpaidFees;
+                                        const percentage = Math.round((context.raw / total) * 100) || 0;
+                                        return context.label + ': ' + context.raw + ' (' + percentage + '%)';
+                                    }
+                                }
                             }
                         }
                     }
-                }
+                });
             }
-        });
-    }
-    
-    // Create Payment Methods Chart
-    function createPaymentMethodsChart() {
-        const ctx = document.getElementById('paymentMethodsChart').getContext('2d');
-        
-        // Get data from PHP
-        const methods = [];
-        const amounts = [];
-        const backgroundColors = [colors.blue, colors.purple, colors.cyan, colors.orange];
-        
-        <?php
-        // Generate payment method data for chart
-        $methodIndex = 0;
-        while ($method = $paymentMethods->fetch_assoc()) {
-            echo "methods.push('" . addslashes($method['method']) . "');\n";
-            echo "amounts.push(" . $method['amount'] . ");\n";
-            $methodIndex++;
+            
+            // Expense Categories Chart
+            const expenseCategoriesCtx = document.getElementById('expenseCategoriesChart')?.getContext('2d');
+            if (expenseCategoriesCtx && chartData.expenseCategories.labels.length > 0) {
+                chartInstances.expenseCategories = new Chart(expenseCategoriesCtx, {
+                    type: 'pie',
+                    data: {
+                        labels: chartData.expenseCategories.labels,
+                        datasets: [{
+                            data: chartData.expenseCategories.amounts,
+                            backgroundColor: chartData.expenseCategories.colors,
+                            borderColor: '#fff',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'right',
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const total = context.dataset.data.reduce((a, b) => a + (b || 0), 0);
+                                        const percentage = Math.round((context.raw / total) * 100) || 0;
+                                        return context.label + ': Rs.' + (context.raw || 0).toLocaleString() + 
+                                               ' (' + percentage + '%)';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            } else if (expenseCategoriesCtx) {
+                // Show no data message
+                const container = expenseCategoriesCtx.canvas.parentNode;
+                container.innerHTML = `
+                    <div class="chart-fallback">
+                        <i class="fas fa-info-circle"></i>
+                        <p>No expense data available for this period</p>
+                    </div>
+                `;
+            }
+            
+            // Loan Status Chart
+            const loanStatusCtx = document.getElementById('loanStatusChart')?.getContext('2d');
+            if (loanStatusCtx) {
+                chartInstances.loanStatus = new Chart(loanStatusCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Loan Principal', 'Interest'],
+                        datasets: [
+                            {
+                                label: 'Paid',
+                                data: [
+                                    chartData.loanStats.paidAmount, 
+                                    chartData.loanStats.paidInterest
+                                ],
+                                backgroundColor: colors.green,
+                                borderColor: colors.green,
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Remaining',
+                                data: [
+                                    chartData.loanStats.remainingAmount, 
+                                    chartData.loanStats.remainingInterest
+                                ],
+                                backgroundColor: colors.orange,
+                                borderColor: colors.orange,
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                stacked: false
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Amount (Rs.)'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.dataset.label + ': Rs.' + (context.raw || 0).toLocaleString();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Payment Methods Chart
+            const paymentMethodsCtx = document.getElementById('paymentMethodsChart')?.getContext('2d');
+            if (paymentMethodsCtx && chartData.paymentMethods.labels.length > 0) {
+                chartInstances.paymentMethods = new Chart(paymentMethodsCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: chartData.paymentMethods.labels,
+                        datasets: [{
+                            data: chartData.paymentMethods.amounts,
+                            backgroundColor: [colors.blue, colors.purple, colors.cyan, colors.orange],
+                            borderColor: '#fff',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '50%',
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const total = context.dataset.data.reduce((a, b) => a + (b || 0), 0);
+                                        const percentage = Math.round((context.raw / total) * 100) || 0;
+                                        return context.label + ': Rs.' + (context.raw || 0).toLocaleString() + 
+                                               ' (' + percentage + '%)';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            } else if (paymentMethodsCtx) {
+                // Show no data message
+                const container = paymentMethodsCtx.canvas.parentNode;
+                container.innerHTML = `
+                    <div class="chart-fallback">
+                        <i class="fas fa-info-circle"></i>
+                        <p>No payment method data available for this period</p>
+                    </div>
+                `;
+            }
+            
+            // Member Stats Chart
+            const memberStatsCtx = document.getElementById('memberStatsChart')?.getContext('2d');
+            if (memberStatsCtx) {
+                chartInstances.memberStats = new Chart(memberStatsCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Member Status'],
+                        datasets: [
+                            {
+                                label: 'Active Members',
+                                data: [chartData.memberStats.activeMembers],
+                                backgroundColor: colors.blue,
+                                borderColor: colors.blue,
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Inactive Members',
+                                data: [chartData.memberStats.inactiveMembers],
+                                backgroundColor: colors.gray,
+                                borderColor: colors.gray,
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                stacked: true
+                            },
+                            y: {
+                                stacked: true,
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Number of Members'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const total = chartData.memberStats.activeMembers + 
+                                                     chartData.memberStats.inactiveMembers;
+                                        const percentage = Math.round((context.raw / total) * 100) || 0;
+                                        return context.dataset.label + ': ' + context.raw + ' (' + percentage + '%)';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            
+            console.log('All charts initialized successfully');
+        } catch (error) {
+            console.error('Error initializing charts:', error);
+            alert('There was an error displaying the charts. Please try refreshing the page.');
         }
-        ?>
-        
-        new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: methods,
-                datasets: [{
-                    data: amounts,
-                    backgroundColor: backgroundColors.slice(0, methods.length),
-                    borderColor: '#fff',
-                    borderWidth: 2
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '50%',
-                plugins: {
-                    legend: {
-                        position: 'bottom'
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                const percentage = Math.round((context.raw / total) * 100);
-                                return context.label + ': Rs.' + context.raw.toLocaleString() + ' (' + percentage + '%)';
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-    
-    // Create Member Stats Chart
-    function createMemberStatsChart() {
-        const ctx = document.getElementById('memberStatsChart').getContext('2d');
-        
-        // Get data from PHP
-        const activeMembers = <?php echo $memberStats['active_members']; ?>;
-        const inactiveMembers = <?php echo $memberStats['inactive_members']; ?>;
-        
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: ['Member Status'],
-                datasets: [
-                    {
-                        label: 'Active Members',
-                        data: [activeMembers],
-                        backgroundColor: colors.blue,
-                        borderColor: colors.blue,
-                        borderWidth: 1
-                    },
-                    {
-                        label: 'Inactive Members',
-                        data: [inactiveMembers],
-                        backgroundColor: colors.gray,
-                        borderColor: colors.gray,
-                        borderWidth: 1
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        stacked: true
-                    },
-                    y: {
-                        stacked: true,
-                        beginAtZero: true,
-                        title: {
-                            display: true,
-                            text: 'Number of Members'
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        position: 'bottom'
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const total = activeMembers + inactiveMembers;
-                                const percentage = Math.round((context.raw / total) * 100);
-                                return context.dataset.label + ': ' + context.raw + ' (' + percentage + '%)';
-                            }
-                        }
-                    }
-                }
-            }
-        });
     }
     
     // Function to download chart as image
-    function downloadChart(chartId, filename) {
+    window.downloadChart = function(chartId, filename) {
         // Check if user is auditor before allowing download
         const isAuditor = <?php echo $isAuditor ? 'true' : 'false'; ?>;
         
@@ -1273,16 +1358,31 @@ if (($loanStats['paid_amount'] + $loanStats['remaining_amount']) > 0) {
         }
         
         const canvas = document.getElementById(chartId);
-        const image = canvas.toDataURL('image/png');
+        if (!canvas) {
+            console.error('Canvas element not found:', chartId);
+            alert('Chart not found. Please try again.');
+            return;
+        }
         
-        // Create temporary link and trigger download
-        const link = document.createElement('a');
-        link.href = image;
-        link.download = filename + '_' + <?php echo $selectedYear; ?> + '.png';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    }
+        try {
+            const image = canvas.toDataURL('image/png');
+            
+            // Create temporary link and trigger download
+            const link = document.createElement('a');
+            link.href = image;
+            link.download = filename + '_<?php echo $selectedYear; ?>.png';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (error) {
+            console.error('Error downloading chart:', error);
+            alert('There was an error downloading the chart. Please try again.');
+        }
+    };
+    
+    // Initialize charts on page load
+    initializeCharts();
+});
 </script>
 </body>
 </html>
