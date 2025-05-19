@@ -12,21 +12,51 @@ if (!isset($_SESSION['u']) || !isset($_SESSION['u']['Member_MemberID'])) {
 $memberID = $_SESSION['u']['Member_MemberID'];
 $conn = getConnection();
 
+// First, auto-mark older notifications (older than 30 days) as "Older"
+$thirtyDaysAgo = date('Y-m-d H:i:s', strtotime('-30 days'));
+$updateOlderQuery = "UPDATE ChangeLog 
+                     SET Status = 'Older' 
+                     WHERE MemberID = ? 
+                     AND Status = 'Not Read'
+                     AND ChangeDate < ?";
+$updateOlderStmt = $conn->prepare($updateOlderQuery);
+$updateOlderStmt->bind_param("ss", $memberID, $thirtyDaysAgo);
+$updateOlderStmt->execute();
+
+// Get filter parameter (default to showing all notifications)
+$filter = isset($_GET['filter']) ? $_GET['filter'] : 'all';
+$filterWhere = "MemberID = ?";
+$filterParams = array($memberID);
+
+// Apply filter to query
+if ($filter === 'unread') {
+    $filterWhere .= " AND Status = 'Not Read'";
+} elseif ($filter === 'read') {
+    $filterWhere .= " AND Status = 'Read'";
+} elseif ($filter === 'older') {
+    $filterWhere .= " AND Status = 'Older'";
+}
+
 // Pagination settings
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $limit = 10; // Notifications per page
 $offset = ($page - 1) * $limit;
 
-// Get total number of notifications for this member
-$countQuery = "SELECT COUNT(*) as total FROM ChangeLog WHERE MemberID = ?";
+// Get total number of notifications for this member with filter applied
+$countQuery = "SELECT COUNT(*) as total FROM ChangeLog WHERE $filterWhere";
 $countStmt = $conn->prepare($countQuery);
-$countStmt->bind_param("s", $memberID);
+// Bind parameters based on the filter
+if (count($filterParams) === 1) {
+    $countStmt->bind_param("s", $filterParams[0]);
+} elseif (count($filterParams) === 2) {
+    $countStmt->bind_param("ss", $filterParams[0], $filterParams[1]);
+}
 $countStmt->execute();
 $countResult = $countStmt->get_result();
 $totalNotifications = $countResult->fetch_assoc()['total'];
 $totalPages = ceil($totalNotifications / $limit);
 
-// Get notifications with pagination
+// Get notifications with pagination and filter
 $notificationsQuery = "SELECT 
                      LogID,
                      RecordType,
@@ -35,11 +65,16 @@ $notificationsQuery = "SELECT
                      Status,
                      DATE_FORMAT(ChangeDate, '%Y-%m-%d %H:%i') as FormattedDate
                      FROM ChangeLog 
-                     WHERE MemberID = ? 
+                     WHERE $filterWhere 
                      ORDER BY ChangeDate DESC 
                      LIMIT ? OFFSET ?";
 $stmt = $conn->prepare($notificationsQuery);
-$stmt->bind_param("sii", $memberID, $limit, $offset);
+// Bind parameters based on the filter
+if (count($filterParams) === 1) {
+    $stmt->bind_param("sii", $filterParams[0], $limit, $offset);
+} elseif (count($filterParams) === 2) {
+    $stmt->bind_param("ssii", $filterParams[0], $filterParams[1], $limit, $offset);
+}
 $stmt->execute();
 $result = $stmt->get_result();
 $notifications = [];
@@ -61,8 +96,9 @@ if (isset($_GET['markAllRead']) && $_GET['markAllRead'] == 1) {
         $_SESSION['error_message'] = "Failed to update notifications";
     }
     
-    // Redirect to remove the query parameter
-    header("Location: notifications.php");
+    // Redirect to remove the query parameter but keep the filter
+    $redirectUrl = "notifications.php" . ($filter !== 'all' ? "?filter=$filter" : "");
+    header("Location: $redirectUrl");
     exit;
 }
 
@@ -78,18 +114,28 @@ if (isset($_GET['markRead']) && is_numeric($_GET['markRead'])) {
         $_SESSION['error_message'] = "Failed to update notification";
     }
     
-    // Redirect to remove the query parameter
-    header("Location: notifications.php");
+    // Redirect to remove the query parameter but keep the filter
+    $redirectUrl = "notifications.php" . ($filter !== 'all' ? "?filter=$filter" : "");
+    header("Location: $redirectUrl");
     exit;
 }
 
-// Count unread notifications
-$unreadQuery = "SELECT COUNT(*) as unread FROM ChangeLog WHERE MemberID = ? AND Status = 'Not Read'";
-$unreadStmt = $conn->prepare($unreadQuery);
-$unreadStmt->bind_param("s", $memberID);
-$unreadStmt->execute();
-$unreadResult = $unreadStmt->get_result();
-$unreadCount = $unreadResult->fetch_assoc()['unread'];
+// Count notifications by status
+$statusCountQuery = "SELECT 
+                     SUM(CASE WHEN Status = 'Not Read' THEN 1 ELSE 0 END) as unread,
+                     SUM(CASE WHEN Status = 'Read' THEN 1 ELSE 0 END) as read_count,
+                     SUM(CASE WHEN Status = 'Older' THEN 1 ELSE 0 END) as older
+                     FROM ChangeLog 
+                     WHERE MemberID = ?";
+$statusCountStmt = $conn->prepare($statusCountQuery);
+$statusCountStmt->bind_param("s", $memberID);
+$statusCountStmt->execute();
+$statusCountResult = $statusCountStmt->get_result();
+$statusCounts = $statusCountResult->fetch_assoc();
+$unreadCount = $statusCounts['unread'];
+$readCount = $statusCounts['read_count'];
+$olderCount = $statusCounts['older'];
+$totalCount = $unreadCount + $readCount + $olderCount;
 ?>
 
 <!DOCTYPE html>
@@ -160,6 +206,15 @@ $unreadCount = $unreadResult->fetch_assoc()['unread'];
         
         .notification-unread {
             background-color: #f0f7ff;
+        }
+        
+        .notification-read {
+            background-color: white;
+        }
+        
+        .notification-older {
+            background-color: #f9f9f9;
+            opacity: 0.8;
         }
         
         .notification-header {
@@ -296,6 +351,27 @@ $unreadCount = $unreadResult->fetch_assoc()['unread'];
         .fade-out {
             opacity: 0;
         }
+        
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .filter-dropdown select {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            background-color: white;
+            color: #1e3c72;
+            font-size: 0.9rem;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .filter-dropdown select:focus {
+            border-color: #1e3c72;
+        }
     </style>
 </head>
 <body>
@@ -310,11 +386,22 @@ $unreadCount = $unreadResult->fetch_assoc()['unread'];
                 <?php endif; ?>
             </h1>
             
-            <?php if ($unreadCount > 0): ?>
-            <a href="notifications.php?markAllRead=1" class="mark-all-button">
-                <i class="fas fa-check-double"></i> Mark All as Read
-            </a>
-            <?php endif; ?>
+            <div class="header-actions">
+                <div class="filter-dropdown">
+                    <select id="notificationFilter" onchange="applyFilter(this.value)">
+                        <option value="all" <?php echo $filter === 'all' ? 'selected' : ''; ?>>All Notifications (<?php echo $totalCount; ?>)</option>
+                        <option value="unread" <?php echo $filter === 'unread' ? 'selected' : ''; ?>>Unread (<?php echo $unreadCount; ?>)</option>
+                        <option value="read" <?php echo $filter === 'read_count' ? 'selected' : ''; ?>>Read (<?php echo $readCount; ?>)</option>
+                        <option value="older" <?php echo $filter === 'older' ? 'selected' : ''; ?>>Older (<?php echo $olderCount; ?>)</option>
+                    </select>
+                </div>
+                
+                <?php if ($unreadCount > 0): ?>
+                <a href="notifications.php?markAllRead=1<?php echo $filter !== 'all' ? '&filter='.$filter : ''; ?>" class="mark-all-button">
+                    <i class="fas fa-check-double"></i> Mark All as Read
+                </a>
+                <?php endif; ?>
+            </div>
         </div>
         
         <?php if (isset($_SESSION['success_message'])): ?>
@@ -339,15 +426,18 @@ $unreadCount = $unreadResult->fetch_assoc()['unread'];
             <?php if (empty($notifications)): ?>
             <div class="no-notifications">
                 <i class="fas fa-inbox fa-3x" style="color: #ddd; margin-bottom: 1rem;"></i>
-                <p>You don't have any notifications yet.</p>
+                <p>You don't have any notifications<?php echo $filter !== 'all' ? ' in this category' : '' ?>.</p>
             </div>
             <?php else: ?>
                 <?php foreach ($notifications as $notification): ?>
-                <div class="notification-item <?php echo $notification['Status'] === 'Not Read' ? 'notification-unread' : ''; ?>">
+                <div class="notification-item <?php echo $notification['Status'] === 'Not Read' ? 'notification-unread' : 
+                         ($notification['Status'] === 'Older' ? 'notification-older' : 'notification-read'); ?>">
                     <div class="notification-header">
                         <div class="notification-title">
                             <?php if ($notification['Status'] === 'Not Read'): ?>
                             <span class="unread-indicator"></span>
+                            <?php elseif ($notification['Status'] === 'Older'): ?>
+                            <span class="older-indicator" title="Notification older than 30 days"><i class="fas fa-clock" style="font-size: 0.8rem; color: #aaa; margin-right: 0.5rem;"></i></span>
                             <?php endif; ?>
                             <?php echo htmlspecialchars($notification['RecordType']); ?> Update
                         </div>
@@ -357,8 +447,8 @@ $unreadCount = $unreadResult->fetch_assoc()['unread'];
                         <?php echo htmlspecialchars($notification['ChangeDetails']); ?>
                     </div>
                     <div class="notification-actions">
-                        <?php if ($notification['Status'] === 'Not Read'): ?>
-                        <a href="notifications.php?markRead=<?php echo $notification['LogID']; ?>" class="action-button">
+                        <?php if ($notification['Status'] === 'Not Read' || $notification['Status'] === 'Older'): ?>
+                        <a href="notifications.php?markRead=<?php echo $notification['LogID']; ?><?php echo $filter !== 'all' ? '&filter='.$filter : ''; ?>" class="action-button">
                             <i class="fas fa-check"></i> Mark as Read
                         </a>
                         <?php else: ?>
@@ -375,19 +465,25 @@ $unreadCount = $unreadResult->fetch_assoc()['unread'];
         <?php if ($totalPages > 1): ?>
         <div class="pagination">
             <?php if ($page > 1): ?>
-            <a href="notifications.php?page=<?php echo $page - 1; ?>"><i class="fas fa-chevron-left"></i></a>
+            <a href="notifications.php?page=<?php echo $page - 1; ?><?php echo $filter !== 'all' ? '&filter='.$filter : ''; ?>">
+                <i class="fas fa-chevron-left"></i>
+            </a>
             <?php endif; ?>
             
             <?php for ($i = 1; $i <= $totalPages; $i++): ?>
             <?php if ($i == $page): ?>
             <span class="active"><?php echo $i; ?></span>
             <?php else: ?>
-            <a href="notifications.php?page=<?php echo $i; ?>"><?php echo $i; ?></a>
+            <a href="notifications.php?page=<?php echo $i; ?><?php echo $filter !== 'all' ? '&filter='.$filter : ''; ?>">
+                <?php echo $i; ?>
+            </a>
             <?php endif; ?>
             <?php endfor; ?>
             
             <?php if ($page < $totalPages): ?>
-            <a href="notifications.php?page=<?php echo $page + 1; ?>"><i class="fas fa-chevron-right"></i></a>
+            <a href="notifications.php?page=<?php echo $page + 1; ?><?php echo $filter !== 'all' ? '&filter='.$filter : ''; ?>">
+                <i class="fas fa-chevron-right"></i>
+            </a>
             <?php endif; ?>
         </div>
         <?php endif; ?>
@@ -397,6 +493,10 @@ $unreadCount = $unreadResult->fetch_assoc()['unread'];
     <?php include '../templates/footer.php'; ?>
 
     <script>
+        function applyFilter(filter) {
+            window.location.href = 'notifications.php?filter=' + filter;
+        }
+        
         document.addEventListener('DOMContentLoaded', function() {
             // Initialize alerts EXCEPT notification alerts
             const alertElements = document.querySelectorAll('.alert');

@@ -426,15 +426,16 @@ try {
     $logQuery = "INSERT INTO ChangeLog (
         RecordType,
         RecordID,
-        UserID,
+        MemberID,  
         TreasurerID,
         OldValues,
         NewValues,
         ChangeDetails
     ) VALUES (?, ?, ?, ?, ?, ?, ?)";
-    
+
     $recordType = 'Payment';
-    $userId = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : $treasurerId;
+    // Use memberId directly instead of userId
+    $memberIdForLog = $memberId; // Use the member_id from the payment
     $oldValues = json_encode(['status' => 'new']);
     $newValues = json_encode([
         'payment_id' => $paymentId,
@@ -445,9 +446,9 @@ try {
         'year' => $year
     ]);
     $changeDetails = "Treasurer processed $paymentType payment of Rs. $amount";
-    
+
     $stmt = $conn->prepare($logQuery);
-    $stmt->bind_param("sssssss", $recordType, $paymentId, $userId, $treasurerId, $oldValues, $newValues, $changeDetails);
+    $stmt->bind_param("sssssss", $recordType, $paymentId, $memberIdForLog, $treasurerId, $oldValues, $newValues, $changeDetails);
     $stmt->execute();
     $stmt->close();
 
@@ -468,52 +469,6 @@ try {
         $conn->rollback();
     }
     $_SESSION['error_message'] = "Error processing payment: " . $e->getMessage();
-    header('Location: treasurerPayment.php');
+    header('Location: ../treasurerPayment.php');
     exit();
-}
-
-// Helper Functions
-function validateCardDetails($cardNumber, $expireDate, $cvv) {
-    if (!preg_match('/^\d{16}$/', str_replace(' ', '', $cardNumber))) {
-        throw new Exception("Invalid card number format");
-    }
-
-    if (!preg_match('/^(0[1-9]|1[0-2])\/\d{2}$/', $expireDate)) {
-        throw new Exception("Invalid expiry date format");
-    }
-
-    list($month, $year) = explode('/', $expireDate);
-    $expYear = '20' . $year;
-    $currentYear = date('Y');
-    $currentMonth = date('m');
-    
-    if ($expYear < $currentYear || 
-        ($expYear == $currentYear && $month < $currentMonth)) {
-        throw new Exception("Card has expired");
-    }
-
-    if (!preg_match('/^\d{3}$/', $cvv)) {
-        throw new Exception("Invalid CVV format");
-    }
-}
-
-function validateFileUpload($file) {
-    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
-    $maxSize = 5 * 1024 * 1024; // 5MB
-
-    if ($file['error'] !== UPLOAD_ERR_OK) {
-        throw new Exception("File upload failed with error code: " . $file['error']);
-    }
-
-    if ($file['size'] > $maxSize) {
-        throw new Exception("File size must be less than 5MB");
-    }
-
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mimeType = finfo_file($finfo, $file['tmp_name']);
-    finfo_close($finfo);
-
-    if (!in_array($mimeType, $allowedTypes)) {
-        throw new Exception("Only JPG, PNG and GIF files are allowed");
-    }
 }

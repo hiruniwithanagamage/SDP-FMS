@@ -101,27 +101,37 @@ if (isset($_SESSION['u'])) {
                     'fines' => $unpaidFines
                 ];
                 
-                // Get unread notifications from ChangeLog
+                // First, get the total count of unread notifications
+                $countQuery = "SELECT COUNT(*) as unread_count
+                            FROM ChangeLog 
+                            WHERE MemberID = ? AND Status = 'Not Read'";
+                $countStmt = $conn->prepare($countQuery);
+                $countStmt->bind_param("s", $memberID);
+                $countStmt->execute();
+                $countResult = $countStmt->get_result();
+                $countData = $countResult->fetch_assoc();
+                $unreadCount = $countData['unread_count'];
+
+                // Then, get only the 5 most recent notifications for display
                 $notificationQuery = "SELECT 
-                                     LogID,
-                                     RecordType,
-                                     RecordID,
-                                     ChangeDetails,
-                                     DATE_FORMAT(ChangeDate, '%Y-%m-%d %H:%i') as FormattedDate
-                                     FROM ChangeLog 
-                                     WHERE MemberID = ? AND Status = 'Not Read' 
-                                     ORDER BY ChangeDate DESC 
-                                     LIMIT 5";
+                                    LogID,
+                                    RecordType,
+                                    RecordID,
+                                    ChangeDetails,
+                                    DATE_FORMAT(ChangeDate, '%Y-%m-%d %H:%i') as FormattedDate
+                                    FROM ChangeLog 
+                                    WHERE MemberID = ? AND Status = 'Not Read' 
+                                    ORDER BY ChangeDate DESC 
+                                    LIMIT 5";
                 $notificationStmt = $conn->prepare($notificationQuery);
                 $notificationStmt->bind_param("s", $memberID);
                 $notificationStmt->execute();
                 $notificationResult = $notificationStmt->get_result();
-                
+
                 if ($notificationResult && $notificationResult->num_rows > 0) {
                     while ($row = $notificationResult->fetch_assoc()) {
                         $notifications[] = $row;
                     }
-                    $unreadCount = $notificationResult->num_rows;
                 }
             }
         } catch (Exception $e) {

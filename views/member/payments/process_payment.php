@@ -72,13 +72,14 @@ try {
 
     // IMPORTANT: Always insert the payment record FIRST before creating any child records
     // This ensures foreign key constraints are not violated
-    $cardNumber = isset($_POST['card_number']) ? $_POST['card_number'] : null;
-    $expireDate = isset($_POST['expire_date']) ? $_POST['expire_date'] : null;
-    $cvv = isset($_POST['cvv']) ? $_POST['cvv'] : null;
-
-    // Set status based on payment method
+    
+    // Set status based on payment method - using updated ENUM values
     $status = ($method === 'transfer') ? 'pending' : 'self';
 
+    // Store receipt URL in Notes column (renamed from receipt_url)
+    $notes = $receiptUrl;
+
+    // Insert payment record - removed card_number, expire_date, cvv columns
     $paymentQuery = "INSERT INTO Payment (
         PaymentID, 
         Payment_Type, 
@@ -87,9 +88,7 @@ try {
         Date, 
         Term, 
         Image, 
-        card_number, 
-        expire_date, 
-        cvv, 
+        Notes,
         Member_MemberID,
         Status
     ) VALUES (
@@ -99,18 +98,59 @@ try {
         $amount,
         '$date',
         $currentTerm,
-        " . ($receiptUrl ? "'$receiptUrl'" : "NULL") . ", 
-        " . ($cardNumber ? "'$cardNumber'" : "NULL") . ",
-        " . ($expireDate ? "'$expireDate'" : "NULL") . ",
-        " . ($cvv ? "'$cvv'" : "NULL") . ",
+        " . ($receiptUrl ? "'$receiptUrl'" : "NULL") . ",
+        " . ($notes ? "'$notes'" : "NULL") . ",
         '$memberId',
         '$status'
     )";
 
     iud($paymentQuery);
 
-    // ONLY process other tables if payment method is NOT transfer
-    if ($method !== 'transfer') {
+    // If online payment, store card details in CardDetails table
+    if ($method === 'online' && isset($_POST['card_number'], $_POST['expire_date'], $_POST['cvv'])) {
+        $cardNumber = $_POST['card_number'];
+        $expireDate = $_POST['expire_date'];
+        $cvv = $_POST['cvv'];
+        
+        // Generate card ID using member ID
+        $cardId = generateCardId($memberId);
+        
+        // Check if member already has card details
+        $cardCheckQuery = "SELECT CardID FROM CardDetails WHERE Member_MemberID = '$memberId'";
+        $cardCheckResult = search($cardCheckQuery);
+        
+        if ($cardCheckResult->num_rows > 0) {
+            // Update existing card details
+            $cardRow = $cardCheckResult->fetch_assoc();
+            $existingCardId = $cardRow['CardID'];
+            
+            $updateCardQuery = "UPDATE CardDetails 
+                              SET Card_Number = '$cardNumber',
+                                  Expire_Date = '$expireDate',
+                                  CVV = '$cvv'
+                              WHERE CardID = '$existingCardId'";
+            iud($updateCardQuery);
+        } else {
+            // Insert new card details
+            $insertCardQuery = "INSERT INTO CardDetails (
+                CardID,
+                Card_Number,
+                Expire_Date,
+                CVV,
+                Member_MemberID
+            ) VALUES (
+                '$cardId',
+                '$cardNumber',
+                '$expireDate',
+                '$cvv',
+                '$memberId'
+            )";
+            iud($insertCardQuery);
+        }
+    }
+
+    // // ONLY process other tables if payment method is NOT transfer
+    // if ($method !== 'transfer') {
         // Process different payment types
         switch($paymentType) {
             case 'registration':
@@ -208,8 +248,8 @@ try {
                     iud($monthlyFeeQuery);
                     
                     // Link the fee to the payment
-                    $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID) 
-                                VALUES ('$feeId', '$paymentId')";
+                    $linkQuery = "INSERT INTO MembershipFeePayment (FeeID, PaymentID, Details) 
+                                VALUES ('$feeId', '$paymentId', 'Monthly fee for month $month')";
                     iud($linkQuery);
                 }
                 break;
@@ -237,12 +277,16 @@ try {
                     throw new Exception("Invalid fine amount");
                 }
 
-                // Update fine record
+                // Update fine record and remove direct Payment_PaymentID reference
                 $query = "UPDATE Fine SET 
-                         IsPaid = 'Yes',
-                         Payment_PaymentID = '$paymentId' 
+                         IsPaid = 'Yes'
                          WHERE FineID = '$fineId'";
                 iud($query);
+                
+                // Add entry to FinePayment junction table
+                $finePaymentQuery = "INSERT INTO FinePayment (FineID, PaymentID) 
+                                   VALUES ('$fineId', '$paymentId')";
+                iud($finePaymentQuery);
                 break;
 
             case 'loan':
@@ -291,7 +335,30 @@ try {
             default:
                 throw new Exception("Invalid payment type");
         }
-    }
+    // }
+
+    // Record the change in the ChangeLog table
+    $changeDetails = "Payment of $amount created for $paymentType";
+    $changeLogQuery = "INSERT INTO ChangeLog (
+        RecordType,
+        RecordID,
+        MemberID,
+        TreasurerID,
+        OldValues,
+        NewValues,
+        ChangeDetails,
+        Status
+    ) VALUES (
+        'Payment',
+        '$paymentId',
+        '$memberId',
+        '', /* Empty treasurer ID since this is a member-initiated payment */
+        '',
+        'Amount: $amount, Type: $paymentType, Method: $method',
+        '$changeDetails',
+        'Not Read'
+    )";
+    iud($changeLogQuery);
 
     // Commit transaction
     iud("COMMIT");
@@ -309,7 +376,7 @@ try {
     exit();
 }
 
-// Helper Functions
+// Helper Functions (remain mostly the same)
 /**
  * Gets the current active term/year from the static table
  * 
@@ -487,6 +554,16 @@ function generateFeeId() {
         iud("ROLLBACK");
         throw new Exception("Error generating fee ID: " . $e->getMessage());
     }
+}
+
+/**
+ * Generates a Card ID with format "CD" + "M" + "last digits of member id"
+ * 
+ * @param string $memberId The member ID to use in card ID generation
+ * @return string The newly generated card ID
+ */
+function generateCardId($memberId) {
+    return "CD" . $memberId;
 }
 
 function checkDuplicatePayment($memberId, $paymentType, $currentTerm) {

@@ -93,11 +93,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["update_profile"])) {
             if (in_array($filetype, $allowed)) {
                 // Create new filename to prevent overwriting
                 $newfilename = uniqid() . "." . $ext;
-                $uploadPath = "../../uploads/" . $newfilename;
+                $uploadPath = "../../uploads/profilePictures/" . $newfilename;
                 
                 // Check if the directory exists, if not create it
-                if (!is_dir("../../uploads/")) {
-                    mkdir("../../uploads/", 0755, true);
+                if (!is_dir("../../uploads/profilePictures/")) {
+                    mkdir("../../uploads/profilePictures/", 0755, true);
                 }
                 
                 // Upload file
@@ -191,7 +191,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["change_password"])) {
 // Set profile image path
 $profileImage = "../../assets/images/profile_photo.jpg"; // default image
 if (!empty($memberData['Image'])) {
-    $profileImage = "../../uploads/" . $memberData['Image'];
+    $profileImage = "../../uploads/profilePictures/" . $memberData['Image'];
 }
 ?>
 

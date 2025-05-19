@@ -103,7 +103,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["change_password"])) {
 // Set profile image path
 $profileImage = "../../assets/images/profile_photo.jpg"; // default image
 if ($memberData && !empty($memberData['Image'])) {
-    $profileImage = "../../uploads/" . $memberData['Image'];
+    $profileImage = "../../uploads/profilePictures/" . $memberData['Image'];
 }
 ?>
 

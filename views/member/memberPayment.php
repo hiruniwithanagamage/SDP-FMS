@@ -313,8 +313,8 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
                         <div class="form-group card-number-group">
                             <label>Card Number</label>
                             <span class="card-icon">💳</span>
-                            <input type="text" name="card_number" pattern="\d{16}" maxlength="16" 
-                                   placeholder="1234 5678 9012 3456">
+                            <input type="text" name="card_number" pattern="[0-9 ]{13,19}" maxlength="19" 
+                                placeholder="1234 5678 9012 3456">
                         </div>
                         <div class="card-expiry-cvv">
                             <div class="form-group">
@@ -372,6 +372,17 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
         const remainingRegFee = <?php echo $remainingRegFee; ?>;
         const memberStatus = "<?php echo $memberStatus; ?>";
         const currentTerm = <?php echo $currentTerm; ?>;
+
+        document.querySelector('input[name="card_number"]').addEventListener('input', function(e) {
+            // Remove all non-digit characters
+            let value = this.value.replace(/\D/g, '');
+            
+            // Add spaces after every 4 digits
+            value = value.replace(/(\d{4})(?=\d)/g, '$1 ');
+            
+            // Update the input value
+            this.value = value;
+        });
     </script>
     <script src="../../assets/js/memberPayments.js"></script>
 </body>

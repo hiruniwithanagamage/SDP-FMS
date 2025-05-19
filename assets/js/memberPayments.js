@@ -1,4 +1,4 @@
-// memberPayment.js
+// Clean up the memberPayment.js file by removing duplicated code and consolidating event listeners
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('paymentForm');
     const yearSelect = document.getElementById('yearSelect');
@@ -20,19 +20,50 @@ document.addEventListener('DOMContentLoaded', function() {
         interest: 0
     };
 
-    // Card number formatting
+    // Card number formatting - uncomment and fix this section
     const cardNumberInput = document.querySelector('input[name="card_number"]');
     if (cardNumberInput) {
         cardNumberInput.addEventListener('input', function(e) {
-            let value = e.target.value.replace(/\s/g, '').replace(/\D/g, '');
-            let formattedValue = '';
-            for (let i = 0; i < value.length; i++) {
-                if (i > 0 && i % 4 === 0) {
-                    formattedValue += ' ';
-                }
-                formattedValue += value[i];
+            // Remove all non-digit characters
+            let value = this.value.replace(/\D/g, '');
+            
+            // Add spaces after every 4 digits
+            value = value.replace(/(\d{4})(?=\d)/g, '$1 ');
+            
+            // Update the input value
+            this.value = value;
+        });
+    }
+
+    // Expire date formatting - use this consolidated version
+    const expireDate = document.querySelector('input[name="expire_date"]');
+    if (expireDate) {
+        expireDate.addEventListener('input', function(e) {
+            let value = this.value.replace(/\D/g, '');
+            
+            if (value.length > 2) {
+                value = value.substring(0, 2) + '/' + value.substring(2, 4);
             }
-            e.target.value = formattedValue.trim();
+            
+            this.value = value;
+            
+            // Validate month (01-12)
+            if (value.length >= 2) {
+                const month = parseInt(value.substring(0, 2));
+                if (month < 1 || month > 12) {
+                    this.setCustomValidity('Please enter a valid month (01-12)');
+                } else {
+                    this.setCustomValidity('');
+                }
+            }
+        });
+    }
+
+    // Format CVV to allow only 3 digits
+    const cvvInput = document.querySelector('input[name="cvv"]');
+    if (cvvInput) {
+        cvvInput.addEventListener('input', function() {
+            this.value = this.value.replace(/\D/g, '').substring(0, 3);
         });
     }
 
@@ -219,32 +250,96 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Payment method handler
-    document.querySelectorAll('input[name="payment_method"]').forEach(radio => {
+    const paymentMethodRadios = document.querySelectorAll('input[name="payment_method"]');
+    paymentMethodRadios.forEach(radio => {
         radio.addEventListener('change', function() {
             if (this.value === 'online') {
                 cardDetails.style.display = 'block';
                 bankTransfer.style.display = 'none';
+                
+                // Enable card field validation
+                enableCardFieldValidation(true);
+                
+                // Disable bank transfer field validation
+                const receiptUpload = bankTransfer.querySelector('input[name="receipt"]');
+                if (receiptUpload) {
+                    receiptUpload.required = false;
+                }
             } else if (this.value === 'transfer') {
                 cardDetails.style.display = 'none';
                 bankTransfer.style.display = 'block';
+                
+                // Disable card field validation
+                enableCardFieldValidation(false);
+                
+                // Enable bank transfer field validation
+                const receiptUpload = bankTransfer.querySelector('input[name="receipt"]');
+                if (receiptUpload) {
+                    receiptUpload.required = true;
+                }
             }
         });
     });
-
-    // Expire date formatting
-    const expireDate = document.querySelector('input[name="expire_date"]');
-    if (expireDate) {
-        expireDate.addEventListener('input', function(e) {
-            let value = e.target.value.replace(/\D/g, '');
-            if (value.length >= 2) {
-                value = value.slice(0,2) + '/' + value.slice(2,4);
+    
+    // Function to enable/disable card field validation
+    function enableCardFieldValidation(enable) {
+        const cardFields = cardDetails.querySelectorAll('input');
+        cardFields.forEach(field => {
+            if (enable) {
+                // Store original attributes in data attributes if not already stored
+                if (!field.dataset.originalRequired) {
+                    field.dataset.originalRequired = field.required || false;
+                    field.dataset.originalPattern = field.pattern || '';
+                }
+                
+                // Restore original validation attributes
+                field.required = field.dataset.originalRequired === 'true';
+                field.pattern = field.dataset.originalPattern;
+            } else {
+                // Store original attributes if not already stored
+                if (!field.dataset.originalRequired) {
+                    field.dataset.originalRequired = field.required || false;
+                    field.dataset.originalPattern = field.pattern || '';
+                }
+                
+                // Remove validation attributes
+                field.required = false;
+                field.pattern = '';
             }
-            e.target.value = value;
         });
     }
 
     // Form submission handler
     form.addEventListener('submit', function(e) {
+        const selectedPaymentMethod = document.querySelector('input[name="payment_method"]:checked');
+        
+        if (!selectedPaymentMethod) {
+            e.preventDefault();
+            alert('Please select a payment method');
+            return;
+        }
+        
+        if (selectedPaymentMethod.value === 'online') {
+            // Validate card fields
+            const cardNumber = document.querySelector('input[name="card_number"]').value;
+            const expireDate = document.querySelector('input[name="expire_date"]').value;
+            const cvv = document.querySelector('input[name="cvv"]').value;
+            
+            if (!cardNumber || !expireDate || !cvv) {
+                e.preventDefault();
+                alert('Please fill in all card details');
+                return;
+            }
+        } else if (selectedPaymentMethod.value === 'transfer') {
+            // Validate receipt upload
+            const receiptUpload = document.querySelector('input[name="receipt"]');
+            if (receiptUpload && !receiptUpload.files.length) {
+                e.preventDefault();
+                alert('Please upload a receipt for bank transfer');
+                return;
+            }
+        }
+        
         if (!validateForm()) {
             e.preventDefault();
             return;
@@ -376,7 +471,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const expireDate = document.querySelector('input[name="expire_date"]');
         const cvv = document.querySelector('input[name="cvv"]');
 
-        // Validate card number
+        // Validate card number - updated regex to allow spaces
         if (!cardNumber.value.replace(/\s/g, '').match(/^\d{16}$/)) {
             showError(cardNumber, 'Please enter a valid 16-digit card number');
             isValid = false;

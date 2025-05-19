@@ -68,7 +68,12 @@ function getActiveYear($conn) {
 
 // Generate new Member ID using prepared statement in format MEMB01, MEMB02, etc.
 function generateNewMemberId($conn) {
-    $query = "SELECT MemberID FROM Member ORDER BY MemberID DESC LIMIT 1";
+    // This modified query ensures we get the member with the highest numeric part
+    $query = "SELECT MemberID FROM Member 
+              WHERE MemberID LIKE 'MEMB%' 
+              ORDER BY CAST(SUBSTRING(MemberID, 5) AS UNSIGNED) DESC 
+              LIMIT 1";
+              
     $stmt = $conn->prepare($query);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -77,7 +82,7 @@ function generateNewMemberId($conn) {
         $lastId = $result->fetch_assoc()['MemberID'];
         // Check if the last ID follows our format (MEMB followed by numbers)
         if (preg_match('/^MEMB(\d+)$/', $lastId, $matches)) {
-            $numericPart = intval($matches[1]);
+            $numericPart = (int)$matches[1];
             $newNumericPart = $numericPart + 1;
             return "MEMB" . str_pad($newNumericPart, 2, '0', STR_PAD_LEFT);
         }
@@ -199,7 +204,7 @@ if (isset($_POST['add'])) {
 
             // Handle file upload if exists
             if ($fileName && isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === 0) {
-                $uploadPath = "../uploads/" . $fileName;
+                $uploadPath = "../../uploads/profilePictures/" . $fileName;
                 if (!move_uploaded_file($_FILES['profile_photo']['tmp_name'], $uploadPath)) {
                     throw new Exception("Failed to upload image");
                 }
@@ -522,10 +527,8 @@ if (isset($_POST['add'])) {
                     <div class="form-column">
                         <label for="status">Status</label>
                         <div class="input-container">
-                            <select id="status" name="status" required>
-                                <option value="FAIL" <?php echo (isset($_POST['status']) && $_POST['status'] === 'FAIL') ? 'selected' : ''; ?>>Pending</option>
-                                <option value="TRUE" <?php echo (isset($_POST['status']) && $_POST['status'] === 'TRUE') ? 'selected' : ''; ?>>Full Member</option>
-                            </select>
+                            <input type="text" id="status" name="status" value="Pending" readonly>
+                            <span class="hint-text">New members always start with Pending status</span>
                         </div>
                     </div>
                 </div>
