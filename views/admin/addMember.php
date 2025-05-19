@@ -20,8 +20,17 @@ function validateNIC($nic) {
 }
 
 function validateMobile($mobile) {
-    // Sri Lankan mobile number validation
-    return preg_match("/^(?:0|94|\+94)?(?:7[0-9]{8})$/", $mobile);
+    // Remove spaces for validation
+    $mobile = str_replace(' ', '', $mobile);
+    
+    // Sri Lankan mobile number validation (07XXXXXXXX)
+    $mobilePattern = "/^(?:0|94|\+94)?(?:7[0-9]{8})$/";
+    
+    // Sri Lankan fixed-line number validation (0XX XXXXXXX)
+    // Covers area codes like 011, 081, etc.
+    $fixedLinePattern = "/^(?:0|94|\+94)?(?:[1-9][0-9][0-9]{6,7})$/";
+    
+    return preg_match($mobilePattern, $mobile) || preg_match($fixedLinePattern, $mobile);
 }
 
 function validateName($name) {
@@ -484,7 +493,7 @@ if (isset($_POST['add'])) {
                             <?php if (isset($errors['mobile'])): ?>
                                 <span class="error-message"><?php echo htmlspecialchars($errors['mobile']); ?></span>
                             <?php endif; ?>
-                            <span class="hint-text">Sri Lankan mobile format (e.g., 07XXXXXXXX)</span>
+                            <span class="hint-text">Sri Lankan phone format (e.g., 07XXXXXXXX or 011 2XXXXXX)</span>
                         </div>
                     </div>
                 </div>
@@ -636,11 +645,21 @@ if (isset($_POST['add'])) {
 
                 // Validate mobile if provided
                 const mobile = document.getElementById('mobile').value.trim();
-                if (mobile !== '' && !/^(?:0|94|\+94)?(?:7[0-9]{8})$/.test(mobile)) {
-                    showError('mobile', 'Invalid Sri Lankan mobile number format (e.g., 07XXXXXXXX)');
-                    hasError = true;
+                if (mobile !== '') {
+                    // Remove spaces for validation
+                    const mobileNoSpaces = mobile.replace(/\s/g, '');
+                    
+                    // Sri Lankan mobile number pattern (07XXXXXXXX)
+                    const mobilePattern = /^(?:0|94|\+94)?(?:7[0-9]{8})$/;
+                    
+                    // Sri Lankan fixed-line number pattern (0XX XXXXXXX)
+                    const fixedLinePattern = /^(?:0|94|\+94)?(?:[1-9][0-9][0-9]{6,7})$/;
+                    
+                    if (!(mobilePattern.test(mobileNoSpaces) || fixedLinePattern.test(mobileNoSpaces))) {
+                        showError('mobile', 'Invalid Sri Lankan phone number format (e.g., 07XXXXXXXX or 011 2XXXXXX)');
+                        hasError = true;
+                    }
                 }
-
                 // Validate family members
                 const familyMembers = parseInt(document.getElementById('family_members').value);
                 if (isNaN(familyMembers) || familyMembers < 0) {

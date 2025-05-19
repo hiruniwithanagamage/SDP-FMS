@@ -76,7 +76,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
     
     // Check if member is already an auditor
-    $checkAuditorQuery = "SELECT * FROM Auditor WHERE MemberID = '$memberID'";
+    $checkAuditorQuery = "SELECT * FROM Auditor WHERE MemberID = '$memberID' AND isActive = 1";
     $checkAuditorResult = search($checkAuditorQuery);
     if ($checkAuditorResult && $checkAuditorResult->num_rows > 0) {
         $errors[] = "This member is already an auditor";
@@ -88,6 +88,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if ($activeAuditorResult && $activeAuditorResult->num_rows > 0) {
         $activeAuditor = $activeAuditorResult->fetch_assoc();
         $errors[] = "There is already an active auditor for this term. Please deactivate the existing auditor first.";
+    }
+
+    // Check if member is already a treasurer for the same term
+    $checkTreasurerQuery = "SELECT * FROM Treasurer WHERE MemberID = '$memberID' AND Term = '$term' AND isActive = 1";
+    $checkTreasurerResult = search($checkTreasurerQuery);
+    if ($checkTreasurerResult && $checkTreasurerResult->num_rows > 0) {
+        $errors[] = "This member is already a treasurer for this term. Same member cannot be both auditor and treasurer for the same year.";
     }
 
     // Get member details

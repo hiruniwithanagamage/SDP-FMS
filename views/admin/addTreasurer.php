@@ -62,7 +62,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
     
     // Check if member is already a treasurer
-    $checkTreasurerQuery = "SELECT * FROM Treasurer WHERE MemberID = '$memberID'";
+    $checkTreasurerQuery = "SELECT * FROM Treasurer WHERE MemberID = '$memberID' AND isActive = 1";
     $checkTreasurerResult = search($checkTreasurerQuery);
     if ($checkTreasurerResult->num_rows > 0) {
         $errors[] = "This member is already a treasurer";

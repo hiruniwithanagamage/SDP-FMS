@@ -122,12 +122,20 @@ $currentYear = getCurrentActiveYear($conn);
 
 // Fetch role options with prepared statements
 function fetchRoleOptions($conn, $tableName, $idColumn, $nameColumn) {
-    $query = "SELECT $idColumn, $nameColumn FROM $tableName";
+
+    // Add Term field as YearInfo only for Auditor and Treasurer tables
+    $yearField = '';
+    if ($tableName == 'Auditor' || $tableName == 'Treasurer') {
+        $yearField = ", Term AS YearInfo";
+    }
+
+    $query = "SELECT $idColumn, $nameColumn$yearField FROM $tableName";
     $stmt = $conn->prepare($query);
     $stmt->execute();
     return $stmt->get_result();
 }
 
+// Keep the calls to fetch options for each role the same:
 $adminResult = fetchRoleOptions($conn, "Admin", "AdminID", "Name");
 $auditorResult = fetchRoleOptions($conn, "Auditor", "AuditorID", "Name");
 $treasurerResult = fetchRoleOptions($conn, "Treasurer", "TreasurerID", "Name");
@@ -532,14 +540,14 @@ function generateUsername($name, $role, $memberId) {
             auditor: [
                 <?php 
                 while($auditor = $auditorResult->fetch_assoc()) {
-                    echo "{id: '" . addslashes($auditor['AuditorID']) . "', name: '" . addslashes($auditor['Name']) . "'},";
+                    echo "{id: '" . addslashes($auditor['AuditorID']) . "', name: '" . addslashes($auditor['Name']) . "', year: '" . (isset($auditor['YearInfo']) ? addslashes($auditor['YearInfo']) : '') . "'},";
                 }
                 ?>
             ],
             treasurer: [
                 <?php 
                 while($treasurer = $treasurerResult->fetch_assoc()) {
-                    echo "{id: '" . addslashes($treasurer['TreasurerID']) . "', name: '" . addslashes($treasurer['Name']) . "'},";
+                    echo "{id: '" . addslashes($treasurer['TreasurerID']) . "', name: '" . addslashes($treasurer['Name']) . "', year: '" . (isset($treasurer['YearInfo']) ? addslashes($treasurer['YearInfo']) : '') . "'},";
                 }
                 ?>
             ],
@@ -580,9 +588,16 @@ function generateUsername($name, $role, $memberId) {
             $('#role_id').empty().append('<option value=""></option>');
             
             if (role) {
-                // Populate with new options
+                // Populate with new options, including year information only for auditor and treasurer
                 roleOptions[role].forEach(option => {
-                    const optionElement = new Option(option.name, option.id, false, false);
+                    let displayText = option.name;
+                    
+                    // Only append year information for auditor and treasurer roles
+                    if ((role === 'auditor' || role === 'treasurer') && option.year) {
+                        displayText += ` (${option.year})`;
+                    }
+                    
+                    const optionElement = new Option(displayText, option.id, false, false);
                     $('#role_id').append(optionElement);
                 });
             }
@@ -644,7 +659,7 @@ function generateUsername($name, $role, $memberId) {
                     const selectedOption = roleOptions[role].find(option => option.id === roleId);
                     
                     if (selectedOption) {
-                        // Get the name from the selected option
+                        // Get the name from the selected option (without year information)
                         const name = selectedOption.name;
                         
                         // Generate username on client side following the format

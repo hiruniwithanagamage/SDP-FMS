@@ -86,9 +86,9 @@ if(isset($_POST['update'])) {
     if(!is_numeric($term)) $errors[] = "Term must be a number";
     
     // Check for duplicate name
-    if(empty($errors) && checkDuplicateName($conn, $name, $auditorId)) {
-        $errors[] = "An auditor with this name already exists";
-    }
+    // if(empty($errors) && checkDuplicateName($conn, $name, $auditorId)) {
+    //     $errors[] = "An auditor with this name already exists";
+    // }
     
     if(empty($errors)) {
         try {
@@ -226,7 +226,7 @@ if(isset($_POST['delete'])) {
         }
         
         // Use prepared statement for deletion
-        $deleteQuery = "DELETE FROM Auditor WHERE AuditorID = ?";
+        $deleteQuery = "DELETE FROM Auditor WHERE AuditorID = ? AND isActive = 0";
         $stmt = $conn->prepare($deleteQuery);
         $stmt->bind_param("s", $auditorId);
         $stmt->execute();
@@ -236,7 +236,7 @@ if(isset($_POST['delete'])) {
             header("Location: " . $_SERVER['PHP_SELF']);
             exit();
         } else {
-            $_SESSION['error_message'] = "Auditor not found or already deleted";
+            $_SESSION['error_message'] = "Auditor not found or active auditor cannot be deleted";
             header("Location: " . $_SERVER['PHP_SELF']);
             exit();
         }

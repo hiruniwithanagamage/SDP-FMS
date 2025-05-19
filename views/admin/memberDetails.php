@@ -133,9 +133,17 @@ if(isset($_POST['update'])) {
     
     // Validate mobile number (Sri Lanka format)
     if (!empty($mobile)) {
-        // Sri Lankan mobile numbers: 07XXXXXXXX or +947XXXXXXXX
-        if (!preg_match('/^(07\d{8}|\+947\d{8})$/', $mobile)) {
-            $errors[] = "Invalid mobile number format. Must be 07XXXXXXXX or +947XXXXXXXX.";
+        // Remove spaces for validation
+        $mobileNoSpaces = str_replace(' ', '', $mobile);
+        
+        // Sri Lankan mobile number pattern (07XXXXXXXX)
+        $mobilePattern = '/^(?:0|94|\+94)?(?:7[0-9]{8})$/';
+        
+        // Sri Lankan fixed-line number pattern (0XX XXXXXXX)
+        $fixedLinePattern = '/^(?:0|94|\+94)?(?:[1-9][0-9][0-9]{6,7})$/';
+        
+        if (!(preg_match($mobilePattern, $mobileNoSpaces) || preg_match($fixedLinePattern, $mobileNoSpaces))) {
+            $errors[] = "Invalid phone number format. Must be a Sri Lankan mobile or fixed-line number.";
         }
     }
     
@@ -860,9 +868,9 @@ if(isset($_POST['delete'])) {
                 </div>
 
                 <div class="form-group">
-                    <label for="edit_mobile">Mobile Number</label>
-                    <input type="text" id="edit_mobile" name="mobile" placeholder="07XXXXXXXX" pattern="^(07\d{8}|\+947\d{8})$">
-                    <small>Format: 07XXXXXXXX or +947XXXXXXXX</small>
+                    <label for="edit_mobile">Mobile/Telephone Number</label>
+                    <input type="text" id="edit_mobile" name="mobile" placeholder="07XXXXXXXX or 011 2XXXXXX">
+                    <small>Format: Mobile (07XXXXXXXX) or Fixed-line (e.g., 011 2XXXXXX)</small>
                 </div>
 
                 <div class="form-group">
@@ -976,9 +984,16 @@ if(isset($_POST['delete'])) {
     // Mobile number validation
     const mobileInput = document.getElementById('edit_mobile');
     mobileInput.addEventListener('input', function() {
-        const mobileValue = this.value;
-        if (mobileValue && !/^(07\d{8}|\+947\d{8})$/.test(mobileValue)) {
-            this.setCustomValidity('Invalid mobile number format. Must be 07XXXXXXXX or +947XXXXXXXX.');
+        const mobileValue = this.value.replace(/\s/g, ''); // Remove spaces for validation
+        
+        // Sri Lankan mobile number pattern (07XXXXXXXX)
+        const mobilePattern = /^(?:0|94|\+94)?(?:7[0-9]{8})$/;
+        
+        // Sri Lankan fixed-line number pattern (0XX XXXXXXX)
+        const fixedLinePattern = /^(?:0|94|\+94)?(?:[1-9][0-9][0-9]{6,7})$/;
+        
+        if (mobileValue && !(mobilePattern.test(mobileValue) || fixedLinePattern.test(mobileValue))) {
+            this.setCustomValidity('Invalid phone number format. Must be a Sri Lankan mobile (07XXXXXXXX) or fixed-line number (e.g., 011 2XXXXXX).');
         } else {
             this.setCustomValidity('');
         }
@@ -1115,9 +1130,16 @@ if(isset($_POST['delete'])) {
             }
             
             // Validate mobile number if provided
-            const mobileValue = mobileInput.value;
-            if (mobileValue && !/^(07\d{8}|\+947\d{8})$/.test(mobileValue)) {
-                alert('Invalid mobile number format. Must be 07XXXXXXXX or +947XXXXXXXX.');
+            const mobileValue = mobileInput.value.replace(/\s/g, ''); // Remove spaces for validation
+            
+            // Sri Lankan mobile number pattern
+            const mobilePattern = /^(?:0|94|\+94)?(?:7[0-9]{8})$/;
+            
+            // Sri Lankan fixed-line number pattern
+            const fixedLinePattern = /^(?:0|94|\+94)?(?:[1-9][0-9][0-9]{6,7})$/;
+            
+            if (mobileValue && !(mobilePattern.test(mobileValue) || fixedLinePattern.test(mobileValue))) {
+                alert('Invalid phone number format. Must be a Sri Lankan mobile (07XXXXXXXX) or fixed-line number (e.g., 011 2XXXXXX).');
                 isValid = false;
             }
             

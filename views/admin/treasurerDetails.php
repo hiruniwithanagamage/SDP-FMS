@@ -188,7 +188,7 @@ if(isset($_POST['delete'])) {
         }
         
         // Use prepared statement for delete
-        $stmt = $conn->prepare("DELETE FROM Treasurer WHERE TreasurerID = ?");
+        $stmt = $conn->prepare("DELETE FROM Treasurer WHERE TreasurerID = ? AND isActive = 0");
         $stmt->bind_param("s", $treasurerId);
         $stmt->execute();
         
