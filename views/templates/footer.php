@@ -118,7 +118,7 @@
                 </div>
             </div>
 
-            <!-- Quick Links -->
+            <!-- Quick Links
             <div class="footer-section">
                 <h3>Quick Links</h3>
                 <ul>
@@ -126,7 +126,7 @@
                     <li><a href="security.php"><i class="fas fa-shield-alt"></i> Security</a></li>
                     <li><a href="support.php"><i class="fas fa-question-circle"></i> Support</a></li>
                 </ul>
-            </div>
+            </div> -->
 
             <!-- Legal -->
             <div class="footer-section">

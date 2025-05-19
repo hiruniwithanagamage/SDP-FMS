@@ -595,7 +595,7 @@ $currentTerm = getCurrentTerm();
                             </div>
                             <div class="dropdown-item" onclick="window.location.href='dashboard.php'">
                                 <i class="fas fa-clipboard-check"></i>
-                                Financial Reports
+                                Financial Analytics
                             </div>
                         </div>
                     </div>
