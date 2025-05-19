@@ -660,7 +660,7 @@ try {
                     <form method="POST">
                         <div class="form-group">
                             <label for="year">Year</label>
-                            <input type="number" id="year" name="year" required min="2024" max="2100" value="<?php echo $nextYear; ?>">
+                            <input type="number" id="year" name="year" required min="2019" max="2100" value="<?php echo $nextYear; ?>">
                         </div>
                         
                         <div class="form-group">
