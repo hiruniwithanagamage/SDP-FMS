@@ -44,6 +44,11 @@ if (isset($_SESSION['u'])) {
                 $loanData = $loanResult->fetch_assoc();
                 $loanDues = $loanData['loan_dues'];
                 
+                // Get the current date information
+                $currentDate = new DateTime(date('Y-m-d'));
+                $currentYear = $currentDate->format('Y');
+                $currentMonth = $currentDate->format('n'); // 1-12 for Jan-Dec
+
                 // Get fee amounts from Static table
                 $feeQuery = "SELECT monthly_fee, registration_fee FROM Static 
                             ORDER BY year DESC LIMIT 1";
@@ -53,65 +58,42 @@ if (isset($_SESSION['u'])) {
                 $feeData = $feeResult->fetch_assoc();
                 $monthlyFee = $feeData['monthly_fee'];
                 $registrationFee = $feeData['registration_fee'];
-                
-                // Check if registration fee is fully paid
-                $regFeeQuery = "SELECT COALESCE(SUM(Amount), 0) as paid_registration 
-                               FROM Payment 
-                               WHERE Member_MemberID = ? AND Payment_Type = 'Registration'";
-                $regFeeStmt = $conn->prepare($regFeeQuery);
-                $regFeeStmt->bind_param("s", $memberID);
-                $regFeeStmt->execute();
-                $regFeeResult = $regFeeStmt->get_result();
-                $regFeeData = $regFeeResult->fetch_assoc();
-                $paidRegistration = $regFeeData['paid_registration'];
+
+                // Calculate unpaid registration fee
+                // Get the total paid registration fees from MembershipFee table
+                $regPaidQuery = "SELECT COALESCE(SUM(Amount), 0) as paid_registration
+                            FROM MembershipFee
+                            WHERE Member_MemberID = ? AND Type = 'registration' AND IsPaid = 'Yes'";
+                $regPaidStmt = $conn->prepare($regPaidQuery);
+                $regPaidStmt->bind_param("s", $memberID);
+                $regPaidStmt->execute();
+                $regPaidResult = $regPaidStmt->get_result();
+                $regPaidData = $regPaidResult->fetch_assoc();
+                $paidRegistration = $regPaidData['paid_registration'];
+
+                // Calculate registration fee due (total from Static - paid amount)
                 $registrationDue = max(0, $registrationFee - $paidRegistration);
-                
-                // Calculate unpaid monthly fees
-                $currentDate = new DateTime(); // Get current date
-                $monthlyFee = $feeData['monthly_fee']; // Get the monthly fee amount from Static table
 
-                // Find the last paid month for this member
-                $lastPaidQuery = "SELECT MAX(Date) as last_paid_date 
-                                FROM MembershipFee mf 
-                                WHERE mf.Member_MemberID = ? AND mf.IsPaid = 'Yes'";
-                $lastPaidStmt = $conn->prepare($lastPaidQuery);
-                $lastPaidStmt->bind_param("s", $memberID);
-                $lastPaidStmt->execute();
-                $lastPaidResult = $lastPaidStmt->get_result();
-                $lastPaidData = $lastPaidResult->fetch_assoc();
+                // Calculate monthly membership fees for current year only
+                // Total expected monthly fees = monthly fee × current month number
+                $totalExpectedMonthlyFees = $currentMonth * $monthlyFee;
 
-                if ($lastPaidData['last_paid_date']) {
-                    // If they have paid before, calculate from the last paid month
-                    $lastPaidDate = new DateTime($lastPaidData['last_paid_date']);
-                    
-                    // Get difference in months
-                    $interval = $currentDate->diff($lastPaidDate);
-                    $monthsDiff = ($interval->y * 12) + $interval->m;
-                    
-                    // If we're in a new month since last payment
-                    if ($monthsDiff > 0) {
-                        $membershipDue = $monthsDiff * $monthlyFee;
-                    } else {
-                        $membershipDue = 0; // No dues if current month is paid
-                    }
-                } else {
-                    // If they have never paid, calculate from join date
-                    $joinedDate = new DateTime($memberData['Joined_Date']);
-                    
-                    // Get difference in months
-                    $interval = $currentDate->diff($joinedDate);
-                    $monthsDiff = ($interval->y * 12) + $interval->m;
-                    
-                    // Include current month if we're past the day of the month they joined
-                    if ($currentDate->format('d') > $joinedDate->format('d')) {
-                        $monthsDiff += 1;
-                    }
-                    
-                    $membershipDue = $monthsDiff * $monthlyFee;
-                }
+                // Get total paid monthly fees for current year
+                $monthlyPaidQuery = "SELECT COALESCE(SUM(Amount), 0) as paid_monthly
+                                    FROM MembershipFee
+                                    WHERE Member_MemberID = ? 
+                                    AND Type = 'monthly' 
+                                    AND IsPaid = 'Yes'
+                                    AND Term = ?";
+                $monthlyPaidStmt = $conn->prepare($monthlyPaidQuery);
+                $monthlyPaidStmt->bind_param("ss", $memberID, $currentYear);
+                $monthlyPaidStmt->execute();
+                $monthlyPaidResult = $monthlyPaidStmt->get_result();
+                $monthlyPaidData = $monthlyPaidResult->fetch_assoc();
+                $paidMonthlyFees = $monthlyPaidData['paid_monthly'];
 
-                // Format the dues for display
-                $formattedMembershipDue = number_format($membershipDue, 2);
+                // Calculate monthly fee due (expected - paid)
+                $membershipDue = max(0, $totalExpectedMonthlyFees - $paidMonthlyFees);
                 
                 // Calculate unpaid fines
                 $fineQuery = "SELECT COALESCE(SUM(Amount), 0) as unpaid_fines 
