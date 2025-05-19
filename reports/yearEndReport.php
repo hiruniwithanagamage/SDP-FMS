@@ -119,11 +119,11 @@ function getFinancialReport($year) {
     
     // Get expense details from Expenses table
     $expenseQuery = "SELECT 
-                      SUM(CASE WHEN Category = 'death_welfare' THEN Amount ELSE 0 END) as death_welfare,
+                      SUM(CASE WHEN Category = 'Death Welfare' THEN Amount ELSE 0 END) as death_welfare,
                       SUM(CASE WHEN Category = 'maintenance' OR Category = 'Maintenace' THEN Amount ELSE 0 END) as maintenance_repairs,
                       SUM(CASE WHEN Category = 'Stationary' THEN Amount ELSE 0 END) as stationary,
                       SUM(CASE WHEN Category = 'Event' THEN Amount ELSE 0 END) as event,
-                      SUM(CASE WHEN Category NOT IN ('death_welfare', 'maintenance', 'Maintenace', 'Stationary', 'Event') THEN Amount ELSE 0 END) as other
+                      SUM(CASE WHEN Category NOT IN ('Death Welfare', 'maintenance', 'Maintenace', 'Stationary', 'Event') THEN Amount ELSE 0 END) as other
                     FROM Expenses
                     WHERE Term = ?";
     

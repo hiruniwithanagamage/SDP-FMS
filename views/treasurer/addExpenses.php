@@ -8,23 +8,37 @@ if (!isset($_SESSION['previous_page']) && isset($_SERVER['HTTP_REFERER'])) {
 }
 
 // Generate new Expense ID
-$query = "SELECT ExpenseID FROM Expenses ORDER BY ExpenseID DESC LIMIT 1";
+// Get current term/year from database
+$termQuery = "SELECT year FROM Static WHERE status = 'active'";
+$termResult = search($termQuery);
+$currentTerm = date('Y'); // Default to current year if not found in DB
+
+if ($termResult && $termResult->num_rows > 0) {
+    $termRow = $termResult->fetch_assoc();
+    $currentTerm = $termRow['year'];
+}
+
+// Get last 2 digits of the year
+$yearSuffix = substr($currentTerm, -2);
+
+// Generate new Expense ID with year component
+$query = "SELECT ExpenseID FROM Expenses WHERE ExpenseID LIKE 'EXP{$yearSuffix}%' ORDER BY ExpenseID DESC LIMIT 1";
 $result = search($query);
 
 if ($result && $result->num_rows > 0) {
     $row = $result->fetch_assoc();
     if ($row && isset($row['ExpenseID'])) {
         $lastId = $row['ExpenseID'];
-        // Use preg_replace to extract only numeric part
-        $numericPart = preg_replace('/[^0-9]/', '', $lastId);
+        // Extract the sequence number (last 2 digits)
+        $numericPart = substr($lastId, -2);
         $newNumericPart = intval($numericPart) + 1;
-        // Format with leading zeros (001, 002, etc.)
-        $newExpenseId = "EXP" . str_pad($newNumericPart, 3, "0", STR_PAD_LEFT);
+        // Format with leading zeros (01, 02, etc.)
+        $newExpenseId = "EXP" . $yearSuffix . str_pad($newNumericPart, 2, "0", STR_PAD_LEFT);
     } else {
-        $newExpenseId = "EXP001";
+        $newExpenseId = "EXP" . $yearSuffix . "01";
     }
 } else {
-    $newExpenseId = "EXP001";
+    $newExpenseId = "EXP" . $yearSuffix . "01";
 }
 
 // Get current treasurer
