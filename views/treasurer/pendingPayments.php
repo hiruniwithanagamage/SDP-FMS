@@ -697,7 +697,7 @@ $currentTerm = getCurrentTerm();
         <div class="content">
             <div class="header-card">
                 <h1>Pending Payments</h1>
-                <a href="index.php" class="back-button">
+                <a href="home-treasurer.php" class="back-button">
                     <i class="fas fa-arrow-left"></i>
                     Back to Dashboard
                 </a>
