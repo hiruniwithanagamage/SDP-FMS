@@ -332,6 +332,10 @@ try {
             // Reset login attempts on successful login
             resetLoginAttempts($d['UserId']);
             
+            // Check and calculate monthly interest (if needed)
+            $interestCalculated = checkAndCalculateMonthlyInterest();
+            $interestCalculatedCount = $_SESSION['interest_calculated_count'] ?? 0;
+            
             // Set session variables
             $_SESSION["u"] = $d;
             $_SESSION["role"] = $d["role"];
@@ -356,7 +360,9 @@ try {
             echo json_encode([
                 "status" => "success",
                 "role" => $d["role"],
-                "lastLogin" => $lastLogin
+                "lastLogin" => $lastLogin,
+                "interestCalculated" => $interestCalculated,
+                "interestCalculatedCount" => $interestCalculatedCount
             ]);
             exit;
             
