@@ -68,9 +68,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Year selection handler
-    yearSelect.addEventListener('change', function() {
-        fetchAndUpdateFees(this.value);
-    });
+    // yearSelect.addEventListener('change', function() {
+    //     fetchAndUpdateFees(this.value);
+    // });
 
     // Payment type change handler
     paymentType.addEventListener('change', function() {
@@ -387,30 +387,30 @@ document.addEventListener('DOMContentLoaded', function() {
         amountHint.textContent = `${selectedMonths} month(s) × Rs. ${staticData.monthly_fee}`;
     }
 
-    async function fetchAndUpdateFees(year) {
-        try {
-            const response = await fetch(`get_fee_structure.php?year=${year}`);
-            if (!response.ok) throw new Error('Failed to fetch fee structure');
+    // async function fetchAndUpdateFees(year) {
+    //     try {
+    //         const response = await fetch(`get_fee_structure.php?year=${year}`);
+    //         if (!response.ok) throw new Error('Failed to fetch fee structure');
             
-            const data = await response.json();
-            if (data.error) {
-                showError(yearSelect, data.error);
-                return;
-            }
+    //         const data = await response.json();
+    //         if (data.error) {
+    //             showError(yearSelect, data.error);
+    //             return;
+    //         }
 
-            staticData = data.fee_structure;
-            if (paymentType.value) {
-                paymentType.dispatchEvent(new Event('change'));
-            }
+    //         staticData = data.fee_structure;
+    //         if (paymentType.value) {
+    //             paymentType.dispatchEvent(new Event('change'));
+    //         }
 
-            if (!data.metadata.is_exact_match) {
-                showNotification(`Using fee structure from year ${data.metadata.actual_year}`);
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            showError(yearSelect, 'Failed to fetch fee structure');
-        }
-    }
+    //         if (!data.metadata.is_exact_match) {
+    //             showNotification(`Using fee structure from year ${data.metadata.actual_year}`);
+    //         }
+    //     } catch (error) {
+    //         console.error('Error:', error);
+    //         showError(yearSelect, 'Failed to fetch fee structure');
+    //     }
+    // }
 
     function validateForm() {
         let isValid = true;

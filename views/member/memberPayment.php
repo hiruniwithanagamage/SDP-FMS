@@ -175,17 +175,8 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
                     </div>
                     <div class="form-group">
                         <label>Term</label>
-                        <select name="year" id="yearSelect">
-                            <?php
-                            $yearQuery = "SELECT DISTINCT year FROM Static ORDER BY year DESC";
-                            $yearResult = search($yearQuery);
-                            while($yearRow = $yearResult->fetch_assoc()): ?>
-                                <option value="<?php echo $yearRow['year']; ?>" 
-                                    <?php echo ($yearRow['year'] == $currentTerm) ? 'selected' : ''; ?>>
-                                    <?php echo $yearRow['year']; ?>
-                                </option>
-                            <?php endwhile; ?>
-                        </select>
+                        <input type="text" name="year" id="yearSelect" value="<?php echo $currentTerm; ?>" readonly>
+                        <input type="hidden" name="year_hidden" value="<?php echo $currentTerm; ?>">
                     </div>
                 </div>
 
@@ -334,9 +325,9 @@ $memberStatus = $memberStatusResult->fetch_assoc()['Status'];
                         <div class="bank-details">
                             <h3>Bank Account Details</h3>
                             <p><strong>Bank:</strong> BOC</p>
-                            <p><strong>Account Name:</strong> Society Fund</p>
-                            <p><strong>Account Number:</strong> 1234567890</p>
-                            <p><strong>Branch:</strong> Main Branch</p>
+                            <p><strong>Account Name:</strong> Eksath Marandhara Samithiya</p>
+                            <p><strong>Account Number:</strong> 1234567</p>
+                            <p><strong>Branch:</strong> Rikillagaskada</p>
                         </div>
                         
                         <div class="receipt-upload-group">
