@@ -2,11 +2,22 @@
 session_start();
 require_once "../../config/database.php";
 
+$termQuery = "SELECT year FROM Static WHERE Status = 'active' LIMIT 1";
+$termResult = search($termQuery);
+
+// Check if we got a result and extract the year
+if ($termResult && $termResult->num_rows > 0) {
+    $term = $termResult->fetch_assoc()['year'];
+} else {
+    // Fallback to current year if no active term found
+    $term = date('Y');
+}
+
 function generateExpenseId() {
-    global $conn;
+    global $conn, $term;
     
     // Get current year for the term
-    $term = date('Y');
+    // $term = date('Y');
     
     // Get the last 2 digits of the term
     $termSuffix = substr($term, -2);
@@ -36,6 +47,7 @@ function generateExpenseId() {
 }
 
 function createExpenseRecord($welfareId, $amount) {
+    global $term;
     $treasurerQuery = "SELECT Treasurer_TreasurerID FROM User WHERE UserId = '{$_SESSION['user_id']}'";
     $treasurerResult = search($treasurerQuery);
     $treasurerData = $treasurerResult->fetch_assoc();
@@ -45,7 +57,7 @@ function createExpenseRecord($welfareId, $amount) {
     }
 
     $date = date('Y-m-d');
-    $term = date('Y');
+    // $term = date('Y');
     $expenseId = generateExpenseId();
     $treasurerId = $treasurerData['Treasurer_TreasurerID'];
     
@@ -65,7 +77,7 @@ function createExpenseRecord($welfareId, $amount) {
 $query = "SELECT dw.*, m.Name as MemberName, m.MemberID 
           FROM DeathWelfare dw
           JOIN Member m ON dw.Member_MemberID = m.MemberID 
-          WHERE dw.Status = 'pending' 
+          WHERE dw.Status = 'pending' AND Term = '$term'
           ORDER BY dw.Date DESC";
 $result = search($query);
 

@@ -80,7 +80,6 @@ function getIncomeVsExpensesByMonth($year) {
 function getMembershipFeeStats($year) {
     // Get the current month (1-12)
     $currentMonth = (int)date('m');
-    echo "<script>console.log('Total Expected Monthly Fees: Rs. $currentMonth');</script>";
     
     // Get the monthly fee amount from the static table for the current term
     $feeAmountSql = "SELECT monthly_fee FROM Static WHERE year = ? ";
@@ -133,7 +132,7 @@ function getMembershipFeeStats($year) {
             $outstanding_amount += $monthlyFeeAmount * ($currentMonth - $row['paid_months']);
         }
     }
-    echo "<script>console.log('Total Expected Monthly Fees: Rs. $paid_fees');</script>";
+    
     return [
         'total_fees' => $total_members,
         'paid_fees' => $paid_fees,

@@ -76,11 +76,29 @@ function createExpenseRecord($loanId, $amount) {
 
 // Fetch pending loans with member details
 function getPendingLoans() {
-    $query = "SELECT l.*, m.Name as MemberName, m.MemberID 
-              FROM Loan l 
-              JOIN Member m ON l.Member_MemberID = m.MemberID 
-              WHERE l.Status = 'pending' 
-              ORDER BY l.Issued_Date DESC";
+    // Get active term within the function
+    $termQuery = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
+    $termResult = search($termQuery);
+    
+    if ($termResult && $termResult->num_rows > 0) {
+        $termData = $termResult->fetch_assoc();
+        $activeTerm = $termData['year'];
+        
+        // Use the active term in the query
+        $query = "SELECT l.*, m.Name as MemberName, m.MemberID 
+                FROM Loan l 
+                JOIN Member m ON l.Member_MemberID = m.MemberID 
+                WHERE l.Status = 'pending' AND Term = '$activeTerm'
+                ORDER BY l.Issued_Date DESC";
+    } else {
+        // No active term found, get all pending loans regardless of term
+        $query = "SELECT l.*, m.Name as MemberName, m.MemberID 
+                FROM Loan l 
+                JOIN Member m ON l.Member_MemberID = m.MemberID 
+                WHERE l.Status = 'pending'
+                ORDER BY l.Issued_Date DESC";
+    }
+    
     return search($query);
 }
 

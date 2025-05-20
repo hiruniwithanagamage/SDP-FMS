@@ -43,7 +43,8 @@ function getTotalBalance() {
 
 // Function to get pending loans count
 function getPendingLoansCount() {
-    $sql = "SELECT COUNT(*) as count FROM Loan WHERE Status = 'pending'";
+    $currentTerm = getCurrentTerm();
+    $sql = "SELECT COUNT(*) as count FROM Loan WHERE Status = 'pending' AND Term = '$currentTerm'";
     $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['count'] ?? 0;
@@ -51,7 +52,8 @@ function getPendingLoansCount() {
 
 // Function to get pending death welfare count
 function getPendingWelfareCount() {
-    $sql = "SELECT COUNT(*) as count FROM DeathWelfare WHERE Status = 'pending'";
+    $currentTerm = getCurrentTerm();
+    $sql = "SELECT COUNT(*) as count FROM DeathWelfare WHERE Status = 'pending' AND Term = '$currentTerm'";
     $result = search($sql);
     $row = $result->fetch_assoc();
     return $row['count'] ?? 0;
