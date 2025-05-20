@@ -27,7 +27,7 @@ $offset = ($currentPage - 1) * $itemsPerPage;
 // Function to get pending reports
 function getPendingReports() {
     $sql = "SELECT ReportID, VersionID, Status, Term FROM FinancialReportVersions 
-            WHERE Status IN ('pending', 'ongoing', 'reviewed') 
+            WHERE Status = 'pending'
             ORDER BY Date DESC";
     $result = search($sql);
     $reports = [];
