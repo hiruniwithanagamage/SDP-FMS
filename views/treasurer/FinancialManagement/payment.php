@@ -46,6 +46,56 @@ function getMemberPayments($year, $month = null, $memberID = null, $page = 1, $r
     return search($sql);
 }
 
+// Enhanced function to search across all payments with search term
+function searchMemberPayments($year, $month = null, $memberID = null, $searchTerm = null, $page = 1, $recordsPerPage = 10) {
+    $whereConditions = ["YEAR(p.Date) = $year"];
+    
+    if ($month !== null && $month > 0) {
+        $whereConditions[] = "MONTH(p.Date) = $month";
+    }
+    
+    if ($memberID !== null && $memberID !== '') {
+        $whereConditions[] = "m.MemberID = '$memberID'";
+    }
+    
+    // Add search term condition
+    if ($searchTerm !== null && $searchTerm !== '') {
+        // Escape search term for SQL injection prevention
+        $conn = getConnection();
+        $searchTerm = $conn->real_escape_string($searchTerm);
+        
+        // Add search conditions
+        $whereConditions[] = "(
+            p.PaymentID LIKE '%$searchTerm%' OR 
+            m.MemberID LIKE '%$searchTerm%' OR 
+            m.Name LIKE '%$searchTerm%'
+        )";
+    }
+    
+    $whereClause = implode(" AND ", $whereConditions);
+    
+    // Calculate offset for pagination
+    $offset = ($page - 1) * $recordsPerPage;
+    
+    $sql = "SELECT 
+            p.PaymentID,
+            m.MemberID,
+            m.Name,
+            p.Payment_Type,
+            p.Method,
+            p.Amount,
+            p.Date,
+            p.Term,
+            p.Status
+        FROM Payment p
+        JOIN Member m ON p.Member_MemberID = m.MemberID
+        WHERE $whereClause
+        ORDER BY p.PaymentID ASC
+        LIMIT $offset, $recordsPerPage";
+    
+    return search($sql);
+}
+
 // Get total count of records for pagination
 function getTotalPayments($year, $month = null, $memberID = null) {
     $whereConditions = ["YEAR(p.Date) = $year"];
@@ -56,6 +106,45 @@ function getTotalPayments($year, $month = null, $memberID = null) {
     
     if ($memberID !== null && $memberID !== '') {
         $whereConditions[] = "m.MemberID = '$memberID'";
+    }
+    
+    $whereClause = implode(" AND ", $whereConditions);
+    
+    $sql = "SELECT 
+            COUNT(*) as total
+        FROM Payment p
+        JOIN Member m ON p.Member_MemberID = m.MemberID
+        WHERE $whereClause";
+    
+    $result = search($sql);
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
+// Enhanced function to count total search results
+function getTotalSearchPayments($year, $month = null, $memberID = null, $searchTerm = null) {
+    $whereConditions = ["YEAR(p.Date) = $year"];
+    
+    if ($month !== null && $month > 0) {
+        $whereConditions[] = "MONTH(p.Date) = $month";
+    }
+    
+    if ($memberID !== null && $memberID !== '') {
+        $whereConditions[] = "m.MemberID = '$memberID'";
+    }
+    
+    // Add search term condition
+    if ($searchTerm !== null && $searchTerm !== '') {
+        // Escape search term for SQL injection prevention
+        $conn = getConnection();
+        $searchTerm = $conn->real_escape_string($searchTerm);
+        
+        // Add search conditions
+        $whereConditions[] = "(
+            p.PaymentID LIKE '%$searchTerm%' OR 
+            m.MemberID LIKE '%$searchTerm%' OR 
+            m.Name LIKE '%$searchTerm%'
+        )";
     }
     
     $whereClause = implode(" AND ", $whereConditions);
@@ -201,82 +290,81 @@ if(isset($_POST['delete_payment'])) {
         }
         
         // CONDITION 3: Handle specific payment types
-        // CONDITION 3: Handle specific payment types
-if ($paymentType == 'loan') {
-    // For loan payments, delete from LoanPayment table and update Loan table
-    $loanQuery = "SELECT * FROM LoanPayment WHERE PaymentID = ?";
-    $stmt = $conn->prepare($loanQuery);
-    $stmt->bind_param("s", $paymentId);
-    $stmt->execute();
-    $loanResult = $stmt->get_result();
-    
-    if ($loanResult->num_rows > 0) {
-        $loanRow = $loanResult->fetch_assoc();
-        $loanId = $loanRow['LoanID'];
-        
-        // Get current loan details
-        $getLoanQuery = "SELECT * FROM Loan WHERE LoanID = ?";
-        $stmt = $conn->prepare($getLoanQuery);
-        $stmt->bind_param("s", $loanId);
-        $stmt->execute();
-        $currentLoanResult = $stmt->get_result();
-        $currentLoan = $currentLoanResult->fetch_assoc();
-        
-        // Get remaining details after applying payment
-        $currentPaidLoan = $currentLoan['Paid_Loan'] ?? 0;
-        $currentPaidInterest = $currentLoan['Paid_Interest'] ?? 0;
-        $currentRemainLoan = $currentLoan['Remain_Loan'] ?? 0;
-        $currentRemainInterest = $currentLoan['Remain_Interest'] ?? 0;
-        
-        // When originally processing a payment, interest is paid first, then principal
-        // So when reversing, we need to first restore the principal, then the interest
-        
-        // First, we determine how much was applied to interest and how much to principal
-        // Since Remain_Interest was likely modified after the payment, we need to calculate
-        // backwards based on original payment amount
-        
-        // We know the total payment amount, and need to reverse it properly
-        $interestPayment = 0;
-        $principalPayment = 0;
-        
-        // Check if paid interest can be reduced by full payment amount
-        if ($currentPaidInterest >= $paymentAmount) {
-            // The entire payment went to interest
-            $interestPayment = $paymentAmount;
-            $principalPayment = 0;
-        } else {
-            // Part went to interest, part to principal
-            $interestPayment = $currentPaidInterest;
-            $principalPayment = $paymentAmount - $interestPayment;
+        if ($paymentType == 'loan') {
+            // For loan payments, delete from LoanPayment table and update Loan table
+            $loanQuery = "SELECT * FROM LoanPayment WHERE PaymentID = ?";
+            $stmt = $conn->prepare($loanQuery);
+            $stmt->bind_param("s", $paymentId);
+            $stmt->execute();
+            $loanResult = $stmt->get_result();
             
-            // Make sure we don't reduce Paid_Loan below 0
-            $principalPayment = min($principalPayment, $currentPaidLoan);
-        }
-        
-        // Calculate new values after reversal
-        $newPaidLoan = $currentPaidLoan - $principalPayment;
-        $newRemainLoan = $currentRemainLoan + $principalPayment;
-        $newPaidInterest = $currentPaidInterest - $interestPayment;
-        $newRemainInterest = $currentRemainInterest + $interestPayment;
-        
-        // Remove loan payment link
-        $deleteLoanPaymentQuery = "DELETE FROM LoanPayment WHERE PaymentID = ?";
-        $stmt = $conn->prepare($deleteLoanPaymentQuery);
-        $stmt->bind_param("s", $paymentId);
-        $stmt->execute();
-        
-        // Update loan with all the new values
-        $updateLoanQuery = "UPDATE Loan 
-                          SET Paid_Loan = ?, 
-                              Remain_Loan = ?,
-                              Paid_Interest = ?,
-                              Remain_Interest = ?
-                          WHERE LoanID = ?";
-        $stmt = $conn->prepare($updateLoanQuery);
-        $stmt->bind_param("dddds", $newPaidLoan, $newRemainLoan, $newPaidInterest, $newRemainInterest, $loanId);
-        $stmt->execute();
-    }
-} else if ($paymentType == 'registration' || $paymentType == 'monthly') {
+            if ($loanResult->num_rows > 0) {
+                $loanRow = $loanResult->fetch_assoc();
+                $loanId = $loanRow['LoanID'];
+                
+                // Get current loan details
+                $getLoanQuery = "SELECT * FROM Loan WHERE LoanID = ?";
+                $stmt = $conn->prepare($getLoanQuery);
+                $stmt->bind_param("s", $loanId);
+                $stmt->execute();
+                $currentLoanResult = $stmt->get_result();
+                $currentLoan = $currentLoanResult->fetch_assoc();
+                
+                // Get remaining details after applying payment
+                $currentPaidLoan = $currentLoan['Paid_Loan'] ?? 0;
+                $currentPaidInterest = $currentLoan['Paid_Interest'] ?? 0;
+                $currentRemainLoan = $currentLoan['Remain_Loan'] ?? 0;
+                $currentRemainInterest = $currentLoan['Remain_Interest'] ?? 0;
+                
+                // When originally processing a payment, interest is paid first, then principal
+                // So when reversing, we need to first restore the principal, then the interest
+                
+                // First, we determine how much was applied to interest and how much to principal
+                // Since Remain_Interest was likely modified after the payment, we need to calculate
+                // backwards based on original payment amount
+                
+                // We know the total payment amount, and need to reverse it properly
+                $interestPayment = 0;
+                $principalPayment = 0;
+                
+                // Check if paid interest can be reduced by full payment amount
+                if ($currentPaidInterest >= $paymentAmount) {
+                    // The entire payment went to interest
+                    $interestPayment = $paymentAmount;
+                    $principalPayment = 0;
+                } else {
+                    // Part went to interest, part to principal
+                    $interestPayment = $currentPaidInterest;
+                    $principalPayment = $paymentAmount - $interestPayment;
+                    
+                    // Make sure we don't reduce Paid_Loan below 0
+                    $principalPayment = min($principalPayment, $currentPaidLoan);
+                }
+                
+                // Calculate new values after reversal
+                $newPaidLoan = $currentPaidLoan - $principalPayment;
+                $newRemainLoan = $currentRemainLoan + $principalPayment;
+                $newPaidInterest = $currentPaidInterest - $interestPayment;
+                $newRemainInterest = $currentRemainInterest + $interestPayment;
+                
+                // Remove loan payment link
+                $deleteLoanPaymentQuery = "DELETE FROM LoanPayment WHERE PaymentID = ?";
+                $stmt = $conn->prepare($deleteLoanPaymentQuery);
+                $stmt->bind_param("s", $paymentId);
+                $stmt->execute();
+                
+                // Update loan with all the new values
+                $updateLoanQuery = "UPDATE Loan 
+                                  SET Paid_Loan = ?, 
+                                      Remain_Loan = ?,
+                                      Paid_Interest = ?,
+                                      Remain_Interest = ?
+                                  WHERE LoanID = ?";
+                $stmt = $conn->prepare($updateLoanQuery);
+                $stmt->bind_param("dddds", $newPaidLoan, $newRemainLoan, $newPaidInterest, $newRemainInterest, $loanId);
+                $stmt->execute();
+            }
+        } else if ($paymentType == 'registration' || $paymentType == 'monthly') {
             // For membership fees (registration or monthly)
             // Get all membership fees linked to this payment
             $feesQuery = "SELECT * FROM MembershipFeePayment WHERE PaymentID = ?";
@@ -364,7 +452,7 @@ if ($paymentType == 'loan') {
     }
     
     // Redirect back to payment page
-    header("Location: payment.php?year=" . $currentYear . "&month=" . $selectedMonth . "&page=" . $currentPage);
+    header("Location: payment.php?year=" . $currentYear . "&month=" . (isset($_GET['month']) ? $_GET['month'] : 0) . "&page=" . (isset($_GET['page']) ? $_GET['page'] : 1));
     exit();
 }
 
@@ -373,13 +461,23 @@ $currentTerm = getCurrentTerm();
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : $currentTerm;
 $selectedMonth = isset($_GET['month']) ? intval($_GET['month']) : 0; // 0 means all months
 $selectedMemberID = isset($_GET['member']) ? $_GET['member'] : '';
+$searchTerm = isset($_GET['search']) ? $_GET['search'] : ''; // Add this line for search term
 
 // Pagination variables
 $recordsPerPage = 10;
 $currentPage = isset($_GET['page']) ? intval($_GET['page']) : 1;
 
-// Get total records and calculate total pages
-$totalRecords = getTotalPayments($selectedYear, $selectedMonth, $selectedMemberID);
+// Get total records and calculate total pages based on search
+if (empty($searchTerm)) {
+    // Regular pagination without search
+    $totalRecords = getTotalPayments($selectedYear, $selectedMonth, $selectedMemberID);
+    $memberPayments = getMemberPayments($selectedYear, $selectedMonth, $selectedMemberID, $currentPage, $recordsPerPage);
+} else {
+    // Search with pagination
+    $totalRecords = getTotalSearchPayments($selectedYear, $selectedMonth, $selectedMemberID, $searchTerm);
+    $memberPayments = searchMemberPayments($selectedYear, $selectedMonth, $selectedMemberID, $searchTerm, $currentPage, $recordsPerPage);
+}
+
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
 // Ensure current page is valid
@@ -389,7 +487,7 @@ if ($currentPage < 1) {
     $currentPage = $totalPages;
 }
 
-// Get data based on filters
+// Get other data based on filters
 $paymentSummary = getPaymentSummary($selectedYear, $selectedMonth, $selectedMemberID);
 $monthlyStats = getMonthlyPaymentStats($selectedYear);
 $allMembers = getAllMembers();
@@ -617,6 +715,35 @@ $methodTypes = [
     .pagination button.disabled:hover {
         background-color: #f8f8f8;
     }
+    
+    /* Search notification styles */
+    .search-notification {
+        margin: 10px 0;
+    }
+    
+    .clear-search-link {
+        margin-left: 15px;
+        color: #0c5460;
+        text-decoration: none;
+    }
+    
+    .clear-search-link:hover {
+        text-decoration: underline;
+    }
+    
+    .search-btn {
+        background-color: #1e3c72;
+        color: white;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-left: 5px;
+    }
+    
+    .search-btn:hover {
+        background-color: #15294e;
+    }
 </style>
 </head>
 <body>
@@ -667,7 +794,7 @@ $methodTypes = [
                 <div class="stat-label">Total Payments</div>
             </div>
             <div class="stat-card">
-                <i class="fas fa-hand-holding-usd"></i>
+                <i class="fas fa-<i class="fas fa-hand-holding-usd"></i>
                 <div class="stat-number">Rs. <?php echo number_format($stats['total_amount'] ?? 0, 2); ?></div>
                 <div class="stat-label">Total Amount</div>
             </div>
@@ -697,11 +824,32 @@ $methodTypes = [
             </div>
             <div class="filters">
                 <div class="search-container">
-                    <input type="text" id="searchInput" placeholder="Search by ID, Name, or Payment ID..." class="search-input">
-                    <button onclick="clearSearch()" class="clear-btn"><i class="fas fa-times"></i></button>
+                    <form id="searchForm" action="" method="GET">
+                        <input type="hidden" name="year" value="<?php echo $selectedYear; ?>">
+                        <input type="hidden" name="month" value="<?php echo $selectedMonth; ?>">
+                        <input type="hidden" name="page" value="1">
+                        <input type="text" id="searchInput" name="search" placeholder="Search by ID, Name, or Payment ID..." 
+                               class="search-input" value="<?php echo htmlspecialchars($searchTerm); ?>">
+                        <button type="submit" class="search-btn"><i class="fas fa-search"></i></button>
+                        <?php if (!empty($searchTerm)): ?>
+                            <button type="button" onclick="clearSearch()" class="clear-btn"><i class="fas fa-times"></i></button>
+                        <?php endif; ?>
+                    </form>
                 </div>
             </div>
         </div>
+
+        <!-- Search notification -->
+        <?php if (!empty($searchTerm)): ?>
+        <div class="search-notification">
+            <div class="alert alert-info">
+                Showing search results for: <strong><?php echo htmlspecialchars($searchTerm); ?></strong>
+                <a href="?year=<?php echo $selectedYear; ?>&month=<?php echo $selectedMonth; ?>" class="clear-search-link">
+                    <i class="fas fa-times"></i> Clear search
+                </a>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <div id="payments-view">
             <div class="table-container" style="max-height: 900px;">
@@ -720,8 +868,8 @@ $methodTypes = [
                     </thead>
                     <tbody>
                         <?php 
-                        $memberPayments = getMemberPayments($selectedYear, $selectedMonth, $selectedMemberID, $currentPage, $recordsPerPage);
-                        while($row = $memberPayments->fetch_assoc()): 
+                        if ($memberPayments && $memberPayments->num_rows > 0):
+                            while($row = $memberPayments->fetch_assoc()): 
                         ?>
                         <tr data-payment-type="<?php echo htmlspecialchars($row['Payment_Type']); ?>" data-method="<?php echo htmlspecialchars($row['Method']); ?>">
                             <td><?php echo htmlspecialchars($row['PaymentID']); ?></td>
@@ -752,7 +900,14 @@ $methodTypes = [
                                 <?php endif; ?>
                             </td>
                         </tr>
-                        <?php endwhile; ?>
+                        <?php 
+                            endwhile; 
+                        else: 
+                        ?>
+                        <tr>
+                            <td colspan="8" style="text-align: center; padding: 20px;">No payment records found.</td>
+                        </tr>
+                        <?php endif; ?>
                     </tbody>
                 </table>
                 
@@ -868,6 +1023,7 @@ $methodTypes = [
             <p>Are you sure you want to delete this payment record? This action cannot be undone.</p>
             <form method="POST">
                 <input type="hidden" id="delete_payment_id" name="payment_id">
+                <input type="hidden" name="year" value="<?php echo $selectedYear; ?>">
                 <input type="hidden" name="month" value="<?php echo $selectedMonth; ?>">
                 <input type="hidden" name="page" value="<?php echo $currentPage; ?>">
                 <div class="delete-modal-buttons">
@@ -891,15 +1047,25 @@ $methodTypes = [
         function goToPage(page) {
             const year = document.getElementById('yearSelect').value;
             const month = document.getElementById('monthSelect').value;
-            window.location.href = `payment.php?year=${year}&month=${month}&page=${page}`;
+            const searchParam = '<?php echo !empty($searchTerm) ? "&search=".urlencode($searchTerm) : ""; ?>';
+            
+            window.location.href = `payment.php?year=${year}&month=${month}&page=${page}${searchParam}`;
         }
         
-        // Update filters using AJAX
+        // Update filters
         function updateFilters() {
             const year = document.getElementById('yearSelect').value;
             const month = document.getElementById('monthSelect').value;
+            const searchParam = '<?php echo !empty($searchTerm) ? "&search=".urlencode($searchTerm) : ""; ?>';
             
-            // refresh the page at the same location
+            window.location.href = `payment.php?year=${year}&month=${month}&page=1${searchParam}`;
+        }
+
+        // Clear search functionality
+        function clearSearch() {
+            const year = document.getElementById('yearSelect').value;
+            const month = document.getElementById('monthSelect').value;
+            
             window.location.href = `payment.php?year=${year}&month=${month}&page=1`;
         }
 
@@ -918,71 +1084,7 @@ $methodTypes = [
             }
         }
 
-        // Search functionality
-        document.addEventListener('DOMContentLoaded', function() {
-            const searchInput = document.getElementById('searchInput');
-            searchInput.addEventListener('input', performSearch);
-        });
-
-        function performSearch() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const tableRows = document.querySelectorAll('#paymentsTable tbody tr');
-            let hasResults = false;
-
-            tableRows.forEach(row => {
-                const paymentID = row.cells[0].textContent.toLowerCase();
-                const memberID = row.cells[1].textContent.toLowerCase();
-                const name = row.cells[2].textContent.toLowerCase();
-                
-                if (name.includes(searchTerm) || 
-                    memberID.includes(searchTerm) || 
-                    paymentID.includes(searchTerm)) {
-                    row.style.display = '';
-                    hasResults = true;
-                } else {
-                    row.style.display = 'none';
-                }
-            });
-
-            // Show/hide no results message
-            updateNoResultsMessage(hasResults);
-            
-            // Hide pagination when searching
-            const pagination = document.querySelector('.pagination');
-            if (pagination) {
-                pagination.style.display = searchTerm ? 'none' : 'flex';
-            }
-        }
-
-        function updateNoResultsMessage(hasResults) {
-            let noResultsMsg = document.querySelector('.no-results');
-            if (!hasResults) {
-                if (!noResultsMsg) {
-                    noResultsMsg = document.createElement('div');
-                    noResultsMsg.className = 'no-results';
-                    noResultsMsg.textContent = 'No matching records found';
-                    const table = document.querySelector('#payments-view .table-container');
-                    table.appendChild(noResultsMsg);
-                }
-                noResultsMsg.style.display = 'block';
-            } else if (noResultsMsg) {
-                noResultsMsg.style.display = 'none';
-            }
-        }
-
-        function clearSearch() {
-            const searchInput = document.getElementById('searchInput');
-            searchInput.value = '';
-            performSearch();
-            searchInput.focus();
-            
-            // Show pagination again
-            const pagination = document.querySelector('.pagination');
-            if (pagination) {
-                pagination.style.display = 'flex';
-            }
-        }
-
+        // Print payment receipt
         function printPaymentReceipt(paymentID) {
             window.location.href = `../payments/payment_receipt.php?payment_id=${paymentID}`;
         }
@@ -1017,10 +1119,14 @@ $methodTypes = [
             const year = urlParams.get('year') || document.getElementById('yearSelect').value;
             const month = urlParams.get('month') || document.getElementById('monthSelect').value;
             const page = urlParams.get('page') || 1;
+            const search = urlParams.get('search') || '';
             
             // Redirect to the same page with parameters
-            window.location.href = `payment.php?year=${year}&month=${month}&page=${page}`;
-
+            let url = `payment.php?year=${year}&month=${month}&page=${page}`;
+            if (search) {
+                url += `&search=${encodeURIComponent(search)}`;
+            }
+            window.location.href = url;
         }
 
         function openDeleteModal(id) {
@@ -1123,6 +1229,17 @@ $methodTypes = [
                 // Clear the stored alert data
                 localStorage.removeItem('payment_alert_type');
                 localStorage.removeItem('payment_alert_message');
+            }
+            
+            // Add event listener for search form submission with Enter key
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) {
+                searchInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        document.getElementById('searchForm').submit();
+                    }
+                });
             }
         });
     </script>
