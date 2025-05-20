@@ -84,7 +84,7 @@ function approvePayment($paymentId) {
     }
 }
 
-// Function to handle payment rejection
+// Function to handle payment rejection with enhanced membership fee handling
 function rejectPayment($paymentId) {
     global $conn;
     
@@ -104,6 +104,90 @@ function rejectPayment($paymentId) {
         $paymentType = $oldPayment['Payment_Type'];
         $memberId = $oldPayment['Member_MemberID'];
         $imagePath = $oldPayment['Image'];
+        
+        // Handle specific payment types before deleting the payment
+        if ($paymentType == 'monthly' || $paymentType == 'registration') {
+            // Find all membership fees associated with this payment
+            $query = "SELECT FeeID FROM MembershipFeePayment WHERE PaymentID = '$paymentId'";
+            $feeResult = search($query);
+            
+            // Delete all associated membership fees
+            while ($feeRow = $feeResult->fetch_assoc()) {
+                $feeId = $feeRow['FeeID'];
+                
+                // Delete from MembershipFee table
+                $deleteFeeQuery = "DELETE FROM MembershipFee WHERE FeeID = '$feeId'";
+                if (!$conn->query($deleteFeeQuery)) {
+                    error_log("Error deleting MembershipFee: " . $conn->error);
+                    throw new Exception("Failed to delete MembershipFee record: " . $conn->error);
+                }
+            }
+            
+            // Delete from MembershipFeePayment junction table
+            $deleteMembershipFeePaymentQuery = "DELETE FROM MembershipFeePayment WHERE PaymentID = '$paymentId'";
+            if (!$conn->query($deleteMembershipFeePaymentQuery)) {
+                error_log("Error deleting MembershipFeePayment: " . $conn->error);
+                throw new Exception("Failed to delete MembershipFeePayment record: " . $conn->error);
+            }
+        } elseif ($paymentType == 'fine') {
+            // Find all fines associated with this payment
+            $query = "SELECT FineID FROM FinePayment WHERE PaymentID = '$paymentId'";
+            $fineResult = search($query);
+            
+            // Update all associated fines to unpaid
+            while ($fineRow = $fineResult->fetch_assoc()) {
+                $fineId = $fineRow['FineID'];
+                
+                // Update Fine status to unpaid
+                $updateFineQuery = "UPDATE Fine SET IsPaid = 'No', Payment_PaymentID = NULL WHERE FineID = '$fineId'";
+                if (!$conn->query($updateFineQuery)) {
+                    error_log("Error updating Fine: " . $conn->error);
+                    throw new Exception("Failed to update Fine record: " . $conn->error);
+                }
+            }
+            
+            // Delete from FinePayment junction table
+            $deleteFinePaymentQuery = "DELETE FROM FinePayment WHERE PaymentID = '$paymentId'";
+            if (!$conn->query($deleteFinePaymentQuery)) {
+                error_log("Error deleting FinePayment: " . $conn->error);
+                throw new Exception("Failed to delete FinePayment record: " . $conn->error);
+            }
+        } elseif ($paymentType == 'loan') {
+            // Get loan details associated with this payment
+            $query = "SELECT LoanID FROM LoanPayment WHERE PaymentID = '$paymentId'";
+            $loanResult = search($query);
+            
+            // Update loan amounts (restore unpaid amounts)
+            while ($loanRow = $loanResult->fetch_assoc()) {
+                $loanId = $loanRow['LoanID'];
+                
+                // Get loan payment details to determine what was being paid
+                // Assuming the payment amount needs to be added back to the remaining loan
+                $loanQuery = "SELECT * FROM Loan WHERE LoanID = '$loanId'";
+                $loanDetailsResult = search($loanQuery);
+                $loanDetails = $loanDetailsResult->fetch_assoc();
+                
+                if ($loanDetails) {
+                    // Add payment amount back to remaining loan amount
+                    // This is simplistic - in a real system, you might need to determine 
+                    // how much was for principal vs interest
+                    $updateLoanQuery = "UPDATE Loan SET 
+                                        Remain_Loan = Remain_Loan + " . $oldPayment['Amount'] . "
+                                        WHERE LoanID = '$loanId'";
+                    if (!$conn->query($updateLoanQuery)) {
+                        error_log("Error updating Loan: " . $conn->error);
+                        throw new Exception("Failed to update Loan record: " . $conn->error);
+                    }
+                }
+            }
+            
+            // Delete from LoanPayment junction table
+            $deleteLoanPaymentQuery = "DELETE FROM LoanPayment WHERE PaymentID = '$paymentId'";
+            if (!$conn->query($deleteLoanPaymentQuery)) {
+                error_log("Error deleting LoanPayment: " . $conn->error);
+                throw new Exception("Failed to delete LoanPayment record: " . $conn->error);
+            }
+        }
         
         // Delete the payment
         $deleteSql = "DELETE FROM Payment WHERE PaymentID = '$paymentId'";
@@ -127,7 +211,7 @@ function rejectPayment($paymentId) {
         $newValues = json_encode([]); // Empty as the record is deleted
         
         // Get current user (treasurer) ID from session
-        $treasurerId = $_SESSION['treasurer_id'] ?? 'Unknown';
+        $treasurerId = $_SESSION['user_id'] ?? 'Unknown';
         
         $changeDetails = "Rejected and deleted payment #$paymentId ({$paymentType}) for Member #{$memberId}";
         
