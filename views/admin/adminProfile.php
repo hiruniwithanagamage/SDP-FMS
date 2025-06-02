@@ -93,7 +93,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["change_password"])) {
 }
 
 // Set default profile image
-$profileImage = "../../assets/images/profile_photo.jpg"; // default image
+$profileImage = "../../assets/images/profile_photo 2.png"; // default image
 ?>
 
 <!DOCTYPE html>

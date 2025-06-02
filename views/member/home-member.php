@@ -522,7 +522,7 @@ $formattedDues = number_format($totalDues, 2);
                <h1>Welcome, <?php echo $memberInfo['Name']; ?></h1>
                <a href="payDues.php" class="dues-button">
                    <i class="fas fa-credit-card"></i>
-                   Outstanding: Rs.<?php echo $formattedDues; ?>
+                   Dues: Rs.<?php echo $formattedDues; ?>
                </a>
            </div>
 

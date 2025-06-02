@@ -1,0 +1,13 @@
+--------------------------------------------------
+Time: 2025-05-21 03:14:44
+Phone: 0779670015 (Dialog)
+Email: 0779670015@sms.dialog.lk
+Message: New Death Welfare Application
+ID: DWF2502
+Member:  (MEMB01)
+Relationship: Dog
+Amount: Rs.15,000.00
+Date: 2025-05-21
+From: Society Management System
+--------------------------------------------------
+

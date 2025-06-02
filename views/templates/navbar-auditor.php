@@ -33,7 +33,7 @@
 
    // Get auditor details
 $memberName = "Guest";
-$defaultProfileImage = $basePath . "assets/images/profile_photo.jpg";
+$defaultProfileImage = $basePath . "assets/images/profile_photo 2.png";
 $memberImage = $defaultProfileImage; // default image
 
 if (isset($userData['Auditor_AuditorID'])) {

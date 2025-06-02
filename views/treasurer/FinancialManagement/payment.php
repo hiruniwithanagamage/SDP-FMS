@@ -794,7 +794,7 @@ $methodTypes = [
                 <div class="stat-label">Total Payments</div>
             </div>
             <div class="stat-card">
-                <i class="fas fa-<i class="fas fa-hand-holding-usd"></i>
+                <i class="fas fa-<i class="fas fa-hand-holding-usd></i>
                 <div class="stat-number">Rs. <?php echo number_format($stats['total_amount'] ?? 0, 2); ?></div>
                 <div class="stat-label">Total Amount</div>
             </div>

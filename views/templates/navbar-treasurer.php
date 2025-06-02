@@ -33,7 +33,7 @@ $userData = $_SESSION["u"];
 
 // Get member details if this is a member user
 $treasurerName = "Guest";
-$defaultProfileImage = $basePath . "assets/images/profile_photo.jpg";
+$defaultProfileImage = $basePath . "assets/images/profile_photo 2.png";
 $treasurerImage = $defaultProfileImage; // default image
 
 $memberQuery = "SELECT Image FROM Member WHERE MemberID = 

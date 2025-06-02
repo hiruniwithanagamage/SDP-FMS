@@ -309,7 +309,7 @@ if (!empty($searchTerm)) {
                                     <td><?php echo htmlspecialchars($row['Name']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NIC']); ?></td>
                                     <td>
-                                        <span class="status-badge <?php echo $row['Status'] === 'active' ? 'status-active' : 'status-inactive'; ?>">
+                                        <span class="status-badge <?php echo $row['Status'] === 'Full Member' ? 'status-active' : 'status-inactive'; ?>">
                                             <?php echo ucfirst($row['Status']); ?>
                                         </span>
                                     </td>

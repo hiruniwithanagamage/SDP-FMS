@@ -33,7 +33,7 @@
 
    // Get admin details if this is a member user
    $memberName = "Guest";
-   $memberImage = $basePath. "assets/images/profile_photo.jpg"; // default image
+   $memberImage = $basePath. "assets/images/profile_photo 2.png"; // default image
 
    if (isset($userData['Admin_AdminID'])) {
       $memberQuery = "SELECT Name FROM Admin WHERE AdminID = '" . $userData['Admin_AdminID'] . "'";

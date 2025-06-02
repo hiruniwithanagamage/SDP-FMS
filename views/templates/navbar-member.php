@@ -32,7 +32,7 @@
 
    // Get member details if this is a member user
    $memberName = "Guest";
-   $memberImage = $basePath."assets/images/profile_photo.jpg"; // default image
+   $memberImage = $basePath."assets/images/profile_photo 2.png"; // default image
 
    if (isset($userData['Member_MemberID'])) {
       $memberQuery = "SELECT Name, Image FROM Member WHERE MemberID = '" . $userData['Member_MemberID'] . "'";
