@@ -244,8 +244,7 @@ $profileImage = "../../assets/images/profile_photo 2.png"; // default image
             align-items: center;
             justify-content: center;
             position: static; /* Override any position: relative from the main profile */
-            margin: 0;
-            /* Override any margin settings from the main profile */
+            margin: 0; /* Override any margin settings from the main profile */
         }
 
         .nav-profile .profile-avatar img {

@@ -3,7 +3,7 @@ session_start();
 require_once "../../config/database.php";
 
 // Get database connection
-$conn = getConnection(); // Assuming this function exists in database.php
+$conn = getConnection();
 
 // Get current active year from static table
 function getCurrentActiveYear($conn) {

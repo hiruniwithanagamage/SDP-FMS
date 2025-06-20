@@ -22,7 +22,7 @@ if (isset($_POST['activate'])) {
         $row = $result->fetch_assoc();
         
         if ($row['status'] === 'active') {
-            // If this is currently active and we're trying to deactivate it,
+            // If this is currently active and trying to deactivate it,
             // check if it's the only active term
             $countActiveStmt = prepare("SELECT COUNT(*) as active_count FROM Static WHERE status = 'active'");
             $countActiveStmt->execute();
@@ -39,7 +39,7 @@ if (isset($_POST['activate'])) {
                 $_SESSION['success_message'] = "Term deactivated successfully!";
             }
         } else {
-            // First, deactivate all terms if we're activating a new one
+            // First, deactivate all terms if user activating a new one
             $deactivateStmt = prepare("UPDATE Static SET status = 'inactive' WHERE status = 'active'");
             $deactivateStmt->execute();
             
@@ -102,7 +102,7 @@ if(isset($_POST['delete'])) {
     
     try {
         // Check if there are related records in other tables
-        // This is a simplified check - you might need to expand this to check all related tables
+        // This is a simplified check - might need to expand this to check all related tables
         $checkRelatedRecordsQuery = "SELECT COUNT(*) AS count FROM MembershipFee WHERE Term IN (SELECT year FROM Static WHERE id = ?)";
         $checkStmt = prepare($checkRelatedRecordsQuery);
         $checkStmt->bind_param("s", $id);

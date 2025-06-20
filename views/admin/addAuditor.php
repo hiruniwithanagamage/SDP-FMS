@@ -5,10 +5,7 @@ require_once "../../config/database.php";
 // Get the logged-in treasurer's ID from the session
 $treasurerID = isset($_SESSION['TreasurerID']) ? $_SESSION['TreasurerID'] : null;
 
-/**
- * Get the current active term from the Static table
- * @return array|null Returns the active term or null if no active term exists
- */
+// Get the current active term from the Static table
 function getCurrentActiveTerm() {
     $activeTermQuery = "SELECT * FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
     $activeTermResult = search($activeTermQuery);
@@ -20,10 +17,7 @@ function getCurrentActiveTerm() {
     return null;
 }
 
-/**
- * Generate sequential Auditor ID following the pattern AUDI01, AUDI02, etc.
- * @return string The generated Auditor ID
- */
+// Generate sequential Auditor ID following the pattern AUDI01, AUDI02, etc.
 function generateAuditorID() {
     $prefix = "AUDI";
     

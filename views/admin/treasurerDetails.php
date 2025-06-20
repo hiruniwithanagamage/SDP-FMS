@@ -79,7 +79,7 @@ if(isset($_POST['update'])) {
         $currentTerm = $currentTreasurerRow['Term'];
         $currentIsActive = $currentTreasurerRow['isActive'];
         
-        // Check if we're trying to set this treasurer as active
+        // Check if user trying to set this treasurer as active
         if($isActive == '1') {
             // Check if any other treasurer in the same term is already active
             $checkQuery = "SELECT COUNT(*) as active_count FROM Treasurer 

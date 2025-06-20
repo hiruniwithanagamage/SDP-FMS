@@ -45,7 +45,7 @@ foreach ($allTerms as $term) {
     $availableTerms[] = $term;
 }
 
-// Generate sequential Treasurer ID using our new function
+// Generate sequential Treasurer ID
 $newTreasurerID = generateTreasurerID();
 
 // Handle form submission

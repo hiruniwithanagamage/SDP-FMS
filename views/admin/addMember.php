@@ -279,7 +279,7 @@ if (isset($_POST['add'])) {
 
         .form-column {
             flex: 1;
-            min-width: 250px; /* Ensure columns don't get too narrow */
+            min-width: 250px; 
         }
 
         label {

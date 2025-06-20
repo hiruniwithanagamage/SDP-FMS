@@ -31,7 +31,7 @@ function generateNewUserId($conn) {
         $row = $result->fetch_assoc();
         if ($row && isset($row['UserId'])) {
             $lastId = $row['UserId'];
-            // Extract numeric part - assuming format is USERxx
+            // Extract numeric part
             $numericPart = substr($lastId, 4); // Extract after "USER"
             $newNumericPart = intval($numericPart) + 1;
             // Format with leading zeros if needed (e.g., USER01, USER02, etc.)
@@ -116,7 +116,7 @@ function checkDuplicateRoleAssociation($conn, $role, $roleId) {
 }
 
 // Get database connection
-$conn = getConnection(); // Assuming this function exists in database.php
+$conn = getConnection(); 
 $newUserId = generateNewUserId($conn);
 $currentYear = getCurrentActiveYear($conn);
 
