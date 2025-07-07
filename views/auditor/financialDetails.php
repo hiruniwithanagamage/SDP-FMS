@@ -289,95 +289,95 @@
     </style>
 </head>
 <body>
-<div class="home-container">
-<?php include '../templates/navbar-admin.php'; ?>
-    <div class="container">
-        <div class="header">
-            <h1>Financial Details - Term <?php echo htmlspecialchars($selectedYear); ?></h1>
-            <select class="term-select" onchange="updateTerm(this.value)">
-                <?php 
-                $startYear = max(2020, $currentTerm - 2); // Prevent negative or unreasonable years
-                for($y = $currentTerm; $y >= $startYear; $y--): 
-                ?>
-                    <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
-                        Term <?php echo $y; ?>
-                    </option>
-                <?php endfor; ?>
-            </select>
-        </div>
+    <div class="home-container">
+    <?php include '../templates/navbar-admin.php'; ?>
+        <div class="container">
+            <div class="header">
+                <h1>Financial Details - Term <?php echo htmlspecialchars($selectedYear); ?></h1>
+                <select class="term-select" onchange="updateTerm(this.value)">
+                    <?php 
+                    $startYear = max(2020, $currentTerm - 2); // Prevent negative or unreasonable years
+                    for($y = $currentTerm; $y >= $startYear; $y--): 
+                    ?>
+                        <option value="<?php echo $y; ?>" <?php echo $y == $selectedYear ? 'selected' : ''; ?>>
+                            Term <?php echo $y; ?>
+                        </option>
+                    <?php endfor; ?>
+                </select>
+            </div>
 
-        <div class="financial-grid">
-            <!-- Membership Fees Card -->
-            <div class="financial-card">
-                <h3>Membership Fees</h3>
-                <div class="amount">Rs. <?php echo number_format($financialDetails['membership_fees']['total_amount'], 2); ?></div>
-                <div class="financial-details">
-                    Paid: <?php echo $financialDetails['membership_fees']['paid_count']; ?> 
-                    | Unpaid: <?php echo $financialDetails['membership_fees']['unpaid_count']; ?>
+            <div class="financial-grid">
+                <!-- Membership Fees Card -->
+                <div class="financial-card">
+                    <h3>Membership Fees</h3>
+                    <div class="amount">Rs. <?php echo number_format($financialDetails['membership_fees']['total_amount'], 2); ?></div>
+                    <div class="financial-details">
+                        Paid: <?php echo $financialDetails['membership_fees']['paid_count']; ?> 
+                        | Unpaid: <?php echo $financialDetails['membership_fees']['unpaid_count']; ?>
+                    </div>
+                </div>
+
+                <!-- Loans Card -->
+                <div class="financial-card">
+                    <h3>Loans</h3>
+                    <div class="amount">Rs. <?php echo number_format($financialDetails['loans']['total_amount'], 2); ?></div>
+                    <div class="financial-details">
+                        Pending: <?php echo $financialDetails['loans']['pending_count']; ?> 
+                        | Approved: <?php echo $financialDetails['loans']['approved_count']; ?> 
+                        | Rejected: <?php echo $financialDetails['loans']['rejected_count']; ?>
+                    </div>
+                </div>
+
+                <!-- Death Welfare Card -->
+                <div class="financial-card">
+                    <h3>Death Welfare</h3>
+                    <div class="amount">Rs. <?php echo number_format($financialDetails['death_welfare']['total_amount'], 2); ?></div>
+                    <div class="financial-details">
+                        Pending: <?php echo $financialDetails['death_welfare']['pending_count']; ?> 
+                        | Approved: <?php echo $financialDetails['death_welfare']['approved_count']; ?> 
+                        | Rejected: <?php echo $financialDetails['death_welfare']['rejected_count']; ?>
+                    </div>
+                </div>
+
+                <!-- Fines Card -->
+                <div class="financial-card">
+                    <h3>Fines</h3>
+                    <div class="amount">Rs. <?php echo number_format($financialDetails['fines']['total_amount'], 2); ?></div>
+                    <div class="financial-details">
+                        Paid: <?php echo $financialDetails['fines']['paid_count']; ?> 
+                        | Unpaid: <?php echo $financialDetails['fines']['unpaid_count']; ?>
+                    </div>
                 </div>
             </div>
 
-            <!-- Loans Card -->
-            <div class="financial-card">
-                <h3>Loans</h3>
-                <div class="amount">Rs. <?php echo number_format($financialDetails['loans']['total_amount'], 2); ?></div>
-                <div class="financial-details">
-                    Pending: <?php echo $financialDetails['loans']['pending_count']; ?> 
-                    | Approved: <?php echo $financialDetails['loans']['approved_count']; ?> 
-                    | Rejected: <?php echo $financialDetails['loans']['rejected_count']; ?>
+            <h2 class="section-title">Fines Breakdown</h2>
+            <div class="financial-grid">
+                <div class="financial-card">
+                    <h3>Late Fines</h3>
+                    <div class="amount">Rs. <?php echo number_format($financialDetails['fines']['late_fines'], 2); ?></div>
+                </div>
+                <div class="financial-card">
+                    <h3>Absent Fines</h3>
+                    <div class="amount">Rs. <?php echo number_format($financialDetails['fines']['absent_fines'], 2); ?></div>
+                </div>
+                <div class="financial-card">
+                    <h3>Violation Fines</h3>
+                    <div class="amount">Rs. <?php echo number_format($financialDetails['fines']['violation_fines'], 2); ?></div>
                 </div>
             </div>
 
-            <!-- Death Welfare Card -->
-            <div class="financial-card">
-                <h3>Death Welfare</h3>
-                <div class="amount">Rs. <?php echo number_format($financialDetails['death_welfare']['total_amount'], 2); ?></div>
-                <div class="financial-details">
-                    Pending: <?php echo $financialDetails['death_welfare']['pending_count']; ?> 
-                    | Approved: <?php echo $financialDetails['death_welfare']['approved_count']; ?> 
-                    | Rejected: <?php echo $financialDetails['death_welfare']['rejected_count']; ?>
-                </div>
+            <h2 class="section-title">Expenses Breakdown</h2>
+            <div class="financial-card expenses-breakdown">
+                <h3>Total Expenses: Rs. <?php echo number_format($financialDetails['expenses']['total_amount'], 2); ?></h3>
+                <?php foreach($financialDetails['expenses']['categories'] as $category): ?>
+                    <div class="expenses-category">
+                        <span><?php echo htmlspecialchars($category['name']); ?></span>
+                        <span>Rs. <?php echo number_format($category['amount'], 2); ?></span>
+                    </div>
+                <?php endforeach; ?>
             </div>
-
-            <!-- Fines Card -->
-            <div class="financial-card">
-                <h3>Fines</h3>
-                <div class="amount">Rs. <?php echo number_format($financialDetails['fines']['total_amount'], 2); ?></div>
-                <div class="financial-details">
-                    Paid: <?php echo $financialDetails['fines']['paid_count']; ?> 
-                    | Unpaid: <?php echo $financialDetails['fines']['unpaid_count']; ?>
-                </div>
-            </div>
-        </div>
-
-        <h2 class="section-title">Fines Breakdown</h2>
-        <div class="financial-grid">
-            <div class="financial-card">
-                <h3>Late Fines</h3>
-                <div class="amount">Rs. <?php echo number_format($financialDetails['fines']['late_fines'], 2); ?></div>
-            </div>
-            <div class="financial-card">
-                <h3>Absent Fines</h3>
-                <div class="amount">Rs. <?php echo number_format($financialDetails['fines']['absent_fines'], 2); ?></div>
-            </div>
-            <div class="financial-card">
-                <h3>Violation Fines</h3>
-                <div class="amount">Rs. <?php echo number_format($financialDetails['fines']['violation_fines'], 2); ?></div>
-            </div>
-        </div>
-
-        <h2 class="section-title">Expenses Breakdown</h2>
-        <div class="financial-card expenses-breakdown">
-            <h3>Total Expenses: Rs. <?php echo number_format($financialDetails['expenses']['total_amount'], 2); ?></h3>
-            <?php foreach($financialDetails['expenses']['categories'] as $category): ?>
-                <div class="expenses-category">
-                    <span><?php echo htmlspecialchars($category['name']); ?></span>
-                    <span>Rs. <?php echo number_format($category['amount'], 2); ?></span>
-                </div>
-            <?php endforeach; ?>
         </div>
     </div>
-</div>
     
     <script>
     function updateTerm(year) {

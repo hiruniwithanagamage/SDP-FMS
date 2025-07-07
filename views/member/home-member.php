@@ -662,7 +662,7 @@ $formattedDues = number_format($totalDues, 2);
     </div>
 </div>
 
-   <!-- Use the common alert handler script -->
+   <!-- the common alert handler script -->
    <script>
         document.addEventListener('DOMContentLoaded', function() {
             // Initialize alerts EXCEPT notification alerts

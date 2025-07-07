@@ -324,34 +324,34 @@ if (!empty($memberData['Image'])) {
         }
 
         /* Style for read-only fields to visually indicate they are not editable */
-input[readonly], textarea[readonly] {
-    background-color: #f8f9fa;
-    border-color: #dee2e6;
-    color: #6c757d;
-    cursor: not-allowed;
-}
+        input[readonly], textarea[readonly] {
+            background-color: #f8f9fa;
+            border-color: #dee2e6;
+            color: #6c757d;
+            cursor: not-allowed;
+        }
 
-/* Highlight the editable fields */
-#email, #mobile, #profile_image {
-    border-left: 3px solid #1a237e;
-}
+        /* Highlight the editable fields */
+        #email, #mobile, #profile_image {
+            border-left: 3px solid #1a237e;
+        }
 
-/* Add a subtle icon to indicate which fields are editable */
-.editable-field {
-    position: relative;
-}
+        /* Add a subtle icon to indicate which fields are editable */
+        .editable-field {
+            position: relative;
+        }
 
-.editable-field::after {
-    content: "\f044"; /* Font Awesome edit icon */
-    font-family: "Font Awesome 5 Free";
-    font-weight: 900;
-    position: absolute;
-    right: 10px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #1a237e;
-    opacity: 0.7;
-}
+        .editable-field::after {
+            content: "\f044"; /* Font Awesome edit icon */
+            font-family: "Font Awesome 5 Free";
+            font-weight: 900;
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #1a237e;
+            opacity: 0.7;
+        }
 
         /* Add specific styles to differentiate navbar profile image from main profile image */
         .nav-profile .profile-avatar {

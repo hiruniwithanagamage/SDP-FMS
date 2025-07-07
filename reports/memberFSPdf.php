@@ -102,7 +102,7 @@ function getMembershipFeePayments($memberID, $year) {
     $currentMonth = date('n');
     
     // Get monthly fee amount from Static table
-    $feeQuery = "SELECT monthly_fee FROM Static ORDER BY year DESC LIMIT 1";
+    $feeQuery = "SELECT monthly_fee FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
     $feeResult = search($feeQuery);
     $feeRow = $feeResult->fetch_assoc();
     $monthlyFee = $feeRow['monthly_fee'];

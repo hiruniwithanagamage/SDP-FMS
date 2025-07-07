@@ -12,11 +12,7 @@ if (!isset($_GET['id']) || empty($_GET['id'])) {
 
 $feeID = $_GET['id'];
 
-/**
- * Function to get membership fee details
- * @param string $feeID The fee ID to retrieve
- * @return array|null The fee details or null if not found
- */
+// Function to get membership fee details
 function getMembershipFeeDetails($feeID) {
     $conn = getConnection();
     $stmt = $conn->prepare("
@@ -45,10 +41,7 @@ function getMembershipFeeDetails($feeID) {
     return $result->fetch_assoc();
 }
 
-/**
- * Function to get all members
- * @return mysqli_result The result set with all members
- */
+// Function to get all members
 function getAllMembers() {
     $conn = getConnection();
     $stmt = $conn->prepare("SELECT MemberID, Name FROM Member ORDER BY Name");
@@ -56,11 +49,7 @@ function getAllMembers() {
     return $stmt->get_result();
 }
 
-/**
- * Function to get fee settings from Static table
- * @param int $term The term year to get settings for
- * @return array|null The fee settings or null if not found
- */
+// Function to get fee settings from Static table
 function getFeeSettings($term) {
     $conn = getConnection();
     $stmt = $conn->prepare("
@@ -75,10 +64,7 @@ function getFeeSettings($term) {
     return $result->fetch_assoc();
 }
 
-/**
- * Function to generate a unique payment ID
- * @return string The generated payment ID
- */
+// Function to generate a unique payment ID
 function generatePaymentID() {
     $conn = getConnection();
     
@@ -115,10 +101,7 @@ function generatePaymentID() {
     }
 }
 
-/**
- * Function to generate a unique expense ID
- * @return string The generated expense ID
- */
+// Function to generate a unique expense ID
 function generateExpenseID() {
     $conn = getConnection();
     
@@ -155,10 +138,7 @@ function generateExpenseID() {
     }
 }
 
-/**
- * Function to get active treasurer ID
- * @return string|null The active treasurer ID or null if not found
- */
+// Function to get active treasurer ID
 function getActiveTreasurer() {
     $conn = getConnection();
     $stmt = $conn->prepare("SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1");

@@ -51,7 +51,7 @@ function getTotalMembers() {
     return $row['total'];
 }
 
-// Get registration fee status - MODIFIED FUNCTION
+// Get registration fee status
 function getRegistrationFeeStatus($year, $page = 1, $recordsPerPage = 5) {
     // Calculate offset for pagination
     $offset = ($page - 1) * $recordsPerPage;
@@ -60,6 +60,11 @@ function getRegistrationFeeStatus($year, $page = 1, $recordsPerPage = 5) {
     $staticFee = getFeeAmounts();
     $requiredAmount = $staticFee['registration_fee'];
     
+    // SQL query to get registration fee status for each member
+    // Using COALESCE to handle cases where no payments exist
+    // and CASE to determine if the member has paid the registration fee
+    // Also getting the last payment date for each member
+    // Using LIMIT for pagination, Using JOINs to get the payment details
     $sql = "SELECT 
             m.MemberID,
             m.Name,

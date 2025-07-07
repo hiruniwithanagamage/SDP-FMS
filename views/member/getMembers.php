@@ -1,4 +1,3 @@
-//getMembers.php
 <?php
 require_once '../../config/connection.php';
 

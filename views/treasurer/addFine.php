@@ -94,7 +94,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $isPaid = 'No';
 
     try {
-        // Generate the fine ID using our function
+        // Generate the fine ID using function
         $fineID = generateFineID();
         
         // Check if a fine of the same type already exists for this member in the current month and term

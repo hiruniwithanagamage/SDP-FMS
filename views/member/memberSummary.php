@@ -40,11 +40,7 @@ if ($currentFinePage < 1) $currentFinePage = 1;
 // Get database connection
 $conn = getConnection();
 
-/**
- * Get all years from the Static table where year is >= member's join year
- * @param string $memberID The member ID
- * @return array Array of years in descending order
- */
+// Get all years from the Static table where year is >= member's join year
 function getAllYears($memberID) {
     $conn = getConnection();
     

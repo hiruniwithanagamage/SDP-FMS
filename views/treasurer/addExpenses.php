@@ -86,7 +86,7 @@ if(isset($_POST['add'])) {
         $errors[] = "Amount is required";
     } elseif(!is_numeric($amount) || $amount <= 0) {
         $errors[] = "Amount must be a positive number";
-    } elseif($amount > 1000000) { // Example maximum limit
+    } elseif($amount > 1000000) { // maximum limit is added
         $errors[] = "Amount exceeds the maximum limit";
     }
 
@@ -397,6 +397,13 @@ if(isset($_GET['cancel'])) {
             <div class="form-group">
                 <label for="amount">Amount</label>
                 <input type="number" id="amount" name="amount" step="0.01" required>
+            </div>
+
+            <div class="form-group">
+                <label></label>
+                <span style="color: #888; font-size: 0.95em;">
+                    Maximum allowed amount: 1,000,000
+                </span>
             </div>
 
             <div class="form-group">

@@ -74,11 +74,7 @@ function getCurrentTerm() {
     return $row['year'] ?? date('Y');
 }
 
-/**
- * Function to generate a unique payment ID
- * @param string $term The term year for the payment
- * @return string The generated payment ID
- */
+// Function to generate a unique payment ID
 function generatePaymentID($term = null) {
     $conn = getConnection();
     
@@ -115,11 +111,7 @@ function generatePaymentID($term = null) {
     }
 }
 
-/**
- * Function to generate a unique expense ID
- * @param string $term The term year for the expense
- * @return string The generated expense ID
- */
+// Function to generate a unique expense ID
 function generateExpenseID($term = null) {
     $conn = getConnection();
     
@@ -156,10 +148,7 @@ function generateExpenseID($term = null) {
     }
 }
 
-/**
- * Function to get active treasurer ID
- * @return string|null The active treasurer ID or null if not found
- */
+// Function to get active treasurer ID
 function getActiveTreasurer() {
     $conn = getConnection();
     $stmt = $conn->prepare("SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1");
@@ -172,6 +161,7 @@ function getActiveTreasurer() {
     return $row['TreasurerID'];
 }
 
+// Function to log changes in the ChangeLog table
 function logChange($recordType, $recordID, $memberID, $oldValues, $newValues, $changeDetails) {
     $conn = getConnection();
     

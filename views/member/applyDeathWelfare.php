@@ -2,7 +2,7 @@
 session_start();
 require_once "../../config/database.php";
 
-// Generate new Welfare ID using the new format: DWF + last 2 digits of term + sequence (01-10)
+// Generate new Welfare ID: DWF + last 2 digits of term + sequence (01-10)
 function generateNewWelfareId() {
     // Get current active term (year) from the static table
     $queryActiveTerm = "SELECT year FROM static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
@@ -39,12 +39,11 @@ function generateNewWelfareId() {
         $sequencePart = substr($lastId, -2); // Last two characters
         $newSequence = intval($sequencePart) + 1;
         
-        // Check if we've reached the limit of 10 applications
+        // Check if it has reached the limit of 10 applications
         if ($newSequence > 10) {
             // Consider implementing a waitlist or different handling
             // For now, we'll cycle back to 01 with a warning
             $newSequence = 1;
-            // You may want to log this situation
             error_log("Warning: More than 10 death welfare applications in term $currentTerm");
         }
     } else {

@@ -70,11 +70,7 @@ function getCurrentTerm() {
     return $row['year'] ?? date('Y');
 }
 
-/**
- * Function to generate a unique expense ID
- * @param string $term The term year for the expense
- * @return string The generated expense ID
- */
+// Function to generate a unique expense ID
 function generateExpenseID($term = null) {
     $conn = getConnection();
     
@@ -144,11 +140,7 @@ function createExpenseRecord($amount, $date, $description, $treasurerID) {
     return false;
 }
 
-/**
- * Function to generate a unique payment ID
- * @param string $term The term year for the payment
- * @return string The generated payment ID
- */
+// Function to generate a unique payment ID
 function generatePaymentID($term = null) {
     $conn = getConnection();
     

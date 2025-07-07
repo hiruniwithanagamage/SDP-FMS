@@ -398,7 +398,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 }
 
-// Category options - removed Adjustment from selectable options
+// Category options
 $categories = [
     'Loan' => 'Loan',
     'Death Welfare' => 'Death Welfare',
@@ -419,7 +419,7 @@ $paymentMethods = [
 
 // Now output the HTML based on popup mode
 if ($isPopup): ?>
-    <!-- Simplified header for popup mode -->
+    <!-- Popup header for embedded page -->
     <!DOCTYPE html>
     <html lang="en">
     <head>

@@ -84,9 +84,9 @@ if (isset($_POST['addComment'])) {
     exit();
 }
 
-// Add this function to check for new transactions after report date
+// to check for new transactions after report date
 function checkForNewTransactions($reportId, $versionId, $selectedTerm) {
-    // First, get the creation date of the current report version
+    // get the creation date of the current report version
     $getReportDateSql = "SELECT Date FROM FinancialReportVersions 
                          WHERE ReportID = ? AND VersionID = ?";
     $getReportDateStmt = prepare($getReportDateSql);
@@ -213,7 +213,7 @@ if (isset($_POST['updateReportStatus'])) {
         $auditorRow = $getAuditorResult->fetch_assoc();
         $auditorID = $auditorRow['Auditor_AuditorID'];
         
-        // Now update with the correct auditorID
+        // update with the correct auditorID
         $sql = "UPDATE FinancialReportVersions SET Status = ?, Auditor_AuditorID = ? WHERE ReportID = ? AND VersionID = ?";
         $stmt = prepare($sql);
         $stmt->bind_param("ssss", $status, $auditorID, $reportId, $versionId);
@@ -221,18 +221,6 @@ if (isset($_POST['updateReportStatus'])) {
         if ($stmt->execute()) {
             // If the report is approved, update previous ongoing versions to reviewed
             if ($status === 'approved') {
-                // [Existing code for approved reports]
-                // $updatePreviousVersionsSql = "UPDATE FinancialReportVersions 
-                //                             SET Status = 'reviewed' 
-                //                             WHERE ReportID = ? 
-                //                             AND VersionID < ? 
-                //                             AND Status = 'ongoing'";
-                // $updatePreviousVersionsStmt = prepare($updatePreviousVersionsSql);
-                // $updatePreviousVersionsStmt->bind_param("ss", $reportId, $versionId);
-                // $updatePreviousVersionsStmt->execute();
-                
-                // [Rest of your existing code for term updates...]
-                
                 $message = "Report approved successfully";
             } else {
                 if (isset($newTransactionsFlag) && $newTransactionsFlag) {
@@ -1597,36 +1585,36 @@ $totalPages = ceil($totalRecords / $itemsPerPage);
 
     <!-- Review Modal -->
     <div id="reviewModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3 class="modal-title">Review Financial Report</h3>
-            <span class="close">&times;</span>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Review Financial Report</h3>
+                <span class="close">&times;</span>
+            </div>
+            <div id="transactionCheckResult" style="display: none; margin-bottom: 15px;"></div>
+            <form method="POST" action="" id="reviewForm">
+                <input type="hidden" name="reportId" value="<?php echo htmlspecialchars($reportId); ?>">
+                <input type="hidden" name="versionId" value="<?php echo htmlspecialchars($versionId); ?>">
+                
+                <div class="form-group">
+                    <label class="form-label">Please select your decision for Report <?php echo htmlspecialchars($reportId); ?> (Version <?php echo htmlspecialchars($versionId); ?>):</label>
+                    <div style="margin-top: 10px;">
+                        <input type="radio" id="makeChanges" name="decision" value="changes" checked>
+                        <label for="makeChanges">Make Changes (Set status to 'Reviewed')</label>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <input type="radio" id="approve" name="decision" value="approve">
+                        <label for="approve">Approve (Set status to 'Approved')</label>
+                    </div>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-cancel" id="closeReviewModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="checkTransactionsBtn">Check for New Transactions</button>
+                    <button type="submit" name="updateReportStatus" class="btn btn-success">Save Decision</button>
+                </div>
+            </form>
         </div>
-        <div id="transactionCheckResult" style="display: none; margin-bottom: 15px;"></div>
-        <form method="POST" action="" id="reviewForm">
-            <input type="hidden" name="reportId" value="<?php echo htmlspecialchars($reportId); ?>">
-            <input type="hidden" name="versionId" value="<?php echo htmlspecialchars($versionId); ?>">
-            
-            <div class="form-group">
-                <label class="form-label">Please select your decision for Report <?php echo htmlspecialchars($reportId); ?> (Version <?php echo htmlspecialchars($versionId); ?>):</label>
-                <div style="margin-top: 10px;">
-                    <input type="radio" id="makeChanges" name="decision" value="changes" checked>
-                    <label for="makeChanges">Make Changes (Set status to 'Reviewed')</label>
-                </div>
-                <div style="margin-top: 10px;">
-                    <input type="radio" id="approve" name="decision" value="approve">
-                    <label for="approve">Approve (Set status to 'Approved')</label>
-                </div>
-            </div>
-            
-            <div class="modal-footer">
-                <button type="button" class="btn btn-cancel" id="closeReviewModal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="checkTransactionsBtn">Check for New Transactions</button>
-                <button type="submit" name="updateReportStatus" class="btn btn-success">Save Decision</button>
-            </div>
-        </form>
     </div>
-</div>
 
     <!-- Comments Viewer Modal -->
     <div id="commentsModal" class="modal">

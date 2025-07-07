@@ -73,13 +73,13 @@ try {
     // IMPORTANT: Always insert the payment record FIRST before creating any child records
     // This ensures foreign key constraints are not violated
     
-    // Set status based on payment method - using updated ENUM values
+    // Set status based on payment method
     $status = ($method === 'transfer') ? 'pending' : 'self';
 
     // Store receipt URL in Notes column (renamed from receipt_url)
     $notes = $receiptUrl;
 
-    // Insert payment record - removed card_number, expire_date, cvv columns
+    // Insert payment recor
     $paymentQuery = "INSERT INTO Payment (
         PaymentID, 
         Payment_Type, 
@@ -376,12 +376,8 @@ try {
     exit();
 }
 
-// Helper Functions (remain mostly the same)
-/**
- * Gets the current active term/year from the static table
- * 
- * @return int|null The current active year or null if not found
- */
+
+// Gets the current active term/year from the static table
 function getCurrentActiveTerm() {
     $query = "SELECT year FROM Static WHERE status = 'active' ORDER BY year DESC LIMIT 1";
     $result = search($query);
@@ -440,12 +436,7 @@ function validateFileUpload($file) {
     }
 }
 
-/**
- * Generates a payment ID with format "PAY"+Last 2 digits of current active term+sequence
- * 
- * @return string The newly generated payment ID
- * @throws Exception if there's an error generating the ID
- */
+// Generates a payment ID with format "PAY"+Last 2 digits of current active term+sequence
 function generatePaymentId() {
     try {
         // Get current active term
@@ -498,12 +489,7 @@ function generatePaymentId() {
     }
 }
 
-/**
- * Generates a fee ID with format "FEE"+Last 2 digits of current active term+sequence
- * 
- * @return string The newly generated fee ID
- * @throws Exception if there's an error generating the ID
- */
+// Generates a fee ID 
 function generateFeeId() {
     try {
         // Get current active term
@@ -556,12 +542,7 @@ function generateFeeId() {
     }
 }
 
-/**
- * Generates a Card ID with format "CD" + "M" + "last digits of member id"
- * 
- * @param string $memberId The member ID to use in card ID generation
- * @return string The newly generated card ID
- */
+// Generates a Card ID
 function generateCardId($memberId) {
     return "CD" . $memberId;
 }

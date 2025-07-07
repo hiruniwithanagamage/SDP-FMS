@@ -54,11 +54,7 @@ function getFineSettings() {
     return $result->fetch_assoc();
 }
 
-/**
- * Function to generate a unique payment ID
- * @param string $term The term year for the payment
- * @return string The generated payment ID
- */
+// Function to generate a unique payment ID
 function generatePaymentID($term = null) {
     $conn = getConnection();
     
@@ -95,11 +91,7 @@ function generatePaymentID($term = null) {
     }
 }
 
-/**
- * Function to generate a unique expense ID
- * @param string $term The term year for the expense
- * @return string The generated expense ID
- */
+// Function to generate a unique expense ID
 function generateExpenseID($term = null) {
     $conn = getConnection();
     
@@ -136,10 +128,7 @@ function generateExpenseID($term = null) {
     }
 }
 
-/**
- * Function to get active treasurer ID
- * @return string|null The active treasurer ID or null if not found
- */
+// Function to get active treasurer ID
 function getActiveTreasurer() {
     $conn = getConnection();
     $stmt = $conn->prepare("SELECT TreasurerID FROM Treasurer WHERE isActive = 1 LIMIT 1");
@@ -425,7 +414,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             header("Location: fine.php");
             exit();
         }
-        // If it's popup mode, we'll continue rendering the page with a success message
+        // If it's popup mode, continue rendering the page with a success message
         // and add JavaScript to refresh the parent later
 
         $updatedFine = getFineDetails($fineID); // Re-fetch to get the updated data
@@ -479,7 +468,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $changeDetails
         );
         
-        // Commit transaction - this should be after the logging
+        // Commit transaction
         $conn->commit();
         
         // Set success message
